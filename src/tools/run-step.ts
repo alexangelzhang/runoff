@@ -1,0 +1,108 @@
+/**
+ * llm_run_step — Execute a single pipeline step with a given provider.
+ */
+
+import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { z } from "zod";
+import { loadConfig, getProviderForStep } from "../config.js";
+import { ResponseCache, getCache } from "../cache.js";
+import { isAgentMode, isTextResponse } from "../providers/types.js";
+import { ensureWorkDirForStep, serializeResponse, type PipelineConfig } from "./helpers.js";
+
+export function register(server: McpServer, initialConfig: PipelineConfig) {
+  server.tool(
+    "llm_run_step",
+    `Execute a pipeline step using the configured provider. Available steps: ${Object.keys(initialConfig.pipeline).join(", ")}. ` +
+    `Steps configured as "builtin" (e.g. claude) are handled by Claude Code itself and will return an error if called here.`,
+    {
+      step: z.string().describe(`Pipeline step to execute: ${Object.keys(initialConfig.pipeline).join(", ")}`),
+      prompt: z.string().describe("The prompt / specification to send to the provider"),
+      language: z.string().optional().describe("Target programming language"),
+      context: z.string().optional().describe("Existing code context for style matching"),
+      workDir: z.string().optional().describe("Absolute path to project directory (agent mode)"),
+    },
+    async ({ step, prompt, language, context, workDir }) => {
+      try {
+        const config = loadConfig();
+        const result = getProviderForStep(step, config);
+        if (!result) {
+          return {
+            content: [{
+              type: "text" as const,
+              text: JSON.stringify({
+                status: "skip",
+                step,
+                reason: `Step "${step}" is configured as builtin — handle it in Claude Code directly.`,
+              }, null, 2),
+            }],
+          };
+        }
+
+        ensureWorkDirForStep(step, config, workDir);
+
+        const cache = getCache();
+        const providerRunsAsAgent = isAgentMode(result.provider.mode);
+        const cacheKey = ResponseCache.key(result.providerName, prompt, language, context);
+
+        // Agent mode: skip cache entirely (same prompt can produce different results per workDir)
+        if (!providerRunsAsAgent) {
+          const cached = cache.get(cacheKey);
+          if (cached) {
+            return {
+              content: [{
+                type: "text" as const,
+                text: JSON.stringify({
+                  status: "success",
+                  step,
+                  provider: result.providerName,
+                  cached: true,
+                  ...serializeResponse(cached),
+                }, null, 2),
+              }],
+            };
+          }
+        }
+
+        const response = await result.provider.execute({ prompt, language, context, workDir });
+
+        if (response.failed) {
+          return {
+            content: [{
+              type: "text" as const,
+              text: JSON.stringify({
+                status: "error",
+                step,
+                provider: result.providerName,
+                error: response.error ?? "Unknown execution error",
+                ...serializeResponse(response),
+              }, null, 2),
+            }],
+            isError: true,
+          };
+        }
+
+        // Only cache text mode responses
+        if (isTextResponse(response)) {
+          cache.put(cacheKey, response);
+        }
+
+        return {
+          content: [{
+            type: "text" as const,
+            text: JSON.stringify({
+              status: "success",
+              step,
+              provider: result.providerName,
+              ...serializeResponse(response),
+            }, null, 2),
+          }],
+        };
+      } catch (err: any) {
+        return {
+          content: [{ type: "text" as const, text: `Step "${step}" error: ${err.message}` }],
+          isError: true,
+        };
+      }
+    }
+  );
+}
