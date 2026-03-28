@@ -24,9 +24,9 @@ def random_id():
 def normalize_path(path):
     return os.path.realpath(os.path.abspath(path))
 
-def git(cmd_args, cwd):
+def git(cmd_args, cwd, timeout=120):
     result = subprocess.run(
-        ["git"] + cmd_args, capture_output=True, text=True, cwd=cwd
+        ["git"] + cmd_args, capture_output=True, text=True, cwd=cwd, timeout=timeout
     )
     if result.returncode != 0:
         raise RuntimeError(f"Git {' '.join(cmd_args)} failed:\n{result.stderr.strip()}")
@@ -127,9 +127,14 @@ class RepoLock:
                         os.remove(os.path.join(self.lock_dir, f))
                     except OSError:
                         pass
-            
+
             if alive == 0:
                 shutil.rmtree(self.lock_dir, ignore_errors=True)
+                # Use mkdir as atomic mutual exclusion — only one process wins
+                try:
+                    os.mkdir(self.lock_dir)
+                except OSError:
+                    pass
                 return True
         except OSError:
             pass
@@ -189,6 +194,13 @@ def do_create(args):
 
     sys.stdout.write(json.dumps({"worktreePath": worktree_path, "baseRef": base_ref}))
 
+def _validate_worktree_path(worktree_path, repo_root):
+    """Ensure worktree_path is contained within the repo root to prevent path traversal."""
+    real_worktree = os.path.realpath(worktree_path)
+    real_repo = os.path.realpath(repo_root)
+    if not real_worktree.startswith(real_repo + os.sep) and real_worktree != real_repo:
+        raise ValueError(f"Worktree path {worktree_path} is outside repo root {repo_root}")
+
 def do_collect(args):
     worktree_path = args.worktree
     base_ref = args.base_ref
@@ -221,7 +233,7 @@ def do_apply(args):
     except Exception as e:
         sys.stdout.write(json.dumps({"error": str(e)}))
         sys.exit(1)
-    
+
     try:
         with open(args.patch_file, "rb") as f:
             patch_bytes = f.read()
@@ -240,12 +252,15 @@ def do_apply(args):
     except Exception as e:
         sys.stdout.write(json.dumps({"error": str(e)}))
         sys.exit(1)
+    finally:
+        lock.release(args.owner_pid)
 
 def do_destroy(args):
     repo_root = args.repo
     worktree_path = args.worktree
-    
+
     try:
+        _validate_worktree_path(worktree_path, repo_root)
         if os.path.exists(worktree_path):
             try:
                 git(["worktree", "remove", "--force", worktree_path], repo_root)

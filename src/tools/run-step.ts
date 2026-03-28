@@ -40,8 +40,24 @@ export function register(server: McpServer, initialConfig: PipelineConfig) {
 
         ensureWorkDirForStep(step, config, workDir);
 
+        if (!result.provider || Array.isArray(result.provider)) {
+          return {
+            content: [{
+              type: "text" as const,
+              text: JSON.stringify({
+                status: "error",
+                step,
+                reason: Array.isArray(result.provider)
+                  ? `Step "${step}" is a race step — use llm_run_pipeline instead.`
+                  : `No provider available for step "${step}".`,
+              }, null, 2),
+            }],
+          };
+        }
+
+        const provider = result.provider;
         const cache = getCache();
-        const providerRunsAsAgent = isAgentMode(result.provider.mode);
+        const providerRunsAsAgent = isAgentMode(provider.mode);
         const cacheKey = ResponseCache.key(result.providerName, prompt, language, context);
 
         // Agent mode: skip cache entirely (same prompt can produce different results per workDir)
@@ -63,7 +79,7 @@ export function register(server: McpServer, initialConfig: PipelineConfig) {
           }
         }
 
-        const response = await result.provider.execute({ prompt, language, context, workDir });
+        const response = await provider.execute({ prompt, language, context, workDir });
 
         if (response.failed) {
           return {

@@ -5,19 +5,17 @@ import { validateConfig, type PipelineConfig } from "../src/config.ts";
 function createBaseConfig(): PipelineConfig {
   return {
     pipeline: {
-      generate: { provider: "codex", order: 1 },
-      review: { provider: "gemini", order: 2 },
+      generate: ["codex"],
+      review: ["gemini", "generate"],
     },
     providers: {
       codex: {
         type: "cli",
         command: "codex",
-        mode: "agent-write",
       },
       gemini: {
         type: "cli",
         command: "gemini",
-        mode: "agent-readonly",
       },
       claude: {
         type: "builtin",
@@ -30,57 +28,54 @@ function createBaseConfig(): PipelineConfig {
   };
 }
 
-test("validateConfig accepts readonly review providers", () => {
+test("validateConfig accepts valid DAG config", () => {
   const config = createBaseConfig();
-  assert.equal(validateConfig(config), config);
+  assert.equal(validateConfig(config), true);
 });
 
-test("validateConfig rejects builtin review steps", () => {
-  const config = createBaseConfig();
-  config.pipeline.review.provider = "claude";
+test("validateConfig rejects non-array step config", () => {
+  const config = createBaseConfig() as any;
+  config.pipeline.generate = { provider: "codex" };
 
   assert.throws(
     () => validateConfig(config),
-    /retry\.reviewStep "review" cannot use builtin provider "claude"/
+    /must be an array/
   );
 });
 
-test("validateConfig rejects agent-write review steps", () => {
-  const config = createBaseConfig();
-  config.providers.gemini.mode = "agent-write";
+test("validateConfig rejects unknown provider reference", () => {
+  const config = createBaseConfig() as any;
+  config.pipeline.generate = ["nonexistent"];
 
   assert.throws(
     () => validateConfig(config),
-    /must use text or agent-readonly mode/
+    /references unknown provider "nonexistent"/
   );
 });
 
-test("validateConfig rejects invalid retry maxRounds", () => {
+test("validateConfig rejects self-dependency", () => {
   const config = createBaseConfig();
-  config.retry!.maxRounds = 0;
+  config.pipeline.generate = ["codex", "generate"];
 
   assert.throws(
     () => validateConfig(config),
-    /retry\.maxRounds must be a positive integer/
+    /cannot depend on itself/
   );
 });
 
-test("validateConfig accepts agent provider in race mode", () => {
+test("validateConfig rejects unknown dependency", () => {
   const config = createBaseConfig();
-  config.providers.agentProv = { type: "cli", command: "agent", mode: "agent-write" };
-  config.modes = {
-    race: { type: "race", providers: ["agentProv"] },
-  };
+  config.pipeline.generate = ["codex", "missing_step"];
 
-  assert.equal(validateConfig(config), config);
+  assert.throws(
+    () => validateConfig(config),
+    /references unknown step "missing_step"/
+  );
 });
 
-test("validateConfig accepts text provider in race mode", () => {
+test("validateConfig accepts race mode (multi-provider array)", () => {
   const config = createBaseConfig();
-  config.providers.textProv = { type: "cli", command: "text-cli", mode: "text" };
-  config.modes = {
-    race: { type: "race", providers: ["textProv"] },
-  };
+  config.pipeline.generate = [["codex", "gemini"]];
 
-  assert.equal(validateConfig(config), config);
+  assert.equal(validateConfig(config), true);
 });

@@ -22,6 +22,9 @@ def normalize_path(path):
 def random_id():
     return uuid.uuid4().hex[:8]
 
+TASK_PAYLOAD_SCHEMA_VERSION = 6
+
+
 @dataclass
 class TaskPayload:
     id: str
@@ -35,6 +38,8 @@ class TaskPayload:
     sessionId: Optional[str] = None
     stepName: Optional[str] = None
     round: int = 1
+    agentId: Optional[str] = None
+    parentHandoffId: Optional[str] = None
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'TaskPayload':
@@ -43,7 +48,16 @@ class TaskPayload:
         missing = [f for f in required if f not in data]
         if missing:
             raise ValueError(f"TaskPayload missing required fields: {', '.join(missing)}")
-            
+
+        sv = data.get("schemaVersion")
+        if sv is not None:
+            if type(sv) is not int or sv < 1:
+                raise ValueError("TaskPayload schemaVersion must be a positive integer")
+            if sv > TASK_PAYLOAD_SCHEMA_VERSION:
+                raise ValueError(
+                    f"TaskPayload schema version {sv} is newer than supported {TASK_PAYLOAD_SCHEMA_VERSION}"
+                )
+
         return cls(
             id=data["id"],
             prompt=data["prompt"],
@@ -55,8 +69,12 @@ class TaskPayload:
             workDir=data.get("workDir"),
             sessionId=data.get("sessionId"),
             stepName=data.get("stepName"),
-            round=data.get("round", 1)
+            round=data.get("round", 1),
+            agentId=data.get("agentId"),
+            parentHandoffId=data.get("parentHandoffId"),
         )
+
+TASK_RESULT_SCHEMA_VERSION = 5
 
 @dataclass
 class TaskResult:
@@ -71,6 +89,7 @@ class TaskResult:
     changes: Optional[str] = None
     filesModified: List[str] = field(default_factory=list)
     diffStat: Optional[str] = None
+    schemaVersion: int = TASK_RESULT_SCHEMA_VERSION
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -83,7 +102,8 @@ class TaskResult:
             "summary": self.summary,
             "changes": self.changes,
             "filesModified": self.filesModified,
-            "diffStat": self.diffStat
+            "diffStat": self.diffStat,
+            "schemaVersion": self.schemaVersion,
         }
 
 def run_git_diff(cwd):
@@ -95,6 +115,14 @@ def run_git_diff(cwd):
     except Exception as e:
         return None, [], str(e)
 
+def _atomic_write_json(filepath: str, data: dict):
+    """Write JSON atomically via temp file + rename."""
+    tmp = filepath + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump(data, f)
+    os.replace(tmp, filepath)
+
+
 def execute_oneshot(task_file: str, result_file: str):
     """Wave 5: Pure one-shot executor logic."""
     try:
@@ -103,11 +131,14 @@ def execute_oneshot(task_file: str, result_file: str):
         task = TaskPayload.from_dict(data)
     except Exception as e:
         res = TaskResult(id="unknown", status="error", error=f"IPC Payload Error: {str(e)}")
-        with open(result_file, "w") as f:
-            json.dump(res.to_dict(), f)
+        _atomic_write_json(result_file, res.to_dict())
         return
 
-    work_dir = task.workDir if task.workDir else os.getcwd()
+    work_dir = os.path.realpath(task.workDir) if task.workDir else os.getcwd()
+    if not os.path.isdir(work_dir):
+        res = TaskResult(id=task.id, status="error", error=f"work_dir does not exist or is not a directory: {work_dir}")
+        _atomic_write_json(result_file, res.to_dict())
+        return
     
     # Simple execution engine implementation
     # In a real system, this would invoke actual tools or subprocesses.
@@ -139,13 +170,11 @@ def execute_oneshot(task_file: str, result_file: str):
                 content=f"Executed prompt (Simulated): {final_prompt[:100]}..."
             )
             
-        with open(result_file, "w") as f:
-            json.dump(result.to_dict(), f)
-            
+        _atomic_write_json(result_file, result.to_dict())
+
     except Exception as e:
         result = TaskResult(id=task.id, status="error", error=str(e))
-        with open(result_file, "w") as f:
-            json.dump(result.to_dict(), f)
+        _atomic_write_json(result_file, result.to_dict())
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="LLM Pipeline Task Runner (Wave 5: One-shot)")

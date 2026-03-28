@@ -27,10 +27,13 @@ async function executeTask(
 ): Promise<TaskResult> {
   return new Promise((resolve, reject) => {
     const scriptDir = dirname(new URL(import.meta.url).pathname);
-    const runnerPath = join(scriptDir, "../../scripts/task_runner.py");
-    
+    const defaultRunnerPath = join(scriptDir, "../../scripts/task_runner.py");
+
+    const useCommand = command || "python3";
+    const useArgs = args.length > 0 ? [...args, taskFile, resultFile] : [defaultRunnerPath, taskFile, resultFile];
+
     // Use detached for group kill support on POSIX
-    const proc = spawn("python3", [runnerPath, taskFile, resultFile], {
+    const proc = spawn(useCommand, useArgs, {
       detached: platform() !== "win32", 
       stdio: "inherit" 
     });
@@ -131,7 +134,7 @@ export class CLIProvider implements LLMProvider {
       workDir: req.workDir,
       sessionId: req.sessionId,
       stepName: req.stepName,
-      round: req.round,
+      round: req.round ?? 1,
       timestamp: new Date().toISOString(),
     });
 

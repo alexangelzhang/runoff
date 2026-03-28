@@ -33,7 +33,7 @@ const HIGH_COMPLEXITY_PATTERNS = [
 
 const MEDIUM_COMPLEXITY_PATTERNS = [
   /实现|develop|implement/i,
-  /编写|编写|create|build/i,
+  /编写|create|build/i,
   /接口|API|interface/i,
   /类|模块|组件|class|module|component/i,
   /服务|中间件|service|middleware/i,
@@ -123,14 +123,17 @@ export function routeProvider(
   if (candidates.length === 1) return candidates[0].provider;
 
   // Use historical trace data to pick the most reliable winner
+  const globalSuccessRate = stats.totalTraces > 0
+    ? (stats.totalTraces - stats.failedCount) / stats.totalTraces
+    : 1.0;
   const scored = candidates.map((c) => {
     const pStat = stats.providerStats[c.provider];
-    const failureRatio = stats.totalTraces > 0 ? stats.failedCount / stats.totalTraces : 0;
-    const successRate = pStat && pStat.stepCount > 0 ? (pStat.stepCount - (stats.failedCount / stats.totalTraces * pStat.stepCount)) / pStat.stepCount : 1.0;
-    return { provider: c.provider, successRate };
+    // Per-provider failure data not yet tracked; use volume as tiebreaker
+    const volume = pStat ? pStat.stepCount : 0;
+    return { provider: c.provider, successRate: globalSuccessRate, volume };
   });
 
-  scored.sort((a, b) => b.successRate - a.successRate);
+  scored.sort((a, b) => b.successRate - a.successRate || b.volume - a.volume);
   return scored[0].provider;
 }
 

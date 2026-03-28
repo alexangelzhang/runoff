@@ -13,7 +13,8 @@ export function register(server: McpServer) {
         const config = loadConfig();
         const pipelineSteps = Object.entries(config.pipeline).map(([stepName, stepConfig]) => {
           const providerName = stepConfig[0];
-          const pc = config.providers[providerName];
+          const primaryProvider = Array.isArray(providerName) ? providerName[0] : providerName;
+          const pc = config.providers[primaryProvider];
           const mode = getStepProviderMode(stepName, config);
           
           return {

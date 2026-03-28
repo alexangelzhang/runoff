@@ -2,8 +2,8 @@
  * Shared types and helper functions used across MCP tool modules.
  */
 
-import { loadConfig } from "../config.js";
-import { isTextResponse, isAgentMode, LLMResponse, ProviderMode } from "../providers/types.js";
+import { loadConfig, getConfiguredProviderMode } from "../config.js";
+import { isTextResponse, isAgentMode, LLMResponse } from "../providers/types.js";
 import { SessionWorkspace } from "../workspace.js";
 import { StepResult, PipelineStatus } from "../state.js";
 import { StepTrace } from "../trace.js";
@@ -96,15 +96,50 @@ export interface PipelineResult {
 export type PipelineConfig = ReturnType<typeof loadConfig>;
 
 export function canRouteStepToProvider(stepName: string, providerName: string, config: PipelineConfig): boolean {
-  return true; // Simple stub for alignment
+  const stepConfig = config.pipeline[stepName];
+  if (!stepConfig?.length) return false;
+  const pRaw = stepConfig[0];
+  if (Array.isArray(pRaw)) {
+    return pRaw.includes(providerName);
+  }
+  return pRaw === providerName;
 }
 
 export function ensureWorkDirForStep(stepName: string, config: PipelineConfig, workDir?: string): void {
-  // Simple stub for alignment
+  const stepConfig = config.pipeline[stepName];
+  if (!stepConfig) {
+    throw new Error(`Unknown pipeline step "${stepName}"`);
+  }
+  const pRaw = stepConfig[0];
+  const names = Array.isArray(pRaw) ? pRaw : [pRaw];
+  let needsWorkDir = false;
+  for (const name of names) {
+    if (name === "builtin") continue;
+    const pc = config.providers[name];
+    if (pc && isAgentMode(getConfiguredProviderMode(pc))) {
+      needsWorkDir = true;
+      break;
+    }
+  }
+  if (needsWorkDir && (!workDir || String(workDir).trim() === "")) {
+    throw new Error(
+      `Step "${stepName}" uses an agent-mode provider and requires workDir (absolute path to the project directory)`
+    );
+  }
 }
 
 export function pipelineHasAgentWriteStep(config: PipelineConfig): boolean {
-  return true; // Simple stub for alignment
+  for (const stepName of Object.keys(config.pipeline)) {
+    const pRaw = config.pipeline[stepName][0];
+    const names = Array.isArray(pRaw) ? pRaw : [pRaw];
+    for (const name of names) {
+      if (name === "builtin") continue;
+      const pc = config.providers[name];
+      if (!pc) continue;
+      if (getConfiguredProviderMode(pc) === "agent-write") return true;
+    }
+  }
+  return false;
 }
 
 export function truncateString(str: string, maxLen: number): string {

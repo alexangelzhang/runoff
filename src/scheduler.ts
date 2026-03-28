@@ -11,12 +11,14 @@ import {
   buildReviewPrompt, 
   renderPrompt 
 } from "./prompt.js";
-import { 
+import {
   LLMProvider,
   LLMRequest,
   LLMResponse,
-  isTextResponse, 
-  isAgentResponse 
+  isTextResponse,
+  isAgentResponse,
+  filterValidNextSteps,
+  type NextStep
 } from "./providers/types.js";
 import { 
   Candidate,
@@ -27,13 +29,12 @@ import {
   parseVerdict 
 } from "./verdict.js";
 import { 
-  StepTrace,
-  recordTrace
+  StepTrace
 } from "./trace.js";
 import { 
   isSyntaxValid 
 } from "./ast_utils.js";
-import { CostTracker } from "./pricing.js";
+import { raceSessions, type RaceSession } from "./tools/helpers.js";
 
 export interface SchedulerContext {
   prompt: string;
@@ -59,12 +60,12 @@ export interface StepOutcome {
   trace: StepTrace;
   verdict?: { approved: boolean; feedback: string };
   candidateSnapshot?: Candidate;
-  nextSteps?: any[];
+  /** Matches TaskResult / IPC nextSteps: name, provider, optional dependsOn */
+  nextSteps?: NextStep[];
 }
 
 export class ExecutionScheduler {
   private config: PipelineConfig;
-  private costTracker = new CostTracker();
 
   constructor(config: PipelineConfig) {
     this.config = config;
@@ -81,12 +82,13 @@ export class ExecutionScheduler {
     let routedFrom: string | undefined;
 
     if (stepConfig && this.config.routing?.length && !Array.isArray(stepConfig.provider)) {
-      const best = routeProvider(ctx.prompt, this.config.routing, stepConfig.providerName);
-      if (best !== stepConfig.providerName) {
+      const originalName = stepConfig.providerName;
+      const best = routeProvider(ctx.prompt, this.config.routing, originalName);
+      if (best !== originalName) {
         const pc = this.config.providers[best];
         if (pc) {
+          routedFrom = originalName;
           stepConfig = { providerName: best, provider: createProvider(best, pc) };
-          routedFrom = stepConfig.providerName;
         }
       }
     }
@@ -102,7 +104,7 @@ export class ExecutionScheduler {
       providers = stepConfig.provider;
       providerNames = stepConfig.providerName.split("|");
     } else {
-      let finalP = stepConfig.provider;
+      let finalP: LLMProvider | null = stepConfig.provider as LLMProvider | null;
       let finalName = stepConfig.providerName;
       if (ctx.round > 1) {
         const all = Object.keys(this.config.providers);
@@ -117,6 +119,7 @@ export class ExecutionScheduler {
           }
         }
       }
+      if (!finalP) throw new Error(`No provider found for step "${stepName}"`);
       providers = [finalP];
       providerNames = [finalName];
     }
@@ -200,6 +203,18 @@ export class ExecutionScheduler {
 
     if (providers.length > 1) {
        (trace as any).raceParticipants = providerNames;
+       // Register race session so llm_race_apply/llm_race_abort can act on it
+       raceSessions.set(ctx.sessionId, {
+         traceId: ctx.sessionId,
+         repoRoot: ctx.workDir || process.cwd(),
+         candidates: responses.map(r => ({
+           providerName: r.p.name,
+           patchText: isAgentResponse(r.resp) ? r.resp.changes : undefined,
+           filesModified: isAgentResponse(r.resp) ? r.resp.filesModified : undefined,
+           diffStat: isAgentResponse(r.resp) ? r.resp.diffStat : undefined,
+         })),
+         createdAt: Date.now(),
+       });
     }
 
     return {
@@ -212,7 +227,7 @@ export class ExecutionScheduler {
       trace,
       verdict: { approved: verdictParsed.approved, feedback: verdictParsed.feedback },
       candidateSnapshot,
-      nextSteps: (response as any).nextSteps
+      nextSteps: filterValidNextSteps(response.nextSteps)
     };
   }
 }

@@ -6,8 +6,8 @@ export function parseVerdict(raw: string): { approved: boolean; feedback: string
     const isApproved = verdictMatch[1].toUpperCase() === "APPROVED";
     return { approved: isApproved, feedback: isApproved ? "" : (verdictMatch[2] ?? raw), format: "structured" };
   }
-  const approvedLine = raw.match(/^\s*[*`'"\s]*APPROVED[*`'"\s]*$/m);
-  if (approvedLine && !raw.toUpperCase().includes("NEEDS_REVISION")) {
+  const approvedLine = raw.match(/^\s*[*`'"\s]*APPROVED[*`'"\s]*[.!]?\s*$/m);
+  if (approvedLine && !raw.toUpperCase().includes("NEEDS_REVISION") && !raw.match(/APPROVED[^\S\n]+\w/im)) {
     return { approved: true, feedback: "", format: "structured" };
   }
   return { approved: false, feedback: raw, format: "unstructured" };

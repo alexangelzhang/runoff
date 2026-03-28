@@ -41,7 +41,10 @@ while true; do
     fi
 
     LOG_FILE="${TASK_FILE%.task.json}.run.log"
-    python3 "$TASK_RUNNER" "$TASK_FILE" "$RESULT_FILE" > "$LOG_FILE" 2>&1 &
+    (
+      python3 "$TASK_RUNNER" "$TASK_FILE" "$RESULT_FILE" > "$LOG_FILE" 2>&1
+      rm -f "$CLAIM_FILE"
+    ) &
 
     echo "\033[2mStarted task $TASK_FILE in background (log: $LOG_FILE)\033[0m"
     echo ""

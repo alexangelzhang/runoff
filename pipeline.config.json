@@ -1,17 +1,13 @@
 {
   "providers": {
     "openai-pro": {
-      "type": "openai",
-      "model": "gpt-4o"
+      "type": "mock"
     },
     "openai-lite": {
-      "type": "openai",
-      "model": "gpt-4o-mini"
+      "type": "mock"
     },
-    "cli": {
-      "type": "cli",
-      "command": "node",
-      "args": ["-e", "import('./src/math_processor.js').then(m => { const p = new m.MathProcessor(); const res = p.process(1,1); if (!(res instanceof Promise)) { console.error('FAILED: Not a Promise'); process.exit(1); } else { console.log('SUCCESS: Async verified'); } })"]
+    "mock-pro": {
+      "type": "mock"
     }
   },
   "pipeline": {
@@ -23,11 +19,5 @@
     "maxRounds": 3,
     "reviewStep": "review"
   },
-  "routing": [
-    {
-      "complexity": "low",
-      "pattern": ".*",
-      "provider": "openai-lite"
-    }
-  ]
+  "routing": []
 }

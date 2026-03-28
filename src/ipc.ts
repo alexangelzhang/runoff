@@ -3,15 +3,17 @@ import { z } from "zod";
 /**
  * IPC Protocol Version.
  * (Wave 6: Semantic State & Knowledge Insights)
+ * Phase D: optional multi-agent correlation (agentId, parentHandoffId); v6 documents that extension.
  */
-export const TASK_PAYLOAD_SCHEMA_VERSION = 5;
+export const TASK_PAYLOAD_SCHEMA_VERSION = 6;
 export const TASK_RESULT_SCHEMA_VERSION = 5;
 
 export const TASK_PAYLOAD_FIELDS = [
-  "id", "prompt", "mode", "timestamp", "system", 
-  "staticContext", "dynamicContext", "workDir", 
+  "id", "prompt", "mode", "timestamp", "system",
+  "staticContext", "dynamicContext", "workDir",
   "sessionId", "stepName", "round", "schemaVersion",
-  "knowledgeBase"
+  "knowledgeBase",
+  "agentId", "parentHandoffId",
 ];
 
 export const TASK_RESULT_FIELDS = [
@@ -36,6 +38,10 @@ export const taskPayloadSchema = z.object({
   round: z.number().default(1),
   schemaVersion: z.number().int().positive(),
   knowledgeBase: z.record(z.string()).optional(),
+  /** Optional logical agent identity for multi-agent / handoff tracing */
+  agentId: z.string().optional(),
+  /** Optional link to a prior handoff or parent task in a multi-agent chain */
+  parentHandoffId: z.string().optional(),
 });
 
 export const taskResultSchema = z.object({

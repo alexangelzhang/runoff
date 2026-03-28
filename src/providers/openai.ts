@@ -1,5 +1,13 @@
 import OpenAI from "openai";
-import { LLMProvider, LLMRequest, LLMResponse, ProviderMode, parseCodeFromResponse } from "./types.js";
+import {
+  LLMProvider,
+  LLMRequest,
+  LLMResponse,
+  ProviderMode,
+  parseCodeFromResponse,
+  type NextStep,
+  filterValidNextSteps
+} from "./types.js";
 
 export class OpenAIProvider implements LLMProvider {
   name = "openai";
@@ -18,7 +26,7 @@ Rules:
 - Output ONLY the code in a single fenced code block, followed by a brief explanation
 - Use the specified language, or infer the best one from context
 - Follow best practices: proper error handling, clear naming, minimal complexity
-- To suggest follow-up tasks, use <NEXT_STEPS>[{"name": "...", "provider": "...", "dependsOn": []}]</NEXT_STE_STEPS>
+- To suggest follow-up tasks, use <NEXT_STEPS>[{"name": "...", "provider": "...", "dependsOn": []}]</NEXT_STEPS>
 - To provide architectural insights, use <INSIGHTS>{"key": "value"}</INSIGHTS>`;
 
     const userPrompt = [
@@ -29,41 +37,57 @@ Rules:
       .filter(Boolean)
       .join("\n\n");
 
-    const response = await this.client.chat.completions.create(
-      {
+    try {
+      const response = await this.client.chat.completions.create(
+        {
+          model: this.model,
+          messages: [
+            { role: "system", content: systemPrompt },
+            { role: "user", content: userPrompt },
+          ],
+          temperature: 0.2,
+          max_tokens: 8192,
+        },
+        { timeout: 300_000, signal: req.signal }
+      );
+
+      const raw = response.choices[0]?.message?.content ?? "";
+      const { code, explanation } = parseCodeFromResponse(raw);
+      const usage = response.usage ? { promptTokens: response.usage.prompt_tokens, completionTokens: response.usage.completion_tokens } : undefined;
+
+      // Wave 6/2: Metadata Extraction
+      let insights: Record<string, string> | undefined;
+      let nextSteps: NextStep[] | undefined;
+
+      const insightsMatch = raw.match(/<INSIGHTS>([\s\S]*?)<\/INSIGHTS>/);
+      if (insightsMatch) {
+        try { insights = JSON.parse(insightsMatch[1]); } catch (e) { console.warn("Failed to parse insights JSON"); }
+      }
+
+      const nextStepsMatch = raw.match(/<NEXT_STEPS>([\s\S]*?)<\/NEXT_STEPS>/);
+      if (nextStepsMatch) {
+        try {
+          nextSteps = filterValidNextSteps(JSON.parse(nextStepsMatch[1]));
+        } catch (e) {
+          console.warn("Failed to parse nextSteps JSON");
+        }
+      }
+
+      return {
+        kind: "text", content: raw, code, explanation,
+        model: response.model, usage,
+        insights, nextSteps
+      };
+    } catch (err) {
+      return {
+        kind: "text",
         model: this.model,
-        messages: [
-          { role: "system", content: systemPrompt },
-          { role: "user", content: userPrompt },
-        ],
-        temperature: 0.2,
-        max_tokens: 8192,
-      },
-      { timeout: 300_000 }
-    );
-
-    const raw = response.choices[0]?.message?.content ?? "";
-    const { code, explanation } = parseCodeFromResponse(raw);
-    const usage = response.usage ? { promptTokens: response.usage.prompt_tokens, completionTokens: response.usage.completion_tokens } : undefined;
-
-    // Wave 6/2: Metadata Extraction
-    let insights: Record<string, string> | undefined;
-    let nextSteps: any[] | undefined;
-
-    const insightsMatch = raw.match(/<INSIGHTS>([\s\S]*?)<\/INSIGHTS>/);
-    if (insightsMatch) {
-      try { insights = JSON.parse(insightsMatch[1]); } catch (e) { console.warn("Failed to parse insights JSON"); }
+        content: "",
+        code: "",
+        explanation: "",
+        failed: true,
+        error: err instanceof Error ? err.message : String(err),
+      };
     }
-
-    const nextStepsMatch = raw.match(/<NEXT_STEPS>([\s\S]*?)<\/NEXT_STEPS>/);
-    if (nextStepsMatch) {
-      try { nextSteps = JSON.parse(nextStepsMatch[1]); } catch (e) { console.warn("Failed to parse nextSteps JSON"); }
-    }
-
-    return { 
-      kind: "text", content: raw, code, explanation, 
-      model: response.model, usage, 
-      insights, nextSteps 
-    };
   }
 }

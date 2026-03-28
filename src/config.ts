@@ -1,24 +1,22 @@
 import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
-import { ProviderMode } from "./providers/types.js";
+import { LLMProvider, ProviderMode } from "./providers/types.js";
+import { computePipelineStages } from "./orchestration/dag.js";
 
 export type ProviderConfig = {
-  type: "openai" | "anthropic" | "builtin" | "cli";
+  type: "openai" | "anthropic" | "builtin" | "cli" | "mock";
   model?: string;
   apiKey?: string;
   command?: string;
   args?: string[];
   timeoutMs?: number;
+  mode?: ProviderMode;
 };
 
 export type PipelineConfig = {
   providers: Record<string, ProviderConfig>;
-  /** 
-   * Each step is defined as [providerName, ...dependsOn]
-   * (Wave 5: Simplified DAG configuration)
-   */
-  /** 
+  /**
    * Each step is defined as [providerName | [provider1, provider2], ...dependsOn]
    * (Wave 6: Race mode support)
    */
@@ -37,26 +35,37 @@ export type PipelineConfig = {
 let _cachedConfig: PipelineConfig | null = null;
 let _cachedDagStages: string[][] | null = null;
 
+export function clearDagStagesCache(): void {
+  _cachedDagStages = null;
+}
+
+/** Clears memoized config/DAG from {@link loadConfig} / {@link getDagStages} (for tests and hot-reload tooling). */
+export function clearConfigCache(): void {
+  _cachedConfig = null;
+  clearDagStagesCache();
+}
+
 /**
  * Deep validation for pipeline configuration.
  * (Wave 5: Strict Schema & DAG integrity)
  */
-export function validateConfig(config: any): config is PipelineConfig {
+export function validateConfig(config: unknown): config is PipelineConfig {
   if (!config || typeof config !== "object") throw new Error("Config must be an object");
-  if (!config.providers || typeof config.providers !== "object") throw new Error("Missing providers object");
-  if (!config.pipeline || typeof config.pipeline !== "object") throw new Error("Missing pipeline object");
+  const c = config as Record<string, any>;
+  if (!c.providers || typeof c.providers !== "object") throw new Error("Missing providers object");
+  if (!c.pipeline || typeof c.pipeline !== "object") throw new Error("Missing pipeline object");
 
-  const allSteps = Object.keys(config.pipeline);
-  for (const [stepName, stepConfig] of Object.entries(config.pipeline)) {
+  const allSteps = Object.keys(c.pipeline);
+  for (const [stepName, stepConfig] of Object.entries(c.pipeline)) {
     if (!Array.isArray(stepConfig) || stepConfig.length === 0) {
       throw new Error(`Step "${stepName}" must be an array with [provider, ...dependsOn]`);
     }
 
     const [pRaw, ...deps] = stepConfig;
     const providersToCheck = Array.isArray(pRaw) ? pRaw : [pRaw];
-    
+
     for (const pName of providersToCheck) {
-      if (!config.providers[pName] && pName !== "builtin") {
+      if (!c.providers[pName] && pName !== "builtin") {
         throw new Error(`Step "${stepName}" references unknown provider "${pName}"`);
       }
     }
@@ -70,6 +79,22 @@ export function validateConfig(config: any): config is PipelineConfig {
       }
     }
   }
+
+  // Cycle detection via topological sort
+  const visited = new Set<string>();
+  const remaining = new Set(allSteps);
+  while (remaining.size > 0) {
+    const ready: string[] = [];
+    for (const step of remaining) {
+      const [_, ...deps] = c.pipeline[step] as any[];
+      if (deps.every((d: string) => visited.has(d))) ready.push(step);
+    }
+    if (ready.length === 0) {
+      throw new Error(`Circular dependency detected among steps: ${[...remaining].join(", ")}`);
+    }
+    for (const s of ready) { visited.add(s); remaining.delete(s); }
+  }
+
   return true;
 }
 
@@ -89,28 +114,35 @@ export function loadConfig(): PipelineConfig {
 
 export type StepProvider = {
   providerName: string;
-  provider: any; 
+  provider: LLMProvider | LLMProvider[] | null;
 };
 
 import { OpenAIProvider } from "./providers/openai.js";
 import { CLIProvider } from "./providers/cli.js";
+import { MockProvider } from "./providers/mock.js";
 
-const providerRegistry: Record<string, any> = {
+const providerRegistry: Record<string, new (...args: any[]) => LLMProvider> = {
   openai: OpenAIProvider,
   cli: CLIProvider,
+  mock: MockProvider,
 };
 
-export function createProvider(name: string, config: ProviderConfig): any {
+export function createProvider(name: string, config: ProviderConfig): LLMProvider | null {
   const ProviderClass = providerRegistry[config.type];
   if (!ProviderClass) {
     if (config.type === "builtin") return null;
     throw new Error(`Unknown provider type: ${config.type}`);
   }
+  if (config.type === "mock") return new ProviderClass(name);
+  if (config.type === "openai") return new ProviderClass(config.model);
+  if (config.type === "cli") return new ProviderClass(name, config.command, config.args, config.mode, config);
   return new ProviderClass(config);
 }
 
 export function getConfiguredProviderMode(config: ProviderConfig): ProviderMode {
+  if (config.mode) return config.mode;
   if (config.type === "openai") return "text";
+  if (config.type === "mock") return "text";
   return "agent-write";
 }
 
@@ -141,7 +173,9 @@ export function getProviderForStep(stepName: string, config: PipelineConfig): St
       provider: pRaw.map(name => {
         const pc = config.providers[name];
         if (!pc) throw new Error(`Provider config not found for: ${name}`);
-        return createProvider(name, pc);
+        const p = createProvider(name, pc);
+        if (!p) throw new Error(`Failed to create provider: ${name}`);
+        return p;
       })
     };
   }
@@ -163,30 +197,9 @@ export function getProviderForStep(stepName: string, config: PipelineConfig): St
  * Using a simple topological sort for stages.
  */
 export function getDagStages(config: PipelineConfig): string[][] {
-  if (_cachedDagStages) return _cachedDagStages;
+  if (_cachedDagStages && config === _cachedConfig) return _cachedDagStages;
 
-  const stages: string[][] = [];
-  const visited = new Set<string>();
-  const allSteps = Object.keys(config.pipeline);
-
-  while (visited.size < allSteps.length) {
-    const currentStage: string[] = [];
-    for (const step of allSteps) {
-      if (visited.has(step)) continue;
-
-      const [_, ...deps] = config.pipeline[step];
-      if (deps.every((dep) => visited.has(dep))) {
-        currentStage.push(step);
-      }
-    }
-
-    if (currentStage.length === 0) {
-      throw new Error("Circular dependency detected in pipeline configuration");
-    }
-
-    for (const step of currentStage) visited.add(step);
-    stages.push(currentStage);
-  }
+  const stages = computePipelineStages(config.pipeline);
 
   if (config === _cachedConfig) _cachedDagStages = stages;
   return stages;

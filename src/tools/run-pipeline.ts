@@ -3,10 +3,11 @@ import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { resolveRepoRoot } from "../workspace.js";
 import { SessionWorkspace } from "../workspace.js";
-import { 
-  loadConfig, 
+import {
+  loadConfig,
   getDagStages,
-  calculateConfigHash
+  calculateConfigHash,
+  clearDagStagesCache
 } from "../config.js";
 import { 
   saveCheckpoint, 
@@ -178,12 +179,12 @@ async function executePipelineInternal(args: PipelineParams & { signal?: AbortSi
     let completedRounds = 0;
 
     for (; round <= maxRounds; round++) {
-      let roundAborted = false;
+      let stepFailed = false;
       const completedThisRound = new Set<string>();
 
       // Loop until no more steps can be executed in this round
       while (true) {
-        if (roundAborted) break;
+        if (stepFailed) break;
 
         // Re-calculate stages based on current (potentially expanded) pipeline
         const allStages = getDagStages(config);
@@ -239,7 +240,7 @@ async function executePipelineInternal(args: PipelineParams & { signal?: AbortSi
                 const deps = ns.dependsOn || [stepName];
                 config.pipeline[ns.name] = [ns.provider, ...deps];
                 // Reset cached stages to force re-calculation
-                (config as any)._cachedDagStages = null; 
+                clearDagStagesCache();
               }
             }
           }
@@ -249,18 +250,18 @@ async function executePipelineInternal(args: PipelineParams & { signal?: AbortSi
             globalKnowledge = { ...globalKnowledge, ...response.insights };
           }
 
-          if (response.failed) { roundAborted = true; break; }
+          if (response.failed) { stepFailed = true; break; }
 
           if (stepName === reviewStepName && verdict) {
             approved = verdict.approved;
             lastReviewFeedback = verdict.feedback;
-            if (approved) { roundAborted = true; break; }
+            if (approved) break;
           }
         }
       }
       completedRounds++;
       if (approved) { finalStatus = "approved"; break; }
-      if (roundAborted && finalStatus === "running") { finalStatus = "failed"; break; }
+      if (stepFailed && finalStatus === "running") { finalStatus = "failed"; break; }
       await saveCheckpoint(sessionId, checkpointSnapshot(round));
     }
 
@@ -287,7 +288,10 @@ async function executePipelineInternal(args: PipelineParams & { signal?: AbortSi
     return finalResult;
 
   } finally {
-    if (workspace) await workspace.destroy();
+    if (workspace) {
+      try { await workspace.applyToSource(); } catch (e) { /* best-effort apply */ }
+      await workspace.destroy();
+    }
   }
 }
 

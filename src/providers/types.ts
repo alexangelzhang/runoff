@@ -18,6 +18,29 @@ export interface LLMRequest {
 
 // --- Response types (discriminated union) ---
 
+export interface NextStep {
+  name: string;
+  provider: string;
+  dependsOn?: string[];
+}
+
+/** Normalize runtime-parsed nextSteps (e.g. from model JSON) to the IPC/TaskResult shape. */
+export function filterValidNextSteps(raw: unknown): NextStep[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const out: NextStep[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== "object") continue;
+    const n = item as Record<string, unknown>;
+    if (typeof n.name !== "string" || typeof n.provider !== "string") continue;
+    const step: NextStep = { name: n.name, provider: n.provider };
+    if (Array.isArray(n.dependsOn) && n.dependsOn.every((d) => typeof d === "string")) {
+      step.dependsOn = n.dependsOn as string[];
+    }
+    out.push(step);
+  }
+  return out.length > 0 ? out : undefined;
+}
+
 export interface TextResponse {
   kind: "text";
   content: string;
@@ -28,7 +51,7 @@ export interface TextResponse {
   failed?: boolean;
   error?: string;
   insights?: Record<string, string>;
-  nextSteps?: any[];
+  nextSteps?: NextStep[];
 }
 
 export interface AgentResponse {
@@ -42,7 +65,7 @@ export interface AgentResponse {
   failed?: boolean;
   error?: string;
   insights?: Record<string, string>;
-  nextSteps?: any[];
+  nextSteps?: NextStep[];
 }
 
 export type LLMResponse = TextResponse | AgentResponse;
