@@ -17,9 +17,9 @@ export const TASK_PAYLOAD_FIELDS = [
 ];
 
 export const TASK_RESULT_FIELDS = [
-  "id", "status", "content", "usage", "error", 
-  "model", "summary", "changes", "filesModified", 
-  "diffStat", "schemaVersion", "insights"
+  "id", "status", "content", "usage", "error",
+  "model", "summary", "changes", "filesModified",
+  "diffStat", "schemaVersion", "insights", "nextSteps"
 ];
 
 // --- Zod schemas for runtime validation ---

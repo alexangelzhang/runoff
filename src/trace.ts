@@ -28,6 +28,10 @@ export interface StepTrace {
   fallback?: boolean;
   /** Whether the provider was dynamically routed */
   routed?: boolean;
+  /** Whether the provider was upgraded on retry */
+  upgraded?: boolean;
+  /** Race mode: participating provider names */
+  raceParticipants?: string[];
 }
 
 export interface CandidateTrace {

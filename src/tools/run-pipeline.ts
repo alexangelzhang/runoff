@@ -40,6 +40,7 @@ import {
   getCandidateContent,
   Candidate
 } from "../candidate.js";
+import { logger } from "../logger.js";
 
 /**
  * Main entry point for pipeline execution with global timeout protection.
@@ -235,7 +236,7 @@ async function executePipelineInternal(args: PipelineParams & { signal?: AbortSi
           if (outcome.nextSteps && Array.isArray(outcome.nextSteps)) {
             for (const ns of outcome.nextSteps) {
               if (!config.pipeline[ns.name]) {
-                console.log(`[Orchestrator] Injecting dynamic step: ${ns.name} (from ${stepName})`);
+                logger.info("orchestrator", `Injecting dynamic step: ${ns.name} (from ${stepName})`);
                 // Auto-depend on the parent if no deps specified
                 const deps = ns.dependsOn || [stepName];
                 config.pipeline[ns.name] = [ns.provider, ...deps];
@@ -269,7 +270,7 @@ async function executePipelineInternal(args: PipelineParams & { signal?: AbortSi
     
     const summary = costTracker.getSummary();
     const finalResult: PipelineResult = {
-      status: finalStatus as any, rounds: completedRounds,
+      status: finalStatus, rounds: completedRounds,
       totalDurationMs: Date.now() - startTime, totalCostUSD: summary.totalCostUSD,
       checkpointFile: sessionId, traceId, stepResults,
       usage: { promptTokens: summary.totalTokens, completionTokens: 0 },
@@ -279,7 +280,7 @@ async function executePipelineInternal(args: PipelineParams & { signal?: AbortSi
 
     recordTrace({
       id: traceId, prompt, promptLength: prompt.length, mode: "pipeline",
-      steps: stepTraces, totalRounds: completedRounds, finalStatus: finalStatus as any,
+      steps: stepTraces, totalRounds: completedRounds, finalStatus,
       totalDurationMs: Date.now() - startTime, timestamp: new Date().toISOString(),
       hasVerifyResults: !!verifyResults, totalUsage: { promptTokens: summary.totalTokens, completionTokens: 0 }
     });

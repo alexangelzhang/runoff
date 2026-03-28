@@ -130,7 +130,7 @@ export class CLIProvider implements LLMProvider {
       system: req.system,
       staticContext: req.staticContext,
       dynamicContext: req.dynamicContext,
-      mode: this.mode as any,
+      mode: this.mode,
       workDir: req.workDir,
       sessionId: req.sessionId,
       stepName: req.stepName,

@@ -1,4 +1,5 @@
 import { LLMProvider, LLMRequest, LLMResponse, ProviderMode } from "./types.js";
+import { logger } from "../logger.js";
 
 export class MockProvider implements LLMProvider {
   name: string;
@@ -10,7 +11,7 @@ export class MockProvider implements LLMProvider {
 
   async execute(req: LLMRequest): Promise<LLMResponse> {
     const stepName = req.stepName || "unknown";
-    console.log(`[MockProvider:${this.name}] Executing step: ${stepName}`);
+    logger.info("mock-provider", `Executing step: ${stepName}`, { provider: this.name });
 
     if (stepName === "analyze") {
       return {

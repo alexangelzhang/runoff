@@ -1,4 +1,4 @@
-import { runPipelineMode } from "./src/tools/run-pipeline.js";
+import { runPipelineMode } from "../src/tools/run-pipeline.js";
 
 async function main() {
   console.log("🚀 Starting Multi-Agent Orchestration Exercise...");

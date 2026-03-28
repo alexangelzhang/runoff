@@ -2,6 +2,9 @@ import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
 import { LLMProvider, ProviderMode } from "./providers/types.js";
+import { OpenAIProvider } from "./providers/openai.js";
+import { CLIProvider } from "./providers/cli.js";
+import { MockProvider } from "./providers/mock.js";
 import { computePipelineStages } from "./orchestration/dag.js";
 
 export type ProviderConfig = {
@@ -116,10 +119,6 @@ export type StepProvider = {
   providerName: string;
   provider: LLMProvider | LLMProvider[] | null;
 };
-
-import { OpenAIProvider } from "./providers/openai.js";
-import { CLIProvider } from "./providers/cli.js";
-import { MockProvider } from "./providers/mock.js";
 
 const providerRegistry: Record<string, new (...args: any[]) => LLMProvider> = {
   openai: OpenAIProvider,

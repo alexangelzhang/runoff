@@ -35,6 +35,7 @@ import {
   isSyntaxValid 
 } from "./ast_utils.js";
 import { raceSessions, type RaceSession } from "./tools/helpers.js";
+import { logger } from "./logger.js";
 
 export interface SchedulerContext {
   prompt: string;
@@ -110,7 +111,7 @@ export class ExecutionScheduler {
         const all = Object.keys(this.config.providers);
         const better = findUpgradedProvider(finalName, all);
         if (better !== finalName) {
-          console.log(`[Scheduler] Upgrading for ${stepName}: ${finalName} -> ${better}`);
+          logger.info("scheduler", `Upgrading for ${stepName}: ${finalName} -> ${better}`);
           const pc = this.config.providers[better];
           if (pc) {
             finalP = createProvider(better, pc);
@@ -165,8 +166,6 @@ export class ExecutionScheduler {
       const bSyntax = isTextResponse(b.resp) && b.resp.code ? isSyntaxValid(b.resp.code) : true;
       if (aSyntax && !bSyntax) return -1;
       if (!aSyntax && bSyntax) return 1;
-
-      // Priority 2: Cost (Placeholder for basic sorting)
       return 0;
     })[0] || responses[0];
 
@@ -199,10 +198,10 @@ export class ExecutionScheduler {
       isAgent: isAgentResponse(response),
       verdict: verdictParsed.format === "structured" ? (verdictParsed.approved ? "approved" : "needs_revision") : undefined,
       upgraded
-    } as any;
+    };
 
     if (providers.length > 1) {
-       (trace as any).raceParticipants = providerNames;
+       trace.raceParticipants = providerNames;
        // Register race session so llm_race_apply/llm_race_abort can act on it
        raceSessions.set(ctx.sessionId, {
          traceId: ctx.sessionId,
