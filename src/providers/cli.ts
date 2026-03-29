@@ -1,17 +1,27 @@
 import { spawn, execSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { platform } from "node:os";
-import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { createTaskPayload, parseTaskResult, type TaskResult } from "../ipc.js";
 import { getTasksDir } from "../paths.js";
-import { 
-  LLMProvider, 
-  LLMRequest, 
-  LLMResponse, 
-  ProviderMode, 
-  parseCodeFromResponse
+import {
+  LLMProvider,
+  LLMRequest,
+  LLMResponse,
+  ProviderMode,
+  parseCodeFromResponse,
 } from "./types.js";
+/** Subset of provider JSON needed at runtime (avoid importing config.ts → circular). */
+export type CLIProviderRuntimeOptions = {
+  timeoutMs?: number;
+};
+
+function atomicWriteJsonFile(filePath: string, data: unknown): void {
+  const tmp = `${filePath}.${process.pid}.tmp`;
+  writeFileSync(tmp, JSON.stringify(data), "utf-8");
+  renameSync(tmp, filePath);
+}
 
 /** 
  * Refactored to manage the task_runner process directly for active cancellation.
@@ -106,14 +116,20 @@ export class CLIProvider implements LLMProvider {
   mode: ProviderMode;
   private command: string;
   private args: string[];
-  private config: any;
+  private runtimeOptions: CLIProviderRuntimeOptions;
 
-  constructor(name: string, command: string, args: string[] = [], mode: ProviderMode = "text", config: any = {}) {
+  constructor(
+    name: string,
+    command: string,
+    args: string[] = [],
+    mode: ProviderMode = "text",
+    runtimeOptions: CLIProviderRuntimeOptions = {},
+  ) {
     this.name = name;
     this.command = command;
     this.args = args;
     this.mode = mode;
-    this.config = config;
+    this.runtimeOptions = runtimeOptions;
   }
 
   async execute(req: LLMRequest): Promise<LLMResponse> {
@@ -124,6 +140,10 @@ export class CLIProvider implements LLMProvider {
     const taskFile = join(tasksDir, `${this.name}.${taskId}.task.json`);
     const resultFile = join(tasksDir, `${this.name}.${taskId}.result.json`);
 
+    const trimmedCmd = this.command.trim();
+    const delegateArgv = trimmedCmd !== "" ? [trimmedCmd, ...this.args] : undefined;
+    const deferFinalize = req.finalizeStrategy === "defer";
+    const sharedLockKey = deferFinalize ? (req.sharedLockKey ?? req.sessionId) : req.sharedLockKey;
     const payload = createTaskPayload({
       id: taskId,
       prompt: req.prompt,
@@ -132,19 +152,22 @@ export class CLIProvider implements LLMProvider {
       dynamicContext: req.dynamicContext,
       mode: this.mode,
       workDir: req.workDir,
-      sessionId: req.sessionId,
+      sessionId: deferFinalize ? `${req.sessionId ?? "session"}-${this.name}-${taskId}` : req.sessionId,
       stepName: req.stepName,
       round: req.round ?? 1,
       timestamp: new Date().toISOString(),
+      ...(delegateArgv ? { delegateArgv } : {}),
+      ...(req.finalizeStrategy ? { finalizeStrategy: req.finalizeStrategy } : {}),
+      ...(sharedLockKey ? { sharedLockKey } : {}),
     });
 
-    writeFileSync(taskFile, JSON.stringify(payload));
+    atomicWriteJsonFile(taskFile, payload);
 
-    const timeoutOverride = this.config.timeoutMs;
+    const timeoutOverride = this.runtimeOptions.timeoutMs;
     const timeoutMs = typeof timeoutOverride === "number" ? timeoutOverride : getResultTimeoutMs(this.mode);
 
     try {
-      const result = await executeTask(this.command, this.args, taskFile, resultFile, timeoutMs, req.signal);
+      const result = await executeTask("python3", [], taskFile, resultFile, timeoutMs, req.signal);
       const failed = result.status === "error";
       
       const usage = result.usage || {
@@ -160,6 +183,14 @@ export class CLIProvider implements LLMProvider {
           summary: result.content || result.summary || "",
           filesModified: result.filesModified || [],
           diffStat: result.diffStat || "",
+          workspace: result.workspacePath
+            ? {
+                workspacePath: result.workspacePath,
+                workspaceRepoRoot: result.workspaceRepoRoot || req.workDir || "",
+                workspaceBaseRef: result.workspaceBaseRef || "",
+                workspaceSharedLockKey: result.workspaceSharedLockKey,
+              }
+            : undefined,
           failed,
           error: result.error,
           usage,
@@ -179,6 +210,25 @@ export class CLIProvider implements LLMProvider {
         };
       }
     } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      const usage = {
+        promptTokens: Math.ceil((req.prompt?.length || 0) / 4),
+        completionTokens: 0,
+      };
+      if (this.mode === "agent-write" || this.mode === "agent-read") {
+        return {
+          kind: "agent",
+          model: `${this.name}-cli`,
+          changes: "",
+          summary: "",
+          filesModified: [],
+          diffStat: "",
+          workspace: undefined,
+          failed: true,
+          error: message,
+          usage,
+        };
+      }
       return {
         kind: "text",
         model: `${this.name}-cli`,
@@ -186,7 +236,8 @@ export class CLIProvider implements LLMProvider {
         code: "",
         explanation: "",
         failed: true,
-        error: err instanceof Error ? err.message : String(err),
+        error: message,
+        usage,
       };
     } finally {
       if (existsSync(taskFile)) unlinkSync(taskFile);

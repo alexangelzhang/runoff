@@ -1,7 +1,12 @@
 import { test } from "node:test";
 import assert from "node:assert";
 import { calculateConfigHash, type PipelineConfig } from "../src/config.js";
-import { assertResumeCompatible, type PipelineState, type ResumeRequest } from "../src/state.js";
+import {
+  assertResumeCompatible,
+  CHECKPOINT_SCHEMA_VERSION,
+  type PipelineState,
+  type ResumeRequest,
+} from "../src/state.js";
 
 test("Checkpoint Resume - P1: Config Checksum Validation", async (t) => {
   const config1: PipelineConfig = {
@@ -22,7 +27,7 @@ test("Checkpoint Resume - P1: Config Checksum Validation", async (t) => {
   assert.notStrictEqual(hash1, hash2, "Hashes should differ for different configs");
 
   const mockState: PipelineState = {
-    schemaVersion: 1,
+    schemaVersion: CHECKPOINT_SCHEMA_VERSION,
     sessionId: "s1",
     prompt: "test",
     round: 1,

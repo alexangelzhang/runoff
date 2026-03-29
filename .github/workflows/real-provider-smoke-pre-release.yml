@@ -1,0 +1,80 @@
+name: Real Provider Smoke Pre-Release
+
+on:
+  workflow_dispatch:
+  workflow_call:
+    secrets:
+      LLM_PIPELINE_REAL_CODEX_ARGV_JSON:
+        required: true
+      LLM_PIPELINE_REAL_GEMINI_ARGV_JSON:
+        required: true
+      GEMINI_API_KEY:
+        required: false
+      OPENAI_API_KEY:
+        required: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: real-provider-smoke-pre-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  real-provider-smoke:
+    runs-on:
+      - self-hosted
+      - llm-pipeline-real-smoke
+    timeout-minutes: 90
+    env:
+      LLM_PIPELINE_RUN_REAL_PROVIDER_SMOKE: "1"
+      LLM_PIPELINE_REAL_CODEX_ARGV_JSON: ${{ secrets.LLM_PIPELINE_REAL_CODEX_ARGV_JSON }}
+      LLM_PIPELINE_REAL_GEMINI_ARGV_JSON: ${{ secrets.LLM_PIPELINE_REAL_GEMINI_ARGV_JSON }}
+      LLM_PIPELINE_REAL_TIMEOUT_MS: ${{ vars.LLM_PIPELINE_REAL_TIMEOUT_MS || '600000' }}
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      REAL_PROVIDER_SMOKE_REPORT_DIR: tmp/real-provider-smoke/pre-release-${{ github.run_id }}-${{ github.run_attempt }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Verify required CLI agents
+        shell: bash
+        run: |
+          set -euo pipefail
+          : "${LLM_PIPELINE_REAL_CODEX_ARGV_JSON:?missing secret LLM_PIPELINE_REAL_CODEX_ARGV_JSON}"
+          : "${LLM_PIPELINE_REAL_GEMINI_ARGV_JSON:?missing secret LLM_PIPELINE_REAL_GEMINI_ARGV_JSON}"
+          command -v codex
+          command -v gemini
+          codex --version
+          gemini --version
+
+      - name: Run pre-release real provider smoke
+        run: npm run smoke:real:pre-release -- --report-dir "$REAL_PROVIDER_SMOKE_REPORT_DIR"
+
+      - name: Upload smoke artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: real-provider-smoke-pre-release-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ env.REAL_PROVIDER_SMOKE_REPORT_DIR }}
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Print summary
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -f "$REAL_PROVIDER_SMOKE_REPORT_DIR/summary.md" ]]; then
+            cat "$REAL_PROVIDER_SMOKE_REPORT_DIR/summary.md"
+          fi

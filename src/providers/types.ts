@@ -12,8 +12,19 @@ export interface LLMRequest {
   system?: string;
   staticContext?: string;
   dynamicContext?: string;
+  /** Agent finalize semantics: auto finalize (default) or defer to llm_race_apply / abort. */
+  finalizeStrategy?: "auto" | "defer";
+  /** Shared repo lock key for intentional concurrent workspaces (e.g. race candidates). */
+  sharedLockKey?: string;
   /** Signal for active cancellation of long-running tasks */
   signal?: AbortSignal;
+}
+
+export interface AgentWorkspaceArtifact {
+  workspacePath: string;
+  workspaceRepoRoot: string;
+  workspaceBaseRef: string;
+  workspaceSharedLockKey?: string;
 }
 
 // --- Response types (discriminated union) ---
@@ -61,6 +72,7 @@ export interface AgentResponse {
   filesModified: string[];
   diffStat: string;          // e.g. "3 files changed, 45 insertions(+), 12 deletions(-)"
   model: string;
+  workspace?: AgentWorkspaceArtifact;
   usage?: { promptTokens: number; completionTokens: number };
   failed?: boolean;
   error?: string;
@@ -70,14 +82,11 @@ export interface AgentResponse {
 
 export type LLMResponse = TextResponse | AgentResponse;
 
-export type ProviderMode = "text" | "agent-write" | "agent-read";
+export const PROVIDER_MODES = ["text", "agent-read", "agent-write"] as const;
+export type ProviderMode = (typeof PROVIDER_MODES)[number];
 
 export function isAgentMode(mode: ProviderMode): boolean {
   return mode !== "text";
-}
-
-export function modesAreCompatible(expected: ProviderMode, candidate: ProviderMode): boolean {
-  return expected === candidate;
 }
 
 export interface LLMProvider {

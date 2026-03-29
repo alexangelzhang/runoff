@@ -1,5 +1,9 @@
-/** Parse structured verdict from review output.
- *  Looks for sentinel line: VERDICT: APPROVED or VERDICT: NEEDS_REVISION: <reason> */
+/**
+ * Single entry point for review approval detection — consumed by `ExecutionScheduler.executeStep`.
+ * Do not add parallel substring heuristics elsewhere; extend this parser if the contract evolves.
+ *
+ * Looks for sentinel line: VERDICT: APPROVED or VERDICT: NEEDS_REVISION: <reason>
+ */
 export function parseVerdict(raw: string): { approved: boolean; feedback: string; format: "structured" | "unstructured" } {
   const verdictMatch = raw.match(/VERDICT:\s*[*`'"\s]*(APPROVED|NEEDS_REVISION)[*`'"\s]*(?::\s*(.*))?/i);
   if (verdictMatch) {

@@ -8,6 +8,7 @@ import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { getTracesDir } from "./paths.js";
 import { PipelineStatus } from "./state.js";
+import { logger } from "./logger.js";
 
 export interface StepTrace {
   name: string;
@@ -60,6 +61,8 @@ export interface PipelineTrace {
   hasVerifyResults: boolean;
   timestamp: string;
   totalUsage?: { promptTokens: number; completionTokens: number };
+  /** Rolling snapshot vs final write (same on-disk file key for a given id+day). */
+  lifecycle?: "running" | "final";
 }
 
 export function createTraceId(): string {
@@ -80,12 +83,21 @@ export function recordTrace(trace: PipelineTrace): void {
   }
 }
 
+/**
+ * Lifecycle: rolling snapshot while the pipeline is still running (issue 6.10).
+ * Uses the same on-disk key as {@link recordTrace} so each run overwrites one file per trace id + day.
+ */
+export function persistRunningPipelineTrace(trace: PipelineTrace): void {
+  recordTrace({ ...trace, lifecycle: "running" });
+}
+
 /** Update an existing trace by ID. Reads, patches, and rewrites the trace file. */
 export function updateTrace(traceId: string, patch: Partial<PipelineTrace>): boolean {
   try {
     const tracesDir = getTracesDir();
     if (!existsSync(tracesDir)) return false;
-    const files = readdirSync(tracesDir).filter((f) => f.endsWith(".json") && f.includes(traceId));
+    const suffix = `_${traceId}.json`;
+    const files = readdirSync(tracesDir).filter((f) => f.endsWith(suffix));
     if (files.length === 0) return false;
     const filePath = join(tracesDir, files[0]);
     const trace = JSON.parse(readFileSync(filePath, "utf-8")) as PipelineTrace;
@@ -111,7 +123,7 @@ export function listTraces(): PipelineTrace[] {
       try {
         return [JSON.parse(readFileSync(join(tracesDir, f), "utf-8")) as PipelineTrace];
       } catch {
-        console.error(`Skipping corrupt trace file: ${f}`);
+        logger.warn("trace", `Skipping corrupt trace file: ${f}`);
         return [];
       }
     });
@@ -153,6 +165,10 @@ export function queryTraces(query: TraceQuery = {}): PipelineTrace[] {
 
 export interface ProviderStat {
   stepCount: number;
+  successfulStepCount: number;
+  failedStepCount: number;
+  successRate: number;
+  failureRate: number;
   totalDurationMs: number;
   avgDurationMs: number;
 }
@@ -192,20 +208,28 @@ export function aggregateTraceStats(query?: TraceQuery): TraceStats {
   const totalRounds = traces.reduce((sum, t) => sum + t.totalRounds, 0);
 
   // Per-provider stats from step traces
-  const providerMap = new Map<string, { count: number; totalMs: number }>();
+  const providerMap = new Map<string, { count: number; successful: number; failed: number; totalMs: number }>();
   for (const trace of traces) {
     for (const step of trace.steps) {
-      const entry = providerMap.get(step.provider) ?? { count: 0, totalMs: 0 };
+      const entry = providerMap.get(step.provider) ?? { count: 0, successful: 0, failed: 0, totalMs: 0 };
       entry.count++;
       entry.totalMs += step.durationMs;
+      if (step.error) entry.failed++;
+      else entry.successful++;
       providerMap.set(step.provider, entry);
     }
   }
 
   const providerStats: Record<string, ProviderStat> = {};
   for (const [name, entry] of providerMap) {
+    const successRate = entry.count > 0 ? entry.successful / entry.count : 0;
+    const failureRate = entry.count > 0 ? entry.failed / entry.count : 0;
     providerStats[name] = {
       stepCount: entry.count,
+      successfulStepCount: entry.successful,
+      failedStepCount: entry.failed,
+      successRate,
+      failureRate,
       totalDurationMs: entry.totalMs,
       avgDurationMs: entry.totalMs / entry.count,
     };

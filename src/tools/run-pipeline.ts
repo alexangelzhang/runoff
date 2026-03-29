@@ -3,12 +3,10 @@ import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { resolveRepoRoot } from "../workspace.js";
 import { SessionWorkspace } from "../workspace.js";
-import {
-  loadConfig,
-  getDagStages,
-  calculateConfigHash,
-  clearDagStagesCache
-} from "../config.js";
+import { loadConfig, calculateConfigHash } from "../config.js";
+import { forkPipelineForRun } from "../orchestration/runtime-pipeline.js";
+import { runPipelineDAGLoop } from "../orchestration/pipeline-runner.js";
+import { shouldFinalizeAgentWorkspace } from "../orchestration/workspace-policy.js";
 import { 
   saveCheckpoint, 
   loadCheckpoint, 
@@ -21,27 +19,19 @@ import {
 import { 
   CostTracker 
 } from "../pricing.js";
+import { PipelineResult, PipelineParams } from "./helpers.js";
+import { pipelineUsesGlobalSessionWorkspace } from "../pipeline-workdir.js";
 import {
-  PipelineResult,
-  PipelineParams,
-  ensureWorkDirForStep,
-  pipelineHasAgentWriteStep
-} from "./helpers.js";
-import { 
-  recordTrace, 
-  type StepTrace 
+  recordTrace,
+  persistRunningPipelineTrace,
+  type StepTrace,
 } from "../trace.js";
-import {
-  ExecutionScheduler,
-  SchedulerContext
-} from "../scheduler.js";
+import { ExecutionScheduler } from "../scheduler.js";
 import {
   emptyCandidate,
   getCandidateContent,
   Candidate
 } from "../candidate.js";
-import { logger } from "../logger.js";
-
 /**
  * Main entry point for pipeline execution with global timeout protection.
  * (Wave 6: Refactored with ExecutionScheduler)
@@ -60,7 +50,7 @@ export async function runPipelineMode(args: PipelineParams): Promise<PipelineRes
       signal: controller.signal 
     });
     return result;
-  } catch (err: any) {
+  } catch (err: unknown) {
     if (controller.signal?.aborted) {
       throw new Error(`Pipeline global timeout exceeded (${GLOBAL_TIMEOUT_MS}ms). All background processes terminated.`);
     }
@@ -71,24 +61,31 @@ export async function runPipelineMode(args: PipelineParams): Promise<PipelineRes
 }
 
 async function executePipelineInternal(args: PipelineParams & { signal?: AbortSignal }): Promise<PipelineResult> {
-  const config = loadConfig();
-  const currentConfigHash = calculateConfigHash(config);
-  
-  const { 
-    prompt, language, context, workDir, acceptanceCriteria, 
-    verifyResults, sessionId: originalSessionId, 
-    maxRounds: requestedMaxRounds, setPipelineTraceId, signal
+  const baseConfig = loadConfig();
+  const currentConfigHash = calculateConfigHash(baseConfig);
+  const runtimeConfig = forkPipelineForRun(baseConfig);
+
+  const {
+    prompt,
+    language,
+    context,
+    workDir,
+    acceptanceCriteria,
+    verifyResults,
+    sessionId: originalSessionId,
+    maxRounds: requestedMaxRounds,
+    setPipelineTraceId,
+    signal,
   } = args;
-  
+
   const sessionId = originalSessionId ?? (randomUUID() as string);
   let traceId = (randomUUID() as string);
   const startTime = Date.now();
 
-  const stages = getDagStages(config);
-  const maxRounds = requestedMaxRounds ?? config.retry?.maxRounds ?? 1;
-  const reviewStepName = config.retry?.reviewStep ?? "review";
+  const maxRounds = requestedMaxRounds ?? runtimeConfig.retry?.maxRounds ?? 1;
+  const reviewStepName = runtimeConfig.retry?.reviewStep ?? "review";
 
-  const scheduler = new ExecutionScheduler(config);
+  const scheduler = new ExecutionScheduler(runtimeConfig);
   const costTracker = new CostTracker();
 
   const resumeRequest = {
@@ -130,7 +127,7 @@ async function executePipelineInternal(args: PipelineParams & { signal?: AbortSi
     stepTraces = resumedState.stepTraces || [];
     globalKnowledge = resumedState.globalKnowledge || {};
     if (resumedState.dynamicPipeline) {
-       Object.assign(config.pipeline, resumedState.dynamicPipeline);
+      Object.assign(runtimeConfig.pipeline, resumedState.dynamicPipeline);
     }
   }
 
@@ -138,9 +135,11 @@ async function executePipelineInternal(args: PipelineParams & { signal?: AbortSi
 
   let workspace: SessionWorkspace | null = null;
   let effectiveWorkDir = workDir;
+  let lastFinalStatus: PipelineStatus = "running";
+  const shouldUseGlobalSessionWorkspace = !!workDir && pipelineUsesGlobalSessionWorkspace(runtimeConfig);
 
   try {
-    if (workDir && pipelineHasAgentWriteStep(config)) {
+    if (shouldUseGlobalSessionWorkspace) {
       if (resumedState?.workspacePath) {
         workspace = await SessionWorkspace.resume(
           resumedState.workspacePath, resumedState.workspaceRepoRoot!, resumedState.workspaceBaseRef!, traceId
@@ -152,121 +151,85 @@ async function executePipelineInternal(args: PipelineParams & { signal?: AbortSi
       effectiveWorkDir = await workspace.resolveWorkDir(workDir);
     }
 
+    const loopState = {
+      stepResults,
+      stepTraces,
+      globalKnowledge,
+      candidate,
+      approved,
+      lastReviewFeedback,
+    };
+
     const checkpointSnapshot = (currentRound: number, status: PipelineStatus = "running"): PipelineState => ({
       sessionId: sessionId,
       prompt,
       round: currentRound,
       maxRounds,
-      lastCode: getCandidateContent(candidate),
-      lastReviewFeedback,
-      approved,
-      stepResults,
-      stepTraces,
-      globalKnowledge,
+      lastCode: getCandidateContent(loopState.candidate),
+      lastReviewFeedback: loopState.lastReviewFeedback,
+      approved: loopState.approved,
+      stepResults: loopState.stepResults,
+      stepTraces: loopState.stepTraces,
+      globalKnowledge: loopState.globalKnowledge,
       traceId,
       timestamp: new Date().toISOString(),
       status,
       resume: resumeMetadata,
-      dynamicPipeline: config.pipeline, // Save the evolved DAG
-      ...(workspace ? {
-        workspacePath: workspace.worktreePath,
-        workspaceRepoRoot: workspace.repoRoot,
-        workspaceBaseRef: workspace.baseRef,
-      } : {}),
+      dynamicPipeline: runtimeConfig.pipeline,
+      ...(workspace
+        ? {
+            workspacePath: workspace.worktreePath,
+            workspaceRepoRoot: workspace.repoRoot,
+            workspaceBaseRef: workspace.baseRef,
+          }
+        : {}),
     });
 
-    let round = startRound;
-    let finalStatus: PipelineStatus = "running";
-    let completedRounds = 0;
+    const { finalStatus, completedRounds, endRound } = await runPipelineDAGLoop({
+      runtimeConfig,
+      scheduler,
+      costTracker,
+      state: loopState,
+      startRound,
+      maxRounds,
+      reviewStepName,
+      resumeSessionId: args.sessionId,
+      traceId,
+      prompt,
+      language,
+      context,
+      workDir,
+      effectiveWorkDir,
+      acceptanceCriteria,
+      verifyResults,
+      signal,
+      onRoundComplete: async (r) => {
+        await saveCheckpoint(sessionId, checkpointSnapshot(r));
+        const snap = costTracker.getSummary();
+        persistRunningPipelineTrace({
+          id: traceId,
+          prompt,
+          promptLength: prompt.length,
+          mode: "pipeline",
+          steps: [...loopState.stepTraces],
+          totalRounds: r,
+          finalStatus: "running",
+          totalDurationMs: Date.now() - startTime,
+          timestamp: new Date().toISOString(),
+          hasVerifyResults: !!verifyResults,
+          totalUsage: { promptTokens: snap.totalTokens, completionTokens: 0 },
+        });
+      },
+    });
 
-    for (; round <= maxRounds; round++) {
-      let stepFailed = false;
-      const completedThisRound = new Set<string>();
+    lastFinalStatus = finalStatus;
 
-      // Loop until no more steps can be executed in this round
-      while (true) {
-        if (stepFailed) break;
-
-        // Re-calculate stages based on current (potentially expanded) pipeline
-        const allStages = getDagStages(config);
-        const nextStage = allStages.find(s => s.some(step => !stepResults[step] && !completedThisRound.has(step)));
-        
-        if (!nextStage) break; // Nothing left to do in this DAG
-
-        // Only run steps in this stage that haven't been done
-        const pendingInStage = nextStage.filter(s => !stepResults[s] && !completedThisRound.has(s));
-        if (pendingInStage.length === 0) break;
-
-        const stageOutcomes = await Promise.all(pendingInStage.map(async (stepName) => {
-          if (args.sessionId && round === startRound && stepResults[stepName]) return { skipped: true, stepName };
-          
-          ensureWorkDirForStep(stepName, config, workDir);
-
-          const ctx: SchedulerContext = {
-            prompt, language, context, workDir: effectiveWorkDir,
-            sessionId: traceId, round, globalKnowledge, candidate,
-            acceptanceCriteria, verifyResults, signal
-          };
-
-          const outcome = await scheduler.executeStep(stepName, ctx);
-          return outcome;
-        }));
-
-        for (const outcome of stageOutcomes) {
-          if ("skipped" in outcome) continue;
-          const { stepName, response, trace, verdict, candidateSnapshot } = outcome;
-          
-          const stepResult: StepResult = {
-            round, status: response.failed ? "failed" : "success",
-            provider: outcome.usedProvider, routedFrom: outcome.routedFrom,
-            durationMs: outcome.durationMs, error: response.error, usage: response.usage
-          };
-
-          if (!response.failed && candidateSnapshot) {
-            candidate = { ...candidateSnapshot };
-            stepResult.candidateSnapshot = { ...candidate };
-          }
-
-          stepResults[stepName] = stepResult;
-          stepTraces.push(trace);
-          costTracker.addCall(stepName, "unknown", response.model, response.usage || { promptTokens: 0, completionTokens: 0 });
-          completedThisRound.add(stepName);
-
-          // Wave 6: Dynamic DAG Expansion - Inject nextSteps
-          if (outcome.nextSteps && Array.isArray(outcome.nextSteps)) {
-            for (const ns of outcome.nextSteps) {
-              if (!config.pipeline[ns.name]) {
-                logger.info("orchestrator", `Injecting dynamic step: ${ns.name} (from ${stepName})`);
-                // Auto-depend on the parent if no deps specified
-                const deps = ns.dependsOn || [stepName];
-                config.pipeline[ns.name] = [ns.provider, ...deps];
-                // Reset cached stages to force re-calculation
-                clearDagStagesCache();
-              }
-            }
-          }
-
-          // Merge insights
-          if (response.insights) {
-            globalKnowledge = { ...globalKnowledge, ...response.insights };
-          }
-
-          if (response.failed) { stepFailed = true; break; }
-
-          if (stepName === reviewStepName && verdict) {
-            approved = verdict.approved;
-            lastReviewFeedback = verdict.feedback;
-            if (approved) break;
-          }
-        }
-      }
-      completedRounds++;
-      if (approved) { finalStatus = "approved"; break; }
-      if (stepFailed && finalStatus === "running") { finalStatus = "failed"; break; }
-      await saveCheckpoint(sessionId, checkpointSnapshot(round));
-    }
-
-    if (finalStatus === "running") finalStatus = round > maxRounds ? "max_rounds" : "approved";
+    stepResults = loopState.stepResults;
+    stepTraces = loopState.stepTraces;
+    globalKnowledge = loopState.globalKnowledge;
+    candidate = loopState.candidate;
+    approved = loopState.approved;
+    lastReviewFeedback = loopState.lastReviewFeedback;
     
     const summary = costTracker.getSummary();
     const finalResult: PipelineResult = {
@@ -282,16 +245,30 @@ async function executePipelineInternal(args: PipelineParams & { signal?: AbortSi
       id: traceId, prompt, promptLength: prompt.length, mode: "pipeline",
       steps: stepTraces, totalRounds: completedRounds, finalStatus,
       totalDurationMs: Date.now() - startTime, timestamp: new Date().toISOString(),
-      hasVerifyResults: !!verifyResults, totalUsage: { promptTokens: summary.totalTokens, completionTokens: 0 }
+      hasVerifyResults: !!verifyResults, totalUsage: { promptTokens: summary.totalTokens, completionTokens: 0 },
+      lifecycle: "final",
     });
 
-    await saveCheckpoint(sessionId, checkpointSnapshot(Math.min(round, maxRounds), finalStatus));
+    await saveCheckpoint(sessionId, checkpointSnapshot(Math.min(endRound, maxRounds), finalStatus));
     return finalResult;
 
   } finally {
     if (workspace) {
-      try { await workspace.applyToSource(); } catch (e) { /* best-effort apply */ }
-      await workspace.destroy();
+      // Cancel / abort: tear down worktree without applying (issue 6.11).
+      if (args.signal?.aborted) {
+        try {
+          await workspace.destroy();
+        } catch {
+          /* best-effort */
+        }
+      } else if (shouldFinalizeAgentWorkspace(lastFinalStatus)) {
+        try {
+          await workspace.applyToSource();
+        } catch {
+          /* best-effort apply */
+        }
+        await workspace.destroy();
+      }
     }
   }
 }
@@ -317,9 +294,14 @@ export function register(server: McpServer) {
           content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
           isError: result.status === "failed" || result.status === "aborted"
         };
-      } catch (err: any) {
+      } catch (err: unknown) {
         return {
-          content: [{ type: "text", text: `Pipeline error: ${err.message}` }],
+          content: [
+            {
+              type: "text",
+              text: `Pipeline error: ${err instanceof Error ? err.message : String(err)}`,
+            },
+          ],
           isError: true
         };
       }

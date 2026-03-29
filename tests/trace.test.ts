@@ -2,7 +2,14 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { mkdirSync, existsSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { createTraceId, recordTrace, listTraces, queryTraces, aggregateTraceStats } from "../src/trace.ts";
+import {
+  createTraceId,
+  recordTrace,
+  updateTrace,
+  listTraces,
+  queryTraces,
+  aggregateTraceStats,
+} from "../src/trace.ts";
 import type { PipelineTrace } from "../src/trace.ts";
 
 function makeTmpTracesDir(): string {
@@ -68,6 +75,35 @@ test("recordTrace writes JSON file to traces dir", () => {
     if (origEnv === undefined) delete process.env.LLM_PIPELINE_HOME;
     else process.env.LLM_PIPELINE_HOME = origEnv;
     rmSync(tracesDir, { recursive: true, force: true });
+  }
+});
+
+test("updateTrace selects file by _traceId.json suffix (not substring of another id)", () => {
+  const dir = makeTmpTracesDir();
+  const tracesDir = join(dir, "traces");
+  mkdirSync(tracesDir, { recursive: true });
+  const origEnv = process.env.LLM_PIPELINE_HOME;
+  process.env.LLM_PIPELINE_HOME = dir;
+
+  try {
+    const inner = "ab12cd34";
+    const outer = `xx${inner}yy`;
+    recordTrace(makeTrace({ id: outer, timestamp: "2026-03-28T10:00:00.000Z", finalStatus: "approved" }));
+    recordTrace(makeTrace({ id: inner, timestamp: "2026-03-28T11:00:00.000Z", finalStatus: "approved" }));
+
+    const ok = updateTrace(inner, { finalStatus: "failed" });
+    assert.equal(ok, true);
+
+    const outerPath = join(tracesDir, `2026-03-28_${outer}.json`);
+    const innerPath = join(tracesDir, `2026-03-28_${inner}.json`);
+    const outerContent = JSON.parse(readFileSync(outerPath, "utf-8"));
+    const innerContent = JSON.parse(readFileSync(innerPath, "utf-8"));
+    assert.equal(outerContent.finalStatus, "approved");
+    assert.equal(innerContent.finalStatus, "failed");
+  } finally {
+    if (origEnv === undefined) delete process.env.LLM_PIPELINE_HOME;
+    else process.env.LLM_PIPELINE_HOME = origEnv;
+    rmSync(dir, { recursive: true, force: true });
   }
 });
 

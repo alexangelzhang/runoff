@@ -8,6 +8,7 @@ import {
   type NextStep,
   filterValidNextSteps
 } from "./types.js";
+import { logger } from "../logger.js";
 
 export class OpenAIProvider implements LLMProvider {
   name = "openai";
@@ -61,15 +62,17 @@ Rules:
 
       const insightsMatch = raw.match(/<INSIGHTS>([\s\S]*?)<\/INSIGHTS>/);
       if (insightsMatch) {
-        try { insights = JSON.parse(insightsMatch[1]); } catch (e) { console.warn("Failed to parse insights JSON"); }
+        try { insights = JSON.parse(insightsMatch[1]); } catch {
+          logger.warn("openai", "Failed to parse insights JSON");
+        }
       }
 
       const nextStepsMatch = raw.match(/<NEXT_STEPS>([\s\S]*?)<\/NEXT_STEPS>/);
       if (nextStepsMatch) {
         try {
           nextSteps = filterValidNextSteps(JSON.parse(nextStepsMatch[1]));
-        } catch (e) {
-          console.warn("Failed to parse nextSteps JSON");
+        } catch {
+          logger.warn("openai", "Failed to parse nextSteps JSON");
         }
       }
 

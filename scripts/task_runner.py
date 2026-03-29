@@ -1,28 +1,66 @@
 #!/usr/bin/env python3
 import argparse
 import base64
-import errno
-import hashlib
 import json
 import os
-import shutil
 import subprocess
 import sys
 import tempfile
-import time
-import uuid
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Any
+from typing import Any, Dict, List, Optional
 
-# Wave 5: Strict IPC & Pure Executor Implementation
+TASK_PAYLOAD_FIELD_NAMES = (
+    "id",
+    "prompt",
+    "mode",
+    "timestamp",
+    "system",
+    "staticContext",
+    "dynamicContext",
+    "workDir",
+    "sessionId",
+    "stepName",
+    "round",
+    "schemaVersion",
+    "knowledgeBase",
+    "agentId",
+    "parentHandoffId",
+    "delegateArgv",
+    "finalizeStrategy",
+    "sharedLockKey",
+)
 
-def normalize_path(path):
-    return os.path.realpath(os.path.abspath(path))
+TASK_RESULT_FIELD_NAMES = (
+    "id",
+    "status",
+    "content",
+    "usage",
+    "error",
+    "model",
+    "summary",
+    "changes",
+    "filesModified",
+    "diffStat",
+    "workspacePath",
+    "workspaceRepoRoot",
+    "workspaceBaseRef",
+    "workspaceSharedLockKey",
+    "schemaVersion",
+    "insights",
+    "nextSteps",
+)
 
-def random_id():
-    return uuid.uuid4().hex[:8]
-
+IPC_MODES = frozenset({"text", "agent-read", "agent-write"})
 TASK_PAYLOAD_SCHEMA_VERSION = 6
+TASK_RESULT_SCHEMA_VERSION = 5
+GIT_DIFF_TIMEOUT_SEC = 120
+DELEGATE_EXEC_TIMEOUT_SEC = int(os.environ.get("LLM_PIPELINE_DELEGATE_TIMEOUT_SEC", "900"))
+SCRIPT_DIR = os.path.dirname(os.path.realpath(os.path.abspath(__file__)))
+WORKSPACE_MANAGER_PATH = os.path.join(SCRIPT_DIR, "workspace_manager.py")
+
+
+def normalize_path(path: str) -> str:
+    return os.path.realpath(os.path.abspath(path))
 
 
 @dataclass
@@ -38,24 +76,76 @@ class TaskPayload:
     sessionId: Optional[str] = None
     stepName: Optional[str] = None
     round: int = 1
+    knowledgeBase: Optional[Dict[str, str]] = None
     agentId: Optional[str] = None
     parentHandoffId: Optional[str] = None
+    delegateArgv: Optional[List[str]] = None
+    finalizeStrategy: str = "auto"
+    sharedLockKey: Optional[str] = None
+
+    @staticmethod
+    def _parse_delegate_argv(raw: Any) -> Optional[List[str]]:
+        if raw is None:
+            return None
+        if not isinstance(raw, list) or not raw:
+            raise ValueError("TaskPayload delegateArgv must be a non-empty JSON array of strings or omitted")
+        out: List[str] = []
+        for i, item in enumerate(raw):
+            if not isinstance(item, str):
+                raise ValueError(f"TaskPayload delegateArgv[{i}] must be a string")
+            out.append(item)
+        return out
+
+    @staticmethod
+    def _parse_knowledge_base(raw: Any) -> Optional[Dict[str, str]]:
+        if raw is None:
+            return None
+        if not isinstance(raw, dict):
+            raise ValueError("TaskPayload knowledgeBase must be an object (string keys, string values) or omitted")
+        out: Dict[str, str] = {}
+        for key, val in raw.items():
+            if not isinstance(key, str):
+                raise ValueError(f"TaskPayload knowledgeBase keys must be strings, got {type(key).__name__}")
+            if not isinstance(val, str):
+                raise ValueError(
+                    f"TaskPayload knowledgeBase values must be strings, got {type(val).__name__} for key {key!r}"
+                )
+            out[key] = val
+        return out
+
+    @staticmethod
+    def _parse_finalize_strategy(raw: Any) -> str:
+        if raw is None:
+            return "auto"
+        if raw not in ("auto", "defer"):
+            raise ValueError("TaskPayload finalizeStrategy must be 'auto', 'defer', or omitted")
+        return str(raw)
+
+    @staticmethod
+    def _parse_optional_string(name: str, raw: Any) -> Optional[str]:
+        if raw is None:
+            return None
+        if not isinstance(raw, str) or not raw.strip():
+            raise ValueError(f"TaskPayload {name} must be a non-empty string when provided")
+        return raw
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> 'TaskPayload':
-        # P1: Strict validation of the IPC contract
+    def from_dict(cls, data: Dict[str, Any]) -> "TaskPayload":
         required = ["id", "prompt", "mode", "timestamp"]
         missing = [f for f in required if f not in data]
         if missing:
             raise ValueError(f"TaskPayload missing required fields: {', '.join(missing)}")
 
-        sv = data.get("schemaVersion")
-        if sv is not None:
-            if type(sv) is not int or sv < 1:
+        if data["mode"] not in IPC_MODES:
+            raise ValueError(f"TaskPayload mode must be one of {sorted(IPC_MODES)}, got {data['mode']!r}")
+
+        schema_version = data.get("schemaVersion")
+        if schema_version is not None:
+            if type(schema_version) is not int or schema_version < 1:
                 raise ValueError("TaskPayload schemaVersion must be a positive integer")
-            if sv > TASK_PAYLOAD_SCHEMA_VERSION:
+            if schema_version > TASK_PAYLOAD_SCHEMA_VERSION:
                 raise ValueError(
-                    f"TaskPayload schema version {sv} is newer than supported {TASK_PAYLOAD_SCHEMA_VERSION}"
+                    f"TaskPayload schema version {schema_version} is newer than supported {TASK_PAYLOAD_SCHEMA_VERSION}"
                 )
 
         return cls(
@@ -70,11 +160,14 @@ class TaskPayload:
             sessionId=data.get("sessionId"),
             stepName=data.get("stepName"),
             round=data.get("round", 1),
+            knowledgeBase=cls._parse_knowledge_base(data.get("knowledgeBase")),
             agentId=data.get("agentId"),
             parentHandoffId=data.get("parentHandoffId"),
+            delegateArgv=cls._parse_delegate_argv(data.get("delegateArgv")),
+            finalizeStrategy=cls._parse_finalize_strategy(data.get("finalizeStrategy")),
+            sharedLockKey=cls._parse_optional_string("sharedLockKey", data.get("sharedLockKey")),
         )
 
-TASK_RESULT_SCHEMA_VERSION = 5
 
 @dataclass
 class TaskResult:
@@ -84,103 +177,294 @@ class TaskResult:
     usage: Dict[str, int] = field(default_factory=lambda: {"promptTokens": 0, "completionTokens": 0})
     error: Optional[str] = None
     model: str = "unknown"
-    # Agent session traits
     summary: Optional[str] = None
     changes: Optional[str] = None
     filesModified: List[str] = field(default_factory=list)
     diffStat: Optional[str] = None
+    workspacePath: Optional[str] = None
+    workspaceRepoRoot: Optional[str] = None
+    workspaceBaseRef: Optional[str] = None
+    workspaceSharedLockKey: Optional[str] = None
     schemaVersion: int = TASK_RESULT_SCHEMA_VERSION
+    insights: Optional[Dict[str, str]] = None
+    nextSteps: Optional[List[Dict[str, Any]]] = None
 
     def to_dict(self) -> Dict[str, Any]:
-        return {
+        data: Dict[str, Any] = {
             "id": self.id,
             "status": self.status,
             "content": self.content,
             "usage": self.usage,
-            "error": self.error,
             "model": self.model,
-            "summary": self.summary,
-            "changes": self.changes,
             "filesModified": self.filesModified,
-            "diffStat": self.diffStat,
             "schemaVersion": self.schemaVersion,
         }
+        if self.error is not None:
+            data["error"] = self.error
+        if self.summary is not None:
+            data["summary"] = self.summary
+        if self.changes is not None:
+            data["changes"] = self.changes
+        if self.diffStat is not None:
+            data["diffStat"] = self.diffStat
+        if self.workspacePath is not None:
+            data["workspacePath"] = self.workspacePath
+        if self.workspaceRepoRoot is not None:
+            data["workspaceRepoRoot"] = self.workspaceRepoRoot
+        if self.workspaceBaseRef is not None:
+            data["workspaceBaseRef"] = self.workspaceBaseRef
+        if self.workspaceSharedLockKey is not None:
+            data["workspaceSharedLockKey"] = self.workspaceSharedLockKey
+        if self.insights is not None:
+            data["insights"] = self.insights
+        if self.nextSteps is not None:
+            data["nextSteps"] = self.nextSteps
+        return data
 
-def run_git_diff(cwd):
-    try:
-        diff = subprocess.check_output(["git", "diff", "HEAD"], cwd=cwd).decode("utf-8")
-        files = subprocess.check_output(["git", "diff", "--name-only", "HEAD"], cwd=cwd).decode("utf-8").splitlines()
-        stat = subprocess.check_output(["git", "diff", "--stat", "HEAD"], cwd=cwd).decode("utf-8")
-        return diff, files, stat
-    except Exception as e:
-        return None, [], str(e)
 
-def _atomic_write_json(filepath: str, data: dict):
-    """Write JSON atomically via temp file + rename."""
+def _atomic_write_json(filepath: str, data: dict) -> None:
     tmp = filepath + ".tmp"
     with open(tmp, "w") as f:
         json.dump(data, f)
     os.replace(tmp, filepath)
 
 
-def execute_oneshot(task_file: str, result_file: str):
-    """Wave 5: Pure one-shot executor logic."""
-    try:
-        with open(task_file, "r") as f:
-            data = json.load(f)
-        task = TaskPayload.from_dict(data)
-    except Exception as e:
-        res = TaskResult(id="unknown", status="error", error=f"IPC Payload Error: {str(e)}")
-        _atomic_write_json(result_file, res.to_dict())
-        return
-
-    work_dir = os.path.realpath(task.workDir) if task.workDir else os.getcwd()
-    if not os.path.isdir(work_dir):
-        res = TaskResult(id=task.id, status="error", error=f"work_dir does not exist or is not a directory: {work_dir}")
-        _atomic_write_json(result_file, res.to_dict())
-        return
-    
-    # Simple execution engine implementation
-    # In a real system, this would invoke actual tools or subprocesses.
-    # Here we simulate the runner behavior for the pipeline integration.
-    
-    # Reconstruct prompt (From Wave 4)
-    final_prompt = task.prompt
+def _compose_prompt_text(task: TaskPayload) -> str:
     if task.system or task.staticContext:
         parts = []
-        if task.system: parts.append(task.system)
-        if task.staticContext: parts.append(task.staticContext)
-        if task.dynamicContext: parts.append(task.dynamicContext)
-        else: parts.append(task.prompt)
-        final_prompt = "\n\n".join(parts)
+        if task.system:
+            parts.append(task.system)
+        if task.staticContext:
+            parts.append(task.staticContext)
+        if task.dynamicContext:
+            parts.append(task.dynamicContext)
+        else:
+            parts.append(task.prompt)
+        return "\n\n".join(parts)
+    return task.prompt
+
+
+def _run_delegate(argv: List[str], cwd: str, stdin_text: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        argv,
+        cwd=cwd,
+        input=stdin_text,
+        text=True,
+        capture_output=True,
+        timeout=DELEGATE_EXEC_TIMEOUT_SEC,
+    )
+
+
+def _git_output(args: List[str], cwd: str, timeout: int = GIT_DIFF_TIMEOUT_SEC) -> str:
+    return subprocess.check_output(["git", *args], cwd=cwd, text=True, timeout=timeout)
+
+
+def _resolve_repo_root(path: str) -> str:
+    return normalize_path(_git_output(["rev-parse", "--show-toplevel"], path).strip())
+
+
+def _is_inside_linked_worktree(path: str) -> bool:
+    git_dir = _git_output(["rev-parse", "--git-dir"], path).strip().replace("\\", "/")
+    return "/worktrees/" in git_dir or ".git/worktrees" in git_dir
+
+
+def _run_workspace_manager(cmd: str, **kwargs: Any) -> Dict[str, Any]:
+    argv = ["python3", WORKSPACE_MANAGER_PATH, cmd]
+    for key, value in kwargs.items():
+        if value is None or value == "":
+            continue
+        argv.extend([f"--{key.replace('_', '-')}", str(value)])
+
+    proc = subprocess.run(argv, capture_output=True, text=True)
+    output = (proc.stdout or "").strip()
+
+    if proc.returncode != 0 and not output:
+        raise RuntimeError((proc.stderr or "").strip() or f"workspace_manager {cmd} failed")
+
+    for line in reversed(output.splitlines() if output else []):
+        try:
+            data = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(data, dict):
+            if data.get("error"):
+                raise RuntimeError(str(data["error"]))
+            return data
+
+    if proc.returncode != 0:
+        raise RuntimeError((proc.stderr or output).strip() or f"workspace_manager {cmd} failed")
+    raise RuntimeError(f"workspace_manager {cmd} returned no JSON payload")
+
+
+def _map_workdir_to_worktree(original_work_dir: str, repo_root: str, worktree_root: str) -> str:
+    abs_work_dir = normalize_path(original_work_dir)
+    abs_repo_root = normalize_path(repo_root)
+    rel = os.path.relpath(abs_work_dir, abs_repo_root)
+    if rel == ".":
+        return worktree_root
+    mapped = normalize_path(os.path.join(worktree_root, rel))
+    os.makedirs(mapped, exist_ok=True)
+    return mapped
+
+
+def run_git_diff(cwd: str):
+    try:
+        try:
+            subprocess.run(["git", "add", "-N", "."], cwd=cwd, check=False, capture_output=True, text=True)
+        except Exception:
+            pass
+        diff = _git_output(["diff", "HEAD"], cwd)
+        files_out = _git_output(["diff", "--name-only", "HEAD"], cwd)
+        stat = _git_output(["diff", "--stat", "HEAD"], cwd)
+        files = [line for line in files_out.splitlines() if line.strip()]
+        return diff, files, stat
+    except subprocess.TimeoutExpired:
+        return None, [], "git diff timed out"
+    except Exception as err:
+        return None, [], str(err)
+
+
+def _decode_patch_bytes(encoded: Optional[str]) -> bytes:
+    if not encoded:
+        return b""
+    return base64.b64decode(encoded.encode("utf-8"))
+
+
+def _apply_patch_to_repo(repo_root: str, patch_bytes: bytes) -> None:
+    if not patch_bytes:
+        return
+    with tempfile.NamedTemporaryFile(prefix="llm-task-runner-", suffix=".patch", delete=False) as tmp:
+        tmp.write(patch_bytes)
+        tmp_path = tmp.name
+    try:
+        _run_workspace_manager("apply", repo=repo_root, patch_file=tmp_path, owner_pid=os.getpid())
+    finally:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+
+
+def _execute_delegate_or_stub(task: TaskPayload, work_dir: str, final_prompt: str) -> str:
+    if task.delegateArgv:
+        try:
+            proc = _run_delegate(task.delegateArgv, work_dir, final_prompt)
+        except subprocess.TimeoutExpired:
+            raise RuntimeError(f"delegateArgv subprocess timed out after {DELEGATE_EXEC_TIMEOUT_SEC}s")
+        if proc.returncode != 0:
+            err_tail = (proc.stderr or proc.stdout or "").strip()[:8000]
+            raise RuntimeError(f"delegateArgv exited {proc.returncode}: {err_tail}")
+        return (proc.stdout or "").strip()
+    return f"Executed prompt (stub runner, no delegateArgv): {final_prompt[:100]}..."
+
+
+def _build_summary(delegate_out: str, work_dir: str) -> str:
+    return delegate_out if delegate_out else f"delegate completed in {work_dir}"
+
+
+def _execute_agent_task(task: TaskPayload, work_dir: str, final_prompt: str) -> TaskResult:
+    repo_root = _resolve_repo_root(work_dir)
+    defer_finalize = task.finalizeStrategy == "defer"
+
+    if _is_inside_linked_worktree(work_dir):
+        if defer_finalize:
+            raise RuntimeError("finalizeStrategy=defer is not supported when workDir already points at an existing linked worktree")
+        worktree_root = _resolve_repo_root(work_dir)
+        print(f"Session workspace (reusing): {worktree_root}", flush=True)
+        delegate_out = _execute_delegate_or_stub(task, work_dir, final_prompt)
+        diff, files, stat = run_git_diff(worktree_root)
+        return TaskResult(
+            id=task.id,
+            status="success",
+            summary=_build_summary(delegate_out, work_dir),
+            changes=diff if diff is not None else "",
+            filesModified=files,
+            diffStat=stat if isinstance(stat, str) else str(stat or ""),
+        )
+
+    session_id = task.id if defer_finalize else (task.sessionId or task.id)
+    create_result = _run_workspace_manager(
+        "create",
+        repo=repo_root,
+        session=session_id,
+        owner_pid=os.getpid(),
+        shared_lock_key=task.sharedLockKey,
+    )
+    worktree_root = normalize_path(str(create_result["worktreePath"]))
+    base_ref = str(create_result["baseRef"])
+    exec_dir = _map_workdir_to_worktree(work_dir, repo_root, worktree_root)
+    print(f"Isolated worktree: {worktree_root}", flush=True)
+
+    should_destroy = True
+    try:
+        delegate_out = _execute_delegate_or_stub(task, exec_dir, final_prompt)
+        diff, files, stat = run_git_diff(worktree_root)
+        collect_result = _run_workspace_manager("collect", worktree=worktree_root, base_ref=base_ref)
+        result = TaskResult(
+            id=task.id,
+            status="success",
+            summary=_build_summary(delegate_out, exec_dir),
+            changes=diff if diff is not None else "",
+            filesModified=files,
+            diffStat=stat if isinstance(stat, str) else str(stat or ""),
+        )
+        if defer_finalize:
+            should_destroy = False
+            result.workspacePath = worktree_root
+            result.workspaceRepoRoot = repo_root
+            result.workspaceBaseRef = base_ref
+            result.workspaceSharedLockKey = task.sharedLockKey
+            return result
+        if task.mode == "agent-write":
+            _apply_patch_to_repo(repo_root, _decode_patch_bytes(collect_result.get("patch")))
+        return result
+    finally:
+        if should_destroy:
+            try:
+                _run_workspace_manager(
+                    "destroy",
+                    repo=repo_root,
+                    worktree=worktree_root,
+                    owner_pid=os.getpid(),
+                    shared_lock_key=task.sharedLockKey,
+                )
+            except Exception as err:
+                print(f"workspace destroy warning: {err}", file=sys.stderr, flush=True)
+
+
+def execute_oneshot(task_file: str, result_file: str) -> None:
+    try:
+        with open(task_file, "r") as f:
+            task = TaskPayload.from_dict(json.load(f))
+    except Exception as err:
+        _atomic_write_json(result_file, TaskResult(id="unknown", status="error", error=f"IPC Payload Error: {err}").to_dict())
+        return
+
+    work_dir = normalize_path(task.workDir) if task.workDir else os.getcwd()
+    if not os.path.isdir(work_dir):
+        _atomic_write_json(
+            result_file,
+            TaskResult(id=task.id, status="error", error=f"work_dir does not exist or is not a directory: {work_dir}").to_dict(),
+        )
+        return
+
+    final_prompt = _compose_prompt_text(task)
 
     try:
-        # P1: This executor currently handles text and agent-write modes
-        if task.mode == "agent-write":
-            # Simulate agent work if needed, or just capture diffs
-            diff, files, stat = run_git_diff(work_dir)
-            result = TaskResult(
-                id=task.id, status="success",
-                summary=f"Successfully processed task in {work_dir}",
-                changes=diff, filesModified=files, diffStat=stat
-            )
+        if task.mode in ("agent-write", "agent-read"):
+            result = _execute_agent_task(task, work_dir, final_prompt)
         else:
-            result = TaskResult(
-                id=task.id, status="success",
-                content=f"Executed prompt (Simulated): {final_prompt[:100]}..."
-            )
-            
+            content = _execute_delegate_or_stub(task, work_dir, final_prompt)
+            result = TaskResult(id=task.id, status="success", content=content)
         _atomic_write_json(result_file, result.to_dict())
+    except Exception as err:
+        _atomic_write_json(result_file, TaskResult(id=task.id, status="error", error=str(err)).to_dict())
 
-    except Exception as e:
-        result = TaskResult(id=task.id, status="error", error=str(e))
-        _atomic_write_json(result_file, result.to_dict())
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="LLM Pipeline Task Runner (Wave 5: One-shot)")
-    parser.print_help = lambda: None # Silent help if needed
+    parser.print_help = lambda: None
     parser.add_argument("task_file", help="Path to the JSON task file")
     parser.add_argument("result_file", help="Path where to write the JSON result")
-    
     args = parser.parse_args()
     execute_oneshot(args.task_file, args.result_file)

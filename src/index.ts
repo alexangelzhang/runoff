@@ -8,13 +8,14 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { loadConfig } from "./config.js";
 import { activeWorkspaces } from "./workspace.js";
-import { raceSessions, cleanupStaleRaceSessions } from "./tools/helpers.js";
+import { raceSessions, cleanupStaleRaceSessions } from "./race-registry.js";
 
 import { register as registerRunStep } from "./tools/run-step.js";
 import { register as registerShowConfig } from "./tools/show-config.js";
 import { register as registerQueryTraces } from "./tools/query-traces.js";
 import { register as registerRace } from "./tools/race.js";
 import { register as registerRunPipeline } from "./tools/run-pipeline.js";
+import { logger } from "./logger.js";
 
 const initialConfig = loadConfig();
 
@@ -33,17 +34,12 @@ registerRunPipeline(server);
 async function main() {
   const transport = new StdioServerTransport();
   await server.connect(transport);
-  console.error("llm-pipeline MCP server v3.0 running on stdio");
+  logger.info("server", "llm-pipeline MCP server v3.0 running on stdio");
 
   // Graceful shutdown
   const shutdown = () => {
-    console.error("llm-pipeline MCP server shutting down...");
-    // Destroy race session workspaces
-    for (const [, session] of raceSessions) {
-      for (const c of session.candidates) {
-        c.workspace?.destroySync();
-      }
-    }
+    logger.info("server", "llm-pipeline MCP server shutting down...");
+    // Race sessions currently store patch metadata only; no live workspace handles to destroy here.
     raceSessions.clear();
     for (const ws of activeWorkspaces) {
       ws.destroySync();
@@ -58,12 +54,12 @@ async function main() {
   process.on("SIGINT", shutdown);
   process.on("SIGTERM", shutdown);
   process.on("uncaughtException", (err) => {
-    console.error("Uncaught exception:", err);
+    logger.error("server", "Uncaught exception", { err });
     shutdown();
   });
 }
 
 main().catch((err) => {
-  console.error("Fatal:", err);
+  logger.error("server", "Fatal startup error", { err });
   process.exit(1);
 });

@@ -1,0 +1,109 @@
+name: Release Template
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_version:
+        description: Release version to verify, for example 3.0.0
+        required: true
+        type: string
+      create_github_release:
+        description: Create a draft GitHub release after verification
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-template-${{ github.ref }}-${{ inputs.release_version }}
+  cancel-in-progress: false
+
+jobs:
+  pre_release_smoke:
+    uses: ./.github/workflows/real-provider-smoke-pre-release.yml
+    secrets: inherit
+
+  verify_and_package:
+    needs: pre_release_smoke
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Validate requested version
+        shell: bash
+        run: |
+          set -euo pipefail
+          PACKAGE_VERSION=$(node -p "require('./package.json').version")
+          if [[ "$PACKAGE_VERSION" != "${{ inputs.release_version }}" ]]; then
+            echo "package.json version $PACKAGE_VERSION does not match workflow input ${{ inputs.release_version }}"
+            exit 1
+          fi
+
+      - name: Build
+        run: npm run build
+
+      - name: Test
+        run: npm test
+
+      - name: Pack release artifact
+        id: pack
+        shell: bash
+        run: |
+          set -euo pipefail
+          PACKAGE_TGZ=$(npm pack --silent | tail -n 1)
+          echo "package_tgz=$PACKAGE_TGZ" >> "$GITHUB_OUTPUT"
+
+      - name: Upload packaged artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-package-${{ inputs.release_version }}
+          path: ${{ steps.pack.outputs.package_tgz }}
+          if-no-files-found: error
+          retention-days: 30
+
+  draft_github_release:
+    if: ${{ inputs.create_github_release }}
+    needs: verify_and_package
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download packaged artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: release-package-${{ inputs.release_version }}
+          path: dist
+
+      - name: Create draft GitHub release
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          RELEASE_VERSION: ${{ inputs.release_version }}
+        run: |
+          set -euo pipefail
+          TAG="v$RELEASE_VERSION"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "GitHub release $TAG already exists"
+            exit 1
+          fi
+          gh release create "$TAG" dist/*.tgz --draft --title "$TAG" --generate-notes
+
+      - name: Print release hint
+        shell: bash
+        env:
+          RELEASE_VERSION: ${{ inputs.release_version }}
+        run: |
+          set -euo pipefail
+          echo "Draft release created for v$RELEASE_VERSION"

@@ -7,7 +7,8 @@ import { z } from "zod";
 import { loadConfig, getProviderForStep } from "../config.js";
 import { ResponseCache, getCache } from "../cache.js";
 import { isAgentMode, isTextResponse } from "../providers/types.js";
-import { ensureWorkDirForStep, serializeResponse, type PipelineConfig } from "./helpers.js";
+import { serializeResponse, type PipelineConfig } from "./helpers.js";
+import { ensureWorkDirForStep } from "../pipeline-workdir.js";
 
 export function register(server: McpServer, initialConfig: PipelineConfig) {
   server.tool(
@@ -113,9 +114,10 @@ export function register(server: McpServer, initialConfig: PipelineConfig) {
             }, null, 2),
           }],
         };
-      } catch (err: any) {
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
         return {
-          content: [{ type: "text" as const, text: `Step "${step}" error: ${err.message}` }],
+          content: [{ type: "text" as const, text: `Step "${step}" error: ${message}` }],
           isError: true,
         };
       }

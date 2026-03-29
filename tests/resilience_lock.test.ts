@@ -1,16 +1,17 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { spawn } from "node:child_process";
-import { join } from "node:path";
-import { dirname } from "node:path";
+import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { mkdirSync } from "node:fs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const workspaceManager = join(__dirname, "../scripts/workspace_manager.py");
+const lockHome = join(__dirname, "../tmp/resilience-lock-pipeline-home");
 
 test("Resilience: Lock Contention & Backoff", async (t) => {
   const repoPath = "/tmp/llm-pipeline-test-repo-lock";
-  const ownerPid = process.pid;
+  mkdirSync(lockHome, { recursive: true });
 
   await t.test("Should handle 5 simultaneous lock requests via exponential backoff", async () => {
     // We try to 'lock' the same repo 5 times in parallel.
@@ -22,7 +23,9 @@ test("Resilience: Lock Contention & Backoff", async (t) => {
           "--repo", repoPath,
           "--owner-pid", (10000 + i).toString(),
           "--shared-lock-key", "" // Exclusive lock
-        ]);
+        ], {
+          env: { ...process.env, LLM_PIPELINE_HOME: lockHome },
+        });
 
         let out = "";
         proc.stdout.on("data", (d) => out += d);

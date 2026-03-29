@@ -53,14 +53,28 @@ export function clearConfigCache(): void {
  * (Wave 5: Strict Schema & DAG integrity)
  */
 export function validateConfig(config: unknown): config is PipelineConfig {
-  if (!config || typeof config !== "object") throw new Error("Config must be an object");
-  const c = config as Record<string, any>;
-  if (!c.providers || typeof c.providers !== "object") throw new Error("Missing providers object");
-  if (!c.pipeline || typeof c.pipeline !== "object") throw new Error("Missing pipeline object");
+  if (!config || typeof config !== "object" || config === null) {
+    throw new Error("Config must be an object");
+  }
+  const c = config as Record<string, unknown>;
+  if (!c.providers || typeof c.providers !== "object" || c.providers === null || Array.isArray(c.providers)) {
+    throw new Error("Missing providers object");
+  }
+  if (!c.pipeline || typeof c.pipeline !== "object" || c.pipeline === null || Array.isArray(c.pipeline)) {
+    throw new Error("Missing pipeline object");
+  }
 
-  const allSteps = Object.keys(c.pipeline);
-  for (const [stepName, stepConfig] of Object.entries(c.pipeline)) {
-    if (!Array.isArray(stepConfig) || stepConfig.length === 0) {
+  const providers = c.providers as Record<string, unknown>;
+  const pipeline = c.pipeline as Record<string, unknown>;
+  const allSteps = Object.keys(pipeline);
+
+  for (const [stepName, stepConfig] of Object.entries(pipeline)) {
+    if (!Array.isArray(stepConfig)) {
+      throw new Error(
+        `Step "${stepName}" must use the tuple DSL [provider, ...dependsOn], not an object. Pipeline steps must be JSON arrays.`,
+      );
+    }
+    if (stepConfig.length === 0) {
       throw new Error(`Step "${stepName}" must be an array with [provider, ...dependsOn]`);
     }
 
@@ -68,12 +82,18 @@ export function validateConfig(config: unknown): config is PipelineConfig {
     const providersToCheck = Array.isArray(pRaw) ? pRaw : [pRaw];
 
     for (const pName of providersToCheck) {
-      if (!c.providers[pName] && pName !== "builtin") {
+      if (typeof pName !== "string") {
+        throw new Error(`Step "${stepName}" provider entry must be a string or array of strings`);
+      }
+      if (!providers[pName] && pName !== "builtin") {
         throw new Error(`Step "${stepName}" references unknown provider "${pName}"`);
       }
     }
 
     for (const dep of deps) {
+      if (typeof dep !== "string") {
+        throw new Error(`Step "${stepName}" dependsOn entries must be strings`);
+      }
       if (dep === stepName) {
         throw new Error(`Step "${stepName}" cannot depend on itself`);
       }
@@ -83,20 +103,7 @@ export function validateConfig(config: unknown): config is PipelineConfig {
     }
   }
 
-  // Cycle detection via topological sort
-  const visited = new Set<string>();
-  const remaining = new Set(allSteps);
-  while (remaining.size > 0) {
-    const ready: string[] = [];
-    for (const step of remaining) {
-      const [_, ...deps] = c.pipeline[step] as any[];
-      if (deps.every((d: string) => visited.has(d))) ready.push(step);
-    }
-    if (ready.length === 0) {
-      throw new Error(`Circular dependency detected among steps: ${[...remaining].join(", ")}`);
-    }
-    for (const s of ready) { visited.add(s); remaining.delete(s); }
-  }
+  computePipelineStages(pipeline as PipelineConfig["pipeline"]);
 
   return true;
 }
@@ -120,22 +127,28 @@ export type StepProvider = {
   provider: LLMProvider | LLMProvider[] | null;
 };
 
-const providerRegistry: Record<string, new (...args: any[]) => LLMProvider> = {
-  openai: OpenAIProvider,
-  cli: CLIProvider,
-  mock: MockProvider,
-};
-
 export function createProvider(name: string, config: ProviderConfig): LLMProvider | null {
-  const ProviderClass = providerRegistry[config.type];
-  if (!ProviderClass) {
-    if (config.type === "builtin") return null;
-    throw new Error(`Unknown provider type: ${config.type}`);
+  switch (config.type) {
+    case "builtin":
+      return null;
+    case "mock":
+      return new MockProvider(name);
+    case "openai":
+      return new OpenAIProvider(config.model);
+    case "cli":
+      return new CLIProvider(
+        name,
+        config.command ?? "",
+        config.args ?? [],
+        getConfiguredProviderMode(config),
+        { timeoutMs: config.timeoutMs },
+      );
+    case "anthropic":
+      throw new Error("Anthropic provider is not implemented");
+    default: {
+      throw new Error(`Unknown provider type: ${(config as ProviderConfig).type}`);
+    }
   }
-  if (config.type === "mock") return new ProviderClass(name);
-  if (config.type === "openai") return new ProviderClass(config.model);
-  if (config.type === "cli") return new ProviderClass(name, config.command, config.args, config.mode, config);
-  return new ProviderClass(config);
 }
 
 export function getConfiguredProviderMode(config: ProviderConfig): ProviderMode {
@@ -206,16 +219,21 @@ export function getDagStages(config: PipelineConfig): string[][] {
 
 /**
  * Generate a deterministic hash for the current configuration.
- * (Wave 5 Fix: Properly sorts keys recursively to detect any change)
+ * `sortKeys` recurses into nested objects and **arrays** (element order is preserved;
+ * object keys are sorted at each level). Hash therefore changes if array order or any nested key changes.
  */
-export function calculateConfigHash(config: any): string {
-  function sortKeys(obj: any): any {
-    if (obj === null || typeof obj !== "object" || Array.isArray(obj)) return obj;
-    return Object.keys(obj).sort().reduce((acc: any, key) => {
-      acc[key] = sortKeys(obj[key]);
-      return acc;
-    }, {});
+function sortKeys(value: unknown): unknown {
+  if (value === null || typeof value !== "object") return value;
+  if (Array.isArray(value)) return value.map(sortKeys);
+  const obj = value as Record<string, unknown>;
+  const sorted: Record<string, unknown> = {};
+  for (const key of Object.keys(obj).sort()) {
+    sorted[key] = sortKeys(obj[key]);
   }
+  return sorted;
+}
+
+export function calculateConfigHash(config: unknown): string {
   const content = JSON.stringify(sortKeys(config));
   return createHash("sha256").update(content).digest("hex").slice(0, 16);
 }

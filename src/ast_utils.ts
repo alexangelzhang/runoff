@@ -1,5 +1,14 @@
 import ts from "typescript";
 
+type SourceFileWithParseDiagnostics = ts.SourceFile & {
+  parseDiagnostics?: readonly ts.Diagnostic[];
+};
+
+function getParseDiagnostics(sourceFile: ts.SourceFile): readonly ts.Diagnostic[] {
+  const pd = (sourceFile as SourceFileWithParseDiagnostics).parseDiagnostics;
+  return pd ?? [];
+}
+
 /**
  * Fast syntax validation for TS/JS code snippets.
  * Returns true if the code is syntactically correct.
@@ -13,11 +22,10 @@ export function isSyntaxValid(code: string, fileName: string = "candidate.ts"): 
       true,
       ts.ScriptKind.TS
     );
-    
-    // Check for obvious syntax errors
-    const diagnostics = (sourceFile as any).parseDiagnostics;
-    return !diagnostics || diagnostics.length === 0;
-  } catch (err) {
+
+    const diagnostics = getParseDiagnostics(sourceFile);
+    return diagnostics.length === 0;
+  } catch {
     return false;
   }
 }

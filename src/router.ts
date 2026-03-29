@@ -4,6 +4,7 @@
  */
 
 import { aggregateTraceStats, TraceStats } from "./trace.js";
+import { getTracesDir } from "./paths.js";
 
 export type Complexity = "low" | "medium" | "high";
 export type ModelTier = "lite" | "full";
@@ -44,14 +45,15 @@ const MEDIUM_COMPLEXITY_PATTERNS = [
 const complexityCache = new Map<string, number>();
 const MAX_CACHE_SIZE = 100;
 
-let _statsCache: { data: TraceStats; expireAt: number } | null = null;
+let _statsCache: { data: TraceStats; expireAt: number; tracesDir: string } | null = null;
 const STATS_TTL_MS = 60 * 1000;
 
 function getCachedStats(): TraceStats {
   const now = Date.now();
-  if (_statsCache && _statsCache.expireAt > now) return _statsCache.data;
+  const tracesDir = getTracesDir();
+  if (_statsCache && _statsCache.expireAt > now && _statsCache.tracesDir === tracesDir) return _statsCache.data;
   const stats = aggregateTraceStats();
-  _statsCache = { data: stats, expireAt: now + STATS_TTL_MS };
+  _statsCache = { data: stats, expireAt: now + STATS_TTL_MS, tracesDir };
   return stats;
 }
 
@@ -68,7 +70,7 @@ export function computeComplexityScore(prompt: string): number {
     if (pattern.test(prompt)) score += 25;
   }
   for (const pattern of MEDIUM_COMPLEXITY_PATTERNS) {
-    if (pattern.test(prompt)) score += 10;
+    if (pattern.test(prompt)) score += 5;
   }
 
   // Structural score
@@ -123,17 +125,15 @@ export function routeProvider(
   if (candidates.length === 1) return candidates[0].provider;
 
   // Use historical trace data to pick the most reliable winner
-  const globalSuccessRate = stats.totalTraces > 0
-    ? (stats.totalTraces - stats.failedCount) / stats.totalTraces
-    : 1.0;
   const scored = candidates.map((c) => {
     const pStat = stats.providerStats[c.provider];
-    // Per-provider failure data not yet tracked; use volume as tiebreaker
-    const volume = pStat ? pStat.stepCount : 0;
-    return { provider: c.provider, successRate: globalSuccessRate, volume };
+    const failureRate = pStat?.failureRate ?? 0.5;
+    const successRate = pStat?.successRate ?? 0.5;
+    const volume = pStat?.stepCount ?? 0;
+    return { provider: c.provider, failureRate, successRate, volume };
   });
 
-  scored.sort((a, b) => b.successRate - a.successRate || b.volume - a.volume);
+  scored.sort((a, b) => a.failureRate - b.failureRate || b.successRate - a.successRate || b.volume - a.volume);
   return scored[0].provider;
 }
 

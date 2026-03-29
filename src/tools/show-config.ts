@@ -1,4 +1,3 @@
-import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { loadConfig } from "../config.js";
 import { getStepProviderMode } from "../config.js";
@@ -29,6 +28,7 @@ export function register(server: McpServer) {
 
         const output = {
           configPath: "pipeline.config.json",
+          pipelineDSL: "tuple-v1",
           steps: pipelineSteps,
           routingRules: config.routing || [],
           retryPolicy: config.retry || { maxRounds: 1 }
@@ -37,9 +37,10 @@ export function register(server: McpServer) {
         return {
           content: [{ type: "text", text: JSON.stringify(output, null, 2) }]
         };
-      } catch (err: any) {
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
         return {
-          content: [{ type: "text", text: `Error loading config: ${err.message}` }],
+          content: [{ type: "text", text: `Error loading config: ${message}` }],
           isError: true
         };
       }

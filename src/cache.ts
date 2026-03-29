@@ -104,6 +104,14 @@ export class ResponseCache {
     return { ...this.stats, size: this.store.size };
   }
 
+  /** Remove all entries and reset stats. */
+  clear(): void {
+    this.store.clear();
+    this.head = null;
+    this.tail = null;
+    this.stats = { hits: 0, misses: 0, evictions: 0, size: 0 };
+  }
+
   private evictLRU(): void {
     if (!this.tail) return;
     const lruKey = this.tail.key;
@@ -140,4 +148,10 @@ let _cache: ResponseCache | null = null;
 export function getCache(): ResponseCache {
   if (!_cache) _cache = new ResponseCache();
   return _cache;
+}
+
+/** Reset the singleton cache (for tests and hot-reload). */
+export function clearCache(): void {
+  if (_cache) _cache.clear();
+  _cache = null;
 }

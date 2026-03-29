@@ -1,15 +1,20 @@
 /**
  * Session-level workspace isolation using Python Workspace Manager backend.
  * Manages a git worktree that persists across all rounds of a pipeline run,
- * with repo-level locking managed exclusively by Python side.
+ * with repo-level locking managed exclusively on the Python side.
+ *
+ * Locking: omit `sharedLockKey` for **exclusive** repo access (default). Set `sharedLockKey` to the
+ * same string only when multiple workspaces must share a lock (e.g. race participants). See
+ * `scripts/workspace_manager.py` module docstring.
  */
 
 import { execFile, execFileSync } from "node:child_process";
 import { promisify } from "node:util";
-import { rmSync, existsSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
+import { logger } from "./logger.js";
 
 const execFileAsync = promisify(execFile);
 const __filename = fileURLToPath(import.meta.url);
@@ -73,22 +78,33 @@ export class SessionWorkspace {
     this.sharedLockKey = sharedLockKey;
   }
 
-  private static async runPython(cmd: string, args: Record<string, string | number>): Promise<any> {
+  private static async runPython(
+    cmd: string,
+    args: Record<string, string | number>
+  ): Promise<Record<string, unknown>> {
     const cliArgs = [SCRIPT_PATH, cmd];
     for (const [k, v] of Object.entries(args)) {
       if (v !== undefined && v !== "") {
         cliArgs.push(`--${k}`, String(v));
       }
     }
-    
+
     let stdout = "";
     try {
       const result = await execFileAsync("python3", cliArgs, { maxBuffer: 10 * 1024 * 1024 });
-      stdout = result.stdout;
-    } catch (e: any) {
-      stdout = e.stdout || "";
+      stdout = typeof result.stdout === "string" ? result.stdout : "";
+    } catch (e: unknown) {
+      if (typeof e === "object" && e !== null && "stdout" in e) {
+        const o = (e as { stdout?: unknown }).stdout;
+        if (typeof o === "string") stdout = o;
+      }
       if (!stdout) {
-        throw new Error(`Workspace Python crashed: ${e.stderr || e.message}`);
+        const stderr =
+          typeof e === "object" && e !== null && "stderr" in e
+            ? String((e as { stderr?: unknown }).stderr ?? "")
+            : "";
+        const message = e instanceof Error ? e.message : String(e);
+        throw new Error(`Workspace Python crashed: ${stderr || message}`);
       }
     }
 
@@ -98,9 +114,10 @@ export class SessionWorkspace {
     const lines = text.split("\n");
     for (let i = lines.length - 1; i >= 0; i--) {
       try {
-        const result = JSON.parse(lines[i]);
-        if (result && typeof result === "object") {
-          if (result.error) throw new Error(result.error);
+        const parsed: unknown = JSON.parse(lines[i]);
+        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+          const result = parsed as Record<string, unknown>;
+          if (result.error != null) throw new Error(String(result.error));
           return result;
         }
       } catch (err) {
@@ -123,6 +140,9 @@ export class SessionWorkspace {
     if (opts.sharedLockKey) args["shared-lock-key"] = opts.sharedLockKey;
 
     const result = await SessionWorkspace.runPython("create", args);
+    if (typeof result.baseRef !== "string" || typeof result.worktreePath !== "string") {
+      throw new Error(`Workspace create returned invalid shape: missing baseRef or worktreePath`);
+    }
     const ws = new SessionWorkspace(opts.repoRoot, result.baseRef, result.worktreePath, sessionId, opts.sharedLockKey);
     activeWorkspaces.add(ws);
     return ws;
@@ -171,11 +191,15 @@ export class SessionWorkspace {
       worktree: this.worktreePath,
       "base-ref": this.baseRef
     });
-    return {
-      patch: result.patch ? Buffer.from(result.patch, "base64") : Buffer.alloc(0),
-      filesModified: result.filesModified || [],
-      diffStat: result.diffStat || ""
-    };
+    const patchB64 = result.patch;
+    const patch =
+      typeof patchB64 === "string" && patchB64.length > 0
+        ? Buffer.from(patchB64, "base64")
+        : Buffer.alloc(0);
+    const fm = result.filesModified;
+    const filesModified = Array.isArray(fm) ? fm.filter((x): x is string => typeof x === "string") : [];
+    const diffStat = typeof result.diffStat === "string" ? result.diffStat : "";
+    return { patch, filesModified, diffStat };
   }
 
   async applyToSource(patch?: Buffer): Promise<void> {
@@ -212,8 +236,9 @@ export class SessionWorkspace {
       };
       if (this.sharedLockKey) args["shared-lock-key"] = this.sharedLockKey;
       await SessionWorkspace.runPython("destroy", args);
-    } catch (e: any) {
-      console.error(`workspace destroy failed: ${e.message}`);
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : String(e);
+      logger.error("workspace", `workspace destroy failed: ${message}`);
     }
 
     activeWorkspaces.delete(this);

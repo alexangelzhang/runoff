@@ -61,6 +61,27 @@ test("IPC Protocol - Wave 5 / Phase D: TaskPayload alignment", async (t) => {
     assert.ok(TASK_PAYLOAD_FIELDS.includes("agentId"), "Should have agentId field");
     assert.ok(TASK_PAYLOAD_FIELDS.includes("parentHandoffId"), "Should have parentHandoffId field");
     assert.ok(TASK_RESULT_FIELDS.includes("changes"), "Should have changes field");
+    assert.ok(TASK_PAYLOAD_FIELDS.includes("delegateArgv"), "Should have delegateArgv field");
+    assert.ok(TASK_PAYLOAD_FIELDS.includes("finalizeStrategy"), "Should have finalizeStrategy field");
+    assert.ok(TASK_PAYLOAD_FIELDS.includes("sharedLockKey"), "Should have sharedLockKey field");
+    assert.ok(TASK_RESULT_FIELDS.includes("workspacePath"), "Should have workspacePath field");
+    assert.ok(TASK_RESULT_FIELDS.includes("workspaceRepoRoot"), "Should have workspaceRepoRoot field");
+    assert.ok(TASK_RESULT_FIELDS.includes("workspaceBaseRef"), "Should have workspaceBaseRef field");
+    assert.ok(TASK_RESULT_FIELDS.includes("workspaceSharedLockKey"), "Should have workspaceSharedLockKey field");
+  });
+
+  await t.test("parseTaskPayload accepts defer finalize and shared lock key", () => {
+    const parsed = parseTaskPayload({
+      id: "defer-1",
+      prompt: "p",
+      mode: "agent-write",
+      timestamp: new Date().toISOString(),
+      schemaVersion: TASK_PAYLOAD_SCHEMA_VERSION,
+      finalizeStrategy: "defer",
+      sharedLockKey: "trace-123",
+    });
+    assert.equal(parsed.finalizeStrategy, "defer");
+    assert.equal(parsed.sharedLockKey, "trace-123");
   });
 
   await t.test("parseTaskPayload accepts optional multi-agent fields and current schemaVersion", () => {
@@ -107,6 +128,19 @@ test("IPC Protocol - Wave 5 / Phase D: TaskPayload alignment", async (t) => {
     assert.equal(pyResult.id, "legacy-5");
   });
 
+  await t.test("Python rejects TaskPayload with invalid mode string", () => {
+    const bad = {
+      id: "bad-mode",
+      prompt: "p",
+      mode: "agent-readonly",
+      timestamp: new Date().toISOString(),
+      schemaVersion: TASK_PAYLOAD_SCHEMA_VERSION,
+    };
+    const pyResult = verifyPythonParsing("TaskPayload", bad);
+    assert.equal(pyResult.status, "error");
+    assert.match(pyResult.message, /mode must be one of/i);
+  });
+
   await t.test("Python rejects TaskPayload with unsupported future schemaVersion", () => {
     const bad = {
       id: "future",
@@ -129,5 +163,25 @@ test("IPC Protocol - Wave 5 / Phase D: TaskPayload alignment", async (t) => {
     const parsed = parseTaskResult(result);
     assert.equal(parsed.id, "res-1");
     assert.equal(parsed.status, "success");
+  });
+
+  await t.test("parseTaskResult accepts workspace metadata", () => {
+    const result = parseTaskResult({
+      id: "agent-res-1",
+      status: "success",
+      usage: { promptTokens: 1, completionTokens: 2 },
+      schemaVersion: 5,
+      summary: "done",
+      workspacePath: "/tmp/ws-1",
+      workspaceRepoRoot: "/tmp/repo",
+      workspaceBaseRef: "abc123",
+      workspaceSharedLockKey: "trace-123",
+      filesModified: ["a.ts"],
+    });
+    assert.equal(result.workspacePath, "/tmp/ws-1");
+    assert.equal(result.workspaceRepoRoot, "/tmp/repo");
+    assert.equal(result.workspaceBaseRef, "abc123");
+    assert.equal(result.workspaceSharedLockKey, "trace-123");
+    assert.deepEqual(result.filesModified, ["a.ts"]);
   });
 });

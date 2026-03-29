@@ -3,6 +3,14 @@
 Centralized workspace manager for llm-pipeline.
 Orchestrates isolated git worktrees, collects patches, applies changes natively,
 and manages OS-level directory locks for concurrent safety across TS pipelines and Python Watcher agents.
+
+Lock contract (issue 6.12)
+--------------------------
+- Default (shared_lock_key omitted / None): **exclusive** lock per repo. Each acquirer gets a unique
+  effective key so two ordinary pipeline sessions never share the same lock directory entry.
+- Opt-in sharing: pass the **same** non-empty `shared_lock_key` (e.g. trace/session id for races)
+  so multiple processes may hold the lock concurrently when keys match.
+- TS callers: `SessionWorkspace.create({ sharedLockKey: "..." })` only when intentional; omit for isolation.
 """
 
 import argparse
@@ -23,6 +31,39 @@ def random_id():
 
 def normalize_path(path):
     return os.path.realpath(os.path.abspath(path))
+
+
+def pipeline_home_dir():
+    return normalize_path(
+        os.environ.get(
+            "LLM_PIPELINE_HOME", os.path.join(os.path.expanduser("~"), ".llm-pipeline")
+        )
+    )
+
+
+def managed_workspaces_dir():
+    return normalize_path(os.path.join(pipeline_home_dir(), "workspaces"))
+
+
+def is_subpath(path, root):
+    path = normalize_path(path)
+    root = normalize_path(root)
+    return path == root or path.startswith(root + os.sep)
+
+
+def is_registered_worktree(repo_root, worktree_path):
+    try:
+        output = git(["worktree", "list", "--porcelain"], repo_root)
+    except Exception:
+        return False
+    target = normalize_path(worktree_path)
+    for line in output.splitlines():
+        if not line.startswith("worktree "):
+            continue
+        candidate = normalize_path(line[len("worktree "):])
+        if candidate == target:
+            return True
+    return False
 
 def git(cmd_args, cwd, timeout=120):
     result = subprocess.run(
@@ -50,10 +91,7 @@ class RepoLock:
         # P0 Fix: Do NOT default to "default". Keep it as None to represent exclusive mode.
         self.shared_lock_key = shared_lock_key
         
-        pipeline_home = os.environ.get(
-            "LLM_PIPELINE_HOME", os.path.join(os.path.expanduser("~"), ".llm-pipeline")
-        )
-        self.locks_dir = os.path.join(pipeline_home, "locks")
+        self.locks_dir = os.path.join(pipeline_home_dir(), "locks")
         os.makedirs(self.locks_dir, exist_ok=True)
         
         repo_id = hashlib.sha256(self.repo_root.encode("utf-8")).hexdigest()[:16]
@@ -64,17 +102,23 @@ class RepoLock:
         attempt = 0
         base_sleep = 0.1
         max_sleep = 2.0
-        # If no shared key provided, we are in exclusive mode. 
-        # We use a unique marker to prevent accidental "None == None" sharing.
-        effective_key = self.shared_lock_key if self.shared_lock_key else f"exclusive_{pid}_{random_id()}"
+        # Exclusive mode: single sentinel in `owner` so all holders agree this repo is taken.
+        # (Random per-pid strings are only for debugging; mutual exclusion is ref_pid + this sentinel.)
+        effective_key = (
+            self.shared_lock_key
+            if self.shared_lock_key
+            else "__exclusive__"
+        )
 
         while True:
             try:
                 os.mkdir(self.lock_dir)
-                with open(os.path.join(self.lock_dir, "owner"), "w") as f:
-                    f.write(effective_key)
+                # Write ref_* before owner so _clean_stale_lock never sees an "empty" lockdir
+                # while another process is between mkdir and first ref (TOCTOU steal).
                 with open(os.path.join(self.lock_dir, f"ref_{pid}"), "w") as f:
                     f.write(str(pid))
+                with open(os.path.join(self.lock_dir, "owner"), "w") as f:
+                    f.write(effective_key)
                 return True
             except OSError as e:
                 if e.errno == errno.EEXIST:
@@ -84,7 +128,6 @@ class RepoLock:
                     except OSError:
                         owner = None
 
-                    # Only allow sharing if key matches AND it's not our auto-generated exclusive key
                     if self.shared_lock_key and owner == self.shared_lock_key:
                         with open(os.path.join(self.lock_dir, f"ref_{pid}"), "w") as f:
                             f.write(str(pid))
@@ -112,9 +155,35 @@ class RepoLock:
             
         self._clean_stale_lock()
 
+    def is_held_by(self, pid):
+        ref_file = os.path.join(self.lock_dir, f"ref_{pid}")
+        if not os.path.exists(ref_file):
+            return False
+        try:
+            with open(os.path.join(self.lock_dir, "owner"), "r") as f:
+                owner = f.read().strip()
+        except OSError:
+            return False
+        effective_key = self.shared_lock_key if self.shared_lock_key else "__exclusive__"
+        return owner == effective_key
+
     def _clean_stale_lock(self):
         try:
+            owner_path = os.path.join(self.lock_dir, "owner")
             ref_files = [f for f in os.listdir(self.lock_dir) if f.startswith("ref_")]
+
+            # No refs yet: either in-flight acquire (mkdir → ref → owner) or orphan mkdir.
+            if not ref_files:
+                if not os.path.isfile(owner_path):
+                    try:
+                        st = os.stat(self.lock_dir)
+                        if time.time() - st.st_mtime < 3.0:
+                            return False
+                    except OSError:
+                        return False
+                shutil.rmtree(self.lock_dir, ignore_errors=True)
+                return True
+
             alive = 0
             for f in ref_files:
                 pid_str = f[4:]
@@ -122,19 +191,30 @@ class RepoLock:
                     p = int(pid_str)
                     os.kill(p, 0)
                     alive += 1
-                except (OSError, ValueError):
+                except ValueError:
                     try:
                         os.remove(os.path.join(self.lock_dir, f))
                     except OSError:
                         pass
+                except ProcessLookupError:
+                    try:
+                        os.remove(os.path.join(self.lock_dir, f))
+                    except OSError:
+                        pass
+                except OSError as e:
+                    # Only treat as dead when the PID does not exist. EPERM / other errors
+                    # mean we cannot probe cross-process; assume the holder is still live
+                    # (otherwise we rmtree a valid lock and a second client gets LOCKED).
+                    if e.errno == errno.ESRCH:
+                        try:
+                            os.remove(os.path.join(self.lock_dir, f))
+                        except OSError:
+                            pass
+                    else:
+                        alive += 1
 
             if alive == 0:
                 shutil.rmtree(self.lock_dir, ignore_errors=True)
-                # Use mkdir as atomic mutual exclusion — only one process wins
-                try:
-                    os.mkdir(self.lock_dir)
-                except OSError:
-                    pass
                 return True
         except OSError:
             pass
@@ -167,10 +247,7 @@ def do_create(args):
         if not base_ref:
             base_ref = git(["rev-parse", "HEAD"], repo_root)
 
-        pipeline_home = os.environ.get(
-            "LLM_PIPELINE_HOME", os.path.join(os.path.expanduser("~"), ".llm-pipeline")
-        )
-        workspaces_dir = os.path.join(pipeline_home, "workspaces")
+        workspaces_dir = managed_workspaces_dir()
         os.makedirs(workspaces_dir, exist_ok=True)
         worktree_path = normalize_path(os.path.join(workspaces_dir, f"session-{session_id}"))
 
@@ -195,11 +272,16 @@ def do_create(args):
     sys.stdout.write(json.dumps({"worktreePath": worktree_path, "baseRef": base_ref}))
 
 def _validate_worktree_path(worktree_path, repo_root):
-    """Ensure worktree_path is contained within the repo root to prevent path traversal."""
-    real_worktree = os.path.realpath(worktree_path)
-    real_repo = os.path.realpath(repo_root)
-    if not real_worktree.startswith(real_repo + os.sep) and real_worktree != real_repo:
-        raise ValueError(f"Worktree path {worktree_path} is outside repo root {repo_root}")
+    """Allow repo-local worktrees, registered git worktrees, and managed external workspaces."""
+    real_worktree = normalize_path(worktree_path)
+    allowed_roots = [normalize_path(repo_root), managed_workspaces_dir()]
+    if any(is_subpath(real_worktree, root) for root in allowed_roots):
+        return
+    if is_registered_worktree(repo_root, real_worktree):
+        return
+    raise ValueError(
+        f"Worktree path {worktree_path} is outside allowed roots and is not a registered worktree"
+    )
 
 def do_collect(args):
     worktree_path = args.worktree
@@ -228,8 +310,11 @@ def do_collect(args):
 def do_apply(args):
     repo_root = args.repo
     lock = RepoLock(repo_root, args.shared_lock_key)
+    acquired_here = False
     try:
-        lock.acquire(args.owner_pid, timeout=30)
+        if not lock.is_held_by(args.owner_pid):
+            lock.acquire(args.owner_pid, timeout=30)
+            acquired_here = True
     except Exception as e:
         sys.stdout.write(json.dumps({"error": str(e)}))
         sys.exit(1)
@@ -253,7 +338,8 @@ def do_apply(args):
         sys.stdout.write(json.dumps({"error": str(e)}))
         sys.exit(1)
     finally:
-        lock.release(args.owner_pid)
+        if acquired_here:
+            lock.release(args.owner_pid)
 
 def do_destroy(args):
     repo_root = args.repo

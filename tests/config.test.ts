@@ -39,7 +39,7 @@ test("validateConfig rejects non-array step config", () => {
 
   assert.throws(
     () => validateConfig(config),
-    /must be an array/
+    /tuple DSL|JSON arrays/i
   );
 });
 

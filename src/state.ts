@@ -5,6 +5,9 @@ import { join } from "node:path";
 import { getSessionsDir } from "./paths.js";
 import { StepTrace } from "./trace.js";
 import type { Candidate } from "./candidate.js";
+import type { PipelineConfig } from "./config.js";
+import { calculateConfigHash } from "./config.js";
+import { logger } from "./logger.js";
 
 export const CHECKPOINT_SCHEMA_VERSION = 3;
 
@@ -99,7 +102,7 @@ export interface PipelineState {
   approved: boolean;
   stepResults: Record<string, StepResult>;
   stepTraces: StepTrace[];
-  dynamicPipeline?: Record<string, any[]>;
+  dynamicPipeline?: PipelineConfig["pipeline"];
   traceId: string;
   globalKnowledge: Record<string, string>;
   timestamp: string;
@@ -148,19 +151,39 @@ function assertCheckpointSchemaVersion(state: Partial<PipelineState>): number {
 }
 
 function parseCheckpoint(raw: string): PipelineState {
-  const parsed = JSON.parse(raw) as Partial<PipelineState>;
+  const parsed: unknown = JSON.parse(raw);
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
     throw new Error("Checkpoint payload must be an object");
   }
+  const obj = parsed as Record<string, unknown>;
+  assertCheckpointSchemaVersion(obj as Partial<PipelineState>);
+
+  // Validate critical fields
+  if (typeof obj.sessionId !== "string") throw new Error("Checkpoint missing sessionId");
+  if (typeof obj.prompt !== "string") throw new Error("Checkpoint missing prompt");
+  if (typeof obj.round !== "number") throw new Error("Checkpoint missing round");
+  if (typeof obj.status !== "string") throw new Error("Checkpoint missing status");
+
+  // Validate dynamicPipeline shape if present
+  if (obj.dynamicPipeline !== undefined) {
+    if (typeof obj.dynamicPipeline !== "object" || obj.dynamicPipeline === null || Array.isArray(obj.dynamicPipeline)) {
+      throw new Error("Checkpoint dynamicPipeline must be a Record<string, [...]>");
+    }
+    for (const [step, val] of Object.entries(obj.dynamicPipeline as Record<string, unknown>)) {
+      if (!Array.isArray(val)) {
+        throw new Error(`Checkpoint dynamicPipeline["${step}"] must be an array`);
+      }
+    }
+  }
+
   return {
-    ...(parsed as PipelineState),
-    schemaVersion: assertCheckpointSchemaVersion(parsed),
+    ...(obj as unknown as PipelineState),
+    schemaVersion: assertCheckpointSchemaVersion(obj as Partial<PipelineState>),
   };
 }
 
-export function createConfigHash(config: unknown): string {
-  return hashValue(config);
-}
+/** @deprecated Use {@link calculateConfigHash} from config.ts instead. */
+export const createConfigHash = calculateConfigHash;
 
 export function buildResumeMetadata(input: ResumeRequest): ResumeMetadata {
   return {
@@ -219,7 +242,7 @@ export async function saveCheckpoint(sessionId: string, state: PipelineState): P
     await rename(tmpFile, file);
     return true;
   } catch (err) {
-    console.error(`Failed to save checkpoint for session ${sessionId}:`, err);
+    logger.error("state", `Failed to save checkpoint for session ${sessionId}`, { err });
     return false;
   }
 }
@@ -231,7 +254,7 @@ export async function loadCheckpoint(sessionId: string): Promise<PipelineState |
     const raw = await readFile(file, "utf-8");
     return parseCheckpoint(raw);
   } catch (err) {
-    console.error(`Failed to load checkpoint for session ${sessionId}:`, err);
+    logger.error("state", `Failed to load checkpoint for session ${sessionId}`, { err });
     return null;
   }
 }
@@ -241,6 +264,6 @@ export async function deleteCheckpoint(sessionId: string): Promise<void> {
     const file = getCheckpointFile(sessionId);
     if (existsSync(file)) await unlink(file);
   } catch (err) {
-    console.error(`Failed to delete checkpoint for session ${sessionId}:`, err);
+    logger.error("state", `Failed to delete checkpoint for session ${sessionId}`, { err });
   }
 }

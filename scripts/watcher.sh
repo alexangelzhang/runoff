@@ -2,6 +2,9 @@
 # Usage: ./watcher.sh <provider-name>
 # Example: ./watcher.sh codex
 #          ./watcher.sh gemini
+#
+# Task files are created by the TS CLIProvider (atomic tmp+rename). Results are written by
+# task_runner.py via atomic JSON write. This script only claims tasks and spawns the runner.
 
 set -uo pipefail
 
@@ -35,6 +38,10 @@ while true; do
     fi
 
     RESULT_FILE="${TASK_FILE%.task.json}.result.json"
+    if [ -f "$RESULT_FILE" ]; then
+      continue
+    fi
+
     CLAIM_FILE="${TASK_FILE}.claimed"
     if ! ( set -o noclobber; : > "$CLAIM_FILE" ) 2>/dev/null; then
       continue

@@ -13,24 +13,29 @@ import {
 
 // --- Token Budget Defaults ---
 
+/**
+ * Model context window sizes (tokens).
+ * IMPORTANT: Keep in sync with PRICING_TABLE in pricing.ts — both tables must cover the same model keys.
+ */
 const MODEL_CONTEXT_WINDOWS: Record<string, number> = {
+  // OpenAI
   "gpt-4o": 128_000,
   "gpt-4o-mini": 128_000,
-  "gpt-4-turbo": 128_000,
-  "gpt-4": 8_192,
-  "gpt-3.5-turbo": 16_384,
   "o1": 200_000,
   "o1-mini": 128_000,
   "o3-mini": 200_000,
-  "claude-3-opus": 200_000,
+  // Anthropic
   "claude-3.5-sonnet": 200_000,
+  "claude-3-opus": 200_000,
   "claude-4-sonnet": 200_000,
+  // Google
   "gemini-2.0-flash": 1_000_000,
   "gemini-2.5-pro": 1_000_000,
+  // Fallback
   "default": 128_000,
 };
 
-export function getModelContextWindow(model: string): number {
+function getModelContextWindow(model: string): number {
   const normalized = model.toLowerCase();
   for (const [key, value] of Object.entries(MODEL_CONTEXT_WINDOWS)) {
     if (normalized.includes(key)) return value;
@@ -45,7 +50,7 @@ function estimateTokens(text: string): number {
 
 // --- Incremental Context Engine (Optimization: Wave 4-1) ---
 
-export function getLineDiff(oldContent: string, newContent: string): string {
+function getLineDiff(oldContent: string, newContent: string): string {
   if (!oldContent) return newContent;
   if (oldContent === newContent) return "(No changes detected)";
 
@@ -228,15 +233,3 @@ export function buildGeneratePrompt(input: GeneratePromptInput): StructuredPromp
   return { system, staticContext, dynamicContext };
 }
 
-export function renderPromptTemplate(prompt: StructuredPrompt): string {
-  return renderPrompt(prompt);
-}
-
-export function getPromptStats(prompt: StructuredPrompt) {
-  const systemTokens = estimateTokens(prompt.system);
-  const staticTokens = estimateTokens(prompt.staticContext);
-  const dynamicTokens = estimateTokens(prompt.dynamicContext);
-  const totalTokens = systemTokens + staticTokens + dynamicTokens;
-  const cacheableRatio = totalTokens > 0 ? (systemTokens + staticTokens) / totalTokens : 0;
-  return { systemTokens, staticTokens, dynamicTokens, totalTokens, cacheableRatio };
-}

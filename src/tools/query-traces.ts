@@ -4,7 +4,18 @@
 
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { queryTraces, aggregateTraceStats } from "../trace.js";
+import type { PipelineStatus } from "../state.js";
+import { queryTraces, aggregateTraceStats, type TraceQuery } from "../trace.js";
+
+const TRACE_STATUS_FILTER = [
+  "approved",
+  "failed",
+  "max_rounds",
+  "running",
+  "queued",
+  "aborted",
+  "awaiting_judge",
+] as const satisfies readonly PipelineStatus[];
 
 export function register(server: McpServer) {
   server.tool(
@@ -12,7 +23,7 @@ export function register(server: McpServer) {
     "Query pipeline execution traces for analysis. Returns trace history and aggregate statistics " +
     "(approval rate, avg duration, provider performance). Useful for data-driven routing decisions.",
     {
-      status: z.enum(["approved", "failed", "max_rounds", "running", "queued", "aborted", "awaiting_judge"]).optional()
+      status: z.enum(TRACE_STATUS_FILTER).optional()
         .describe("Filter by final pipeline status"),
       mode: z.enum(["pipeline", "race"]).optional().describe("Filter by execution mode"),
       since: z.string().optional().describe("ISO date string — only traces after this timestamp"),
@@ -22,7 +33,7 @@ export function register(server: McpServer) {
     },
     async ({ status, mode, since, until, limit, aggregate }) => {
       try {
-        const query = { status: status as any, mode, since, until, limit };
+        const query: TraceQuery = { status, mode, since, until, limit };
         const traces = queryTraces(query);
         const includeAggregate = aggregate !== false;
         const stats = includeAggregate ? aggregateTraceStats(query) : undefined;
@@ -48,9 +59,10 @@ export function register(server: McpServer) {
             }, null, 2),
           }],
         };
-      } catch (err: any) {
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
         return {
-          content: [{ type: "text" as const, text: `Trace query error: ${err.message}` }],
+          content: [{ type: "text" as const, text: `Trace query error: ${message}` }],
           isError: true,
         };
       }

@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { join, resolve } from "node:path";
 import test from "node:test";
+import { SessionWorkspace } from "../src/workspace.ts";
 
 const ROOT_DIR = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const WATCHER_PATH = join(ROOT_DIR, "scripts", "watcher.sh");
@@ -143,20 +144,18 @@ test("watcher smoke: text task completes end-to-end", async () => {
     const { resultFile } = enqueueTask(realHomeDir, "fake", {
       id: "textsmoke",
       provider: "fake",
-      command: providerScript,
-      args: [],
+      delegateArgv: [providerScript],
       prompt: "hello watcher",
       mode: "text",
-      schemaVersion: 1,
+      schemaVersion: 6,
       timestamp: new Date().toISOString(),
     });
 
     const result = await waitForJsonFile(resultFile);
-    assert.equal(result.status, "done");
-    assert.equal(result.schemaVersion, 1);
-    assert.equal(result.schemaVersion, 1);
-    assert.match(result.output, /text provider cwd=/);
-    assert.match(result.output, /hello watcher/);
+    assert.equal(result.status, "success");
+    assert.equal(result.schemaVersion, 5);
+    assert.match(result.content, /text provider cwd=/);
+    assert.match(result.content, /hello watcher/);
     console.log("WATCHER OUTPUT:", watcher.output()); assert.equal((watcher.output().match(/Started task/g) ?? []).length, 1);
   } finally {
     await stopWatcher(watcher.child);
@@ -185,18 +184,17 @@ test("watcher smoke: agent-write runs in isolated worktree and reapplies patch t
     const { resultFile, logFile } = enqueueTask(realHomeDir, "fakeagent", {
       id: "agentsmoke",
       provider: "fakeagent",
-      command: providerScript,
-      args: [],
+      delegateArgv: [providerScript],
       prompt: "ship it",
       mode: "agent-write",
-      schemaVersion: 1,
+      schemaVersion: 6,
       workDir: repoDir,
       timestamp: new Date().toISOString(),
     });
 
     // Wait for the agent to start executing (log shows cwd)
     await waitForCondition(
-      () => existsSync(logFile) && readFileSync(logFile, "utf-8").includes("agent cwd="),
+      () => existsSync(logFile) && readFileSync(logFile, "utf-8").includes("Isolated worktree:"),
       10_000,
       "Timed out waiting for watcher log output",
     );
@@ -208,9 +206,10 @@ test("watcher smoke: agent-write runs in isolated worktree and reapplies patch t
     const result = await waitForJsonFile(resultFile, 15_000);
     const logContent = readFileSync(logFile, "utf-8");
 
-    assert.equal(result.status, "done");
-    assert.match(result.output, /agent cwd=/);
-    assert.match(result.output, /ship it/);
+    assert.equal(result.status, "success");
+    assert.equal(result.schemaVersion, 5);
+    assert.match(result.summary, /agent cwd=/);
+    assert.match(result.summary, /ship it/);
     assert.match(result.changes, /updated by agent/);
     assert.match(logContent, /Isolated worktree:/);
     console.log("WATCHER OUTPUT:", watcher.output()); assert.equal((watcher.output().match(/Started task/g) ?? []).length, 1);
@@ -225,7 +224,7 @@ test("watcher smoke: agent-write runs in isolated worktree and reapplies patch t
     assert.ok(worktreeMatch, "Log must contain worktree path");
     const worktreePath = worktreeMatch![1];
 
-    const cwdMatch = result.output.match(/agent cwd=([^\s\x1b]+)/);
+    const cwdMatch = result.summary.match(/agent cwd=([^\s\x1b]+)/);
     assert.ok(cwdMatch, "Output must contain agent cwd");
     const agentCwd = cwdMatch![1];
 
@@ -240,6 +239,73 @@ test("watcher smoke: agent-write runs in isolated worktree and reapplies patch t
     );
   } finally {
     await stopWatcher(watcher.child);
+    rmSync(sandboxDir, { recursive: true, force: true });
+  }
+});
+
+test("watcher smoke: agent-write defer keeps source repo clean and returns workspace metadata", async () => {
+  const previousHome = process.env.LLM_PIPELINE_HOME;
+  const sandboxDir = mkdtempSync(join(tmpdir(), "llm-watcher-defer-"));
+  const homeDir = join(sandboxDir, "home");
+  mkdirSync(homeDir, { recursive: true });
+  const realHomeDir = realpathSync(homeDir);
+  process.env.LLM_PIPELINE_HOME = realHomeDir;
+
+  const repoDir = realpathSync(createGitRepo(sandboxDir));
+  const notePath = join(repoDir, "note.txt");
+
+  const providerScript = createExecutableScript(
+    sandboxDir,
+    "fake-agent-defer-provider.sh",
+    "#!/bin/sh\nprintf 'defer change\\n' >> note.txt\nprintf 'kept in workspace\\n' > deferred.txt\nprintf 'defer cwd=%s\\n' \"$PWD\"\n"
+  );
+
+  const watcher = startWatcher("fakedefer", realHomeDir);
+  try {
+    const { resultFile } = enqueueTask(realHomeDir, "fakedefer", {
+      id: "defer-smoke",
+      provider: "fakedefer",
+      delegateArgv: [providerScript],
+      prompt: "hold changes for judge",
+      mode: "agent-write",
+      finalizeStrategy: "defer",
+      sharedLockKey: "trace-defer",
+      sessionId: "trace-defer",
+      schemaVersion: 6,
+      workDir: repoDir,
+      timestamp: new Date().toISOString(),
+    });
+
+    const result = await waitForJsonFile(resultFile, 15_000);
+
+    assert.equal(result.status, "success");
+    assert.equal(result.schemaVersion, 5);
+    assert.equal(typeof result.workspacePath, "string");
+    assert.equal(result.workspaceRepoRoot, repoDir);
+    assert.equal(typeof result.workspaceBaseRef, "string");
+    assert.equal(result.workspaceSharedLockKey, "trace-defer");
+    assert.match(result.summary, /defer cwd=/);
+    assert.deepEqual(new Set(result.filesModified), new Set(["deferred.txt", "note.txt"]));
+    assert.equal(readFileSync(notePath, "utf-8"), "base\n");
+    assert.equal(existsSync(join(repoDir, "deferred.txt")), false);
+    assert.ok(existsSync(result.workspacePath), "deferred workspace should remain on disk");
+
+    const resumed = await SessionWorkspace.resume(
+      result.workspacePath,
+      result.workspaceRepoRoot,
+      result.workspaceBaseRef,
+      "watcher-defer-test",
+      result.workspaceSharedLockKey,
+    );
+    const patch = await resumed.collectPatch();
+    assert.deepEqual(new Set(patch.filesModified), new Set(["deferred.txt", "note.txt"]));
+    await resumed.destroy();
+    assert.equal(existsSync(result.workspacePath), false);
+    assert.equal(readFileSync(notePath, "utf-8"), "base\n");
+  } finally {
+    await stopWatcher(watcher.child);
+    if (previousHome === undefined) delete process.env.LLM_PIPELINE_HOME;
+    else process.env.LLM_PIPELINE_HOME = previousHome;
     rmSync(sandboxDir, { recursive: true, force: true });
   }
 });

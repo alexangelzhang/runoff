@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { PROVIDER_MODES } from "./providers/types.js";
 
 /**
  * IPC Protocol Version.
@@ -14,12 +15,14 @@ export const TASK_PAYLOAD_FIELDS = [
   "sessionId", "stepName", "round", "schemaVersion",
   "knowledgeBase",
   "agentId", "parentHandoffId",
+  "delegateArgv", "finalizeStrategy", "sharedLockKey",
 ];
 
 export const TASK_RESULT_FIELDS = [
   "id", "status", "content", "usage", "error",
   "model", "summary", "changes", "filesModified",
-  "diffStat", "schemaVersion", "insights", "nextSteps"
+  "diffStat", "workspacePath", "workspaceRepoRoot", "workspaceBaseRef",
+  "workspaceSharedLockKey", "schemaVersion", "insights", "nextSteps"
 ];
 
 // --- Zod schemas for runtime validation ---
@@ -27,7 +30,7 @@ export const TASK_RESULT_FIELDS = [
 export const taskPayloadSchema = z.object({
   id: z.string(),
   prompt: z.string(),
-  mode: z.enum(["text", "agent-read", "agent-write"]),
+  mode: z.enum(PROVIDER_MODES),
   timestamp: z.string(),
   system: z.string().optional(),
   staticContext: z.string().optional(),
@@ -42,6 +45,13 @@ export const taskPayloadSchema = z.object({
   agentId: z.string().optional(),
   /** Optional link to a prior handoff or parent task in a multi-agent chain */
   parentHandoffId: z.string().optional(),
+  /**
+   * When set, scripts/task_runner.py runs this argv with cwd=workDir, stdin=composed prompt,
+   * stdout → result content (then agent modes collect git diff). Omitted → in-process stub (tests/CI).
+   */
+  delegateArgv: z.array(z.string()).min(1).optional(),
+  finalizeStrategy: z.enum(["auto", "defer"]).optional(),
+  sharedLockKey: z.string().optional(),
 });
 
 export const taskResultSchema = z.object({
@@ -58,6 +68,10 @@ export const taskResultSchema = z.object({
   changes: z.string().optional(),
   filesModified: z.array(z.string()).optional().default([]),
   diffStat: z.string().optional(),
+  workspacePath: z.string().optional(),
+  workspaceRepoRoot: z.string().optional(),
+  workspaceBaseRef: z.string().optional(),
+  workspaceSharedLockKey: z.string().optional(),
   schemaVersion: z.number().int().positive(),
   insights: z.record(z.string()).optional(),
   nextSteps: z.array(z.object({
@@ -79,7 +93,7 @@ export function createTaskPayload(input: Omit<TaskPayload, "schemaVersion">): Ta
   };
 }
 
-export function parseTaskPayload(data: any): TaskPayload {
+export function parseTaskPayload(data: unknown): TaskPayload {
   const result = taskPayloadSchema.safeParse(data);
   if (!result.success) {
     throw new Error(`Invalid TaskPayload schema: ${result.error.message}`);
@@ -102,7 +116,7 @@ export function createTaskResult(input: Partial<TaskResult> & { id: string; stat
   };
 }
 
-export function parseTaskResult(data: any): TaskResult {
+export function parseTaskResult(data: unknown): TaskResult {
   const result = taskResultSchema.safeParse(data);
   if (!result.success) {
     throw new Error(`Invalid TaskResult schema: ${result.error.message}`);

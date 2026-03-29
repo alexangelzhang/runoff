@@ -42,6 +42,7 @@ src/paths.ts           — Home/tasks/traces directory resolution
 scripts/task_runner.py — Python task execution (subprocess, worktree, patch, lock)
 scripts/workspace_manager.py — Centralized workspace backend (worktree, lock, patch apply)
 scripts/watcher.sh     — Watcher process for polling task files
+scripts/check-ipc-sync.ts — CI helper: TS/Python IPC constants must match
 ```
 
 ## Architecture
@@ -50,6 +51,8 @@ scripts/watcher.sh     — Watcher process for polling task files
 - Python: subprocess execution, timeout management, diff collection, workspace management (worktree + locking)
 - IPC: file-based JSON (`*.task.json` → `*.result.json`), schema in `src/ipc.ts`
 - Shared schema enforced by `tests/ipc-schema.test.ts` — adding IPC fields requires updating both sides
+- **`npm run check-ipc-sync`** — compares `src/ipc.ts` with `scripts/task_runner.py` (schema versions + field manifests); run after IPC changes
+- **`typescript` in `dependencies`** (not only devDependencies) because `src/ast_utils.ts` imports the compiler API (`import ts from "typescript"`) for `isSyntaxValid` at runtime in the MCP server
 - Workspace isolation: Python `workspace_manager.py` owns all physical git worktree ops and cross-process locking
 
 ## Testing
