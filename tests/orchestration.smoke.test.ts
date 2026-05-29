@@ -171,7 +171,7 @@ test("session workspace agent-write keeps source repo untouched until finalize a
     const logContent = readFileSync(logFile, "utf-8");
 
     assert.equal(result.status, "success");
-    assert.equal(result.schemaVersion, 5);
+    assert.equal(result.schemaVersion, 6);
     assert.match(result.summary, /session cwd=/);
     assert.match(result.summary, /make the session workspace change/);
     assert.match(logContent, /Session workspace \(reusing\):/);
@@ -296,6 +296,7 @@ test("runPipelineMode agent race waits for judge and finalizes the chosen worksp
     assert.equal(existsSync(join(repoDir, "src", "winner.txt")), false);
     assert.equal(existsSync(join(repoDir, "src", "loser.txt")), false);
 
+    raceSessions.clear();
     const applied = await applyRaceSession(result.traceId, 0);
     assert.equal(applied.status, "applied");
     assert.equal(applied.appliedVia, "workspace");
@@ -306,6 +307,10 @@ test("runPipelineMode agent race waits for judge and finalizes the chosen worksp
     assert.equal(readFileSync(join(repoDir, "src", "module.txt"), "utf-8"), "base module\nwinner line\n");
     assert.equal(readFileSync(join(repoDir, "src", "winner.txt"), "utf-8"), "winner artifact\n");
     assert.equal(existsSync(join(repoDir, "src", "loser.txt")), false);
+    const checkpointAfterApply = await loadCheckpoint(result.checkpointFile);
+    assert.equal(checkpointAfterApply?.status, "approved");
+    assert.equal(checkpointAfterApply?.pendingRaceTraceId, undefined);
+    assert.equal(checkpointAfterApply?.raceCandidates, undefined);
     for (const workspacePath of workspacePaths) {
       assert.equal(existsSync(workspacePath), false, `candidate workspace should be cleaned after finalization: ${workspacePath}`);
     }
@@ -314,6 +319,224 @@ test("runPipelineMode agent race waits for judge and finalizes the chosen worksp
     if (traceId && raceSessions.has(traceId)) {
       await abortRaceSession(traceId, "test cleanup");
     }
+    activeWorkspaces.clear();
+    clearConfigCache();
+    process.chdir(previousCwd);
+    if (previousHome === undefined) delete process.env.LLM_PIPELINE_HOME;
+    else process.env.LLM_PIPELINE_HOME = previousHome;
+    rmSync(sandboxDir, { recursive: true, force: true });
+  }
+});
+
+
+test("mixed standalone agent-write plus race stays isolated until winner apply", async () => {
+  const previousHome = process.env.LLM_PIPELINE_HOME;
+  const previousCwd = process.cwd();
+  const sandboxDir = mkdtempSync(join(tmpdir(), "llm-orch-mixed-race-"));
+  const homeDir = join(sandboxDir, "home");
+  const configDir = join(sandboxDir, "config");
+  mkdirSync(homeDir, { recursive: true });
+  mkdirSync(configDir, { recursive: true });
+  process.env.LLM_PIPELINE_HOME = homeDir;
+
+  const repoDir = realpathSync(createGitRepo(sandboxDir, "mixed-race-repo"));
+  const repoSrcDir = join(repoDir, "src");
+  let traceId: string | undefined;
+
+  const draftScript = createExecutableScript(
+    sandboxDir,
+    "mixed-draft.sh",
+    [
+      "#!/bin/sh",
+      "printf 'draft line\n' >> module.txt",
+      "printf 'draft artifact\n' > draft.txt",
+      "",
+    ].join("\n")
+  );
+  const winnerScript = createExecutableScript(
+    sandboxDir,
+    "mixed-winner.sh",
+    [
+      "#!/bin/sh",
+      "printf 'winner line\n' >> module.txt",
+      "printf 'winner artifact\n' > winner.txt",
+      "",
+    ].join("\n")
+  );
+  const loserScript = createExecutableScript(
+    sandboxDir,
+    "mixed-loser.sh",
+    [
+      "#!/bin/sh",
+      "printf 'loser line\n' >> module.txt",
+      "printf 'loser artifact\n' > loser.txt",
+      "",
+    ].join("\n")
+  );
+
+  writeFileSync(
+    join(configDir, "pipeline.config.json"),
+    JSON.stringify(
+      {
+        providers: {
+          draft: { type: "cli", command: draftScript, mode: "agent-write" },
+          winner: { type: "cli", command: winnerScript, mode: "agent-write" },
+          loser: { type: "cli", command: loserScript, mode: "agent-write" },
+          judge: { type: "mock" },
+        },
+        pipeline: {
+          draft: ["draft"],
+          implement: [["winner", "loser"], "draft"],
+          review: ["judge", "implement"],
+        },
+        retry: {
+          maxRounds: 1,
+          reviewStep: "review",
+        },
+        routing: [],
+      },
+      null,
+      2,
+    ),
+    "utf-8",
+  );
+
+  clearConfigCache();
+  process.chdir(configDir);
+
+  try {
+    const result = await runPipelineMode({
+      prompt: "Implement the requested change in the project",
+      workDir: repoSrcDir,
+      maxRounds: 1,
+    });
+    traceId = result.traceId;
+
+    assert.equal(result.status, "awaiting_judge");
+    assert.equal(readFileSync(join(repoDir, "src", "module.txt"), "utf-8"), "base module\n");
+    assert.equal(existsSync(join(repoDir, "src", "draft.txt")), false);
+    assert.equal(existsSync(join(repoDir, "src", "winner.txt")), false);
+    assert.equal(existsSync(join(repoDir, "src", "loser.txt")), false);
+
+    const checkpoint = await loadCheckpoint(result.checkpointFile);
+    assert.ok(checkpoint?.workspacePath, "mixed pipeline should keep a global session workspace for standalone steps");
+    assert.equal(checkpoint?.status, "awaiting_judge");
+
+    const raceSession = raceSessions.get(result.traceId);
+    assert.ok(raceSession);
+    assert.equal(raceSession?.candidates.length, 2);
+    for (const candidate of raceSession?.candidates ?? []) {
+      assert.ok(candidate.filesModified?.includes("src/draft.txt"), `candidate ${candidate.providerName} should include draft base changes`);
+      assert.ok(candidate.filesModified?.includes("src/module.txt"), `candidate ${candidate.providerName} should include accumulated module diff`);
+    }
+
+    const applied = await applyRaceSession(result.traceId, 0);
+    assert.equal(applied.status, "applied");
+    assert.equal(readFileSync(join(repoDir, "src", "module.txt"), "utf-8"), "base module\ndraft line\nwinner line\n");
+    assert.equal(readFileSync(join(repoDir, "src", "draft.txt"), "utf-8"), "draft artifact\n");
+    assert.equal(readFileSync(join(repoDir, "src", "winner.txt"), "utf-8"), "winner artifact\n");
+    assert.equal(existsSync(join(repoDir, "src", "loser.txt")), false);
+
+    const checkpointAfterApply = await loadCheckpoint(result.checkpointFile);
+    assert.equal(checkpointAfterApply?.status, "approved");
+    assert.equal(checkpointAfterApply?.workspacePath, undefined);
+    assert.equal(checkpointAfterApply?.pendingRaceTraceId, undefined);
+  } finally {
+    if (traceId && raceSessions.has(traceId)) {
+      await abortRaceSession(traceId, "mixed race cleanup");
+    }
+    activeWorkspaces.clear();
+    clearConfigCache();
+    process.chdir(previousCwd);
+    if (previousHome === undefined) delete process.env.LLM_PIPELINE_HOME;
+    else process.env.LLM_PIPELINE_HOME = previousHome;
+    rmSync(sandboxDir, { recursive: true, force: true });
+  }
+});
+
+test("runPipelineMode surfaces apply failures and preserves workspace for recovery", async () => {
+  const previousHome = process.env.LLM_PIPELINE_HOME;
+  const previousCwd = process.cwd();
+  const sandboxDir = mkdtempSync(join(tmpdir(), "llm-orch-apply-fail-"));
+  const homeDir = join(sandboxDir, "home");
+  const configDir = join(sandboxDir, "config");
+  mkdirSync(homeDir, { recursive: true });
+  mkdirSync(configDir, { recursive: true });
+  process.env.LLM_PIPELINE_HOME = homeDir;
+
+  const repoDir = realpathSync(createGitRepo(sandboxDir, "apply-fail-repo"));
+  const repoSrcDir = join(repoDir, "src");
+  const providerScript = createExecutableScript(
+    sandboxDir,
+    "apply-fail-writer.sh",
+    [
+      "#!/bin/sh",
+      "printf 'session only line\n' >> module.txt",
+      "printf 'apply fail artifact\n' > artifact.txt",
+      "",
+    ].join("\n")
+  );
+
+  writeFileSync(
+    join(configDir, "pipeline.config.json"),
+    JSON.stringify(
+      {
+        providers: {
+          writer: { type: "cli", command: providerScript, mode: "agent-write" },
+          judge: { type: "mock" },
+        },
+        pipeline: {
+          implement: ["writer"],
+          review: ["judge", "implement"],
+        },
+        retry: { maxRounds: 1, reviewStep: "review" },
+        routing: [],
+      },
+      null,
+      2,
+    ),
+    "utf-8",
+  );
+
+  clearConfigCache();
+  process.chdir(configDir);
+
+  const originalApplyToSource = SessionWorkspace.prototype.applyToSource;
+  SessionWorkspace.prototype.applyToSource = async function () {
+    throw new Error("synthetic apply failure");
+  };
+
+  try {
+    await assert.rejects(
+      () =>
+        runPipelineMode({
+          prompt: "Implement the requested change in the project",
+          workDir: repoSrcDir,
+          maxRounds: 1,
+          sessionId: "apply-failure-session",
+        }),
+      /synthetic apply failure/,
+    );
+
+    assert.equal(readFileSync(join(repoDir, "src", "module.txt"), "utf-8"), "base module\n");
+    assert.equal(existsSync(join(repoDir, "src", "artifact.txt")), false);
+
+    const checkpoint = await loadCheckpoint("apply-failure-session");
+    assert.equal(checkpoint?.status, "failed");
+    assert.ok(checkpoint?.workspacePath, "failed finalize should preserve the workspace for recovery");
+    assert.equal(existsSync(checkpoint!.workspacePath!), true);
+
+    if (checkpoint?.workspacePath && checkpoint.workspaceRepoRoot && checkpoint.workspaceBaseRef) {
+      const resumed = await SessionWorkspace.resume(
+        checkpoint.workspacePath,
+        checkpoint.workspaceRepoRoot,
+        checkpoint.workspaceBaseRef,
+        checkpoint.traceId,
+      );
+      await resumed.destroy();
+    }
+  } finally {
+    SessionWorkspace.prototype.applyToSource = originalApplyToSource;
     activeWorkspaces.clear();
     clearConfigCache();
     process.chdir(previousCwd);

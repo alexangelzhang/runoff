@@ -148,7 +148,14 @@ export class SessionWorkspace {
     return ws;
   }
 
-  static async resume(worktreePath: string, repoRoot: string, baseRef: string, sessionId: string, sharedLockKey?: string): Promise<SessionWorkspace> {
+  static async resume(
+    worktreePath: string,
+    repoRoot: string,
+    baseRef: string,
+    sessionId: string,
+    sharedLockKey?: string,
+    options?: { registerActive?: boolean },
+  ): Promise<SessionWorkspace> {
     if (!existsSync(worktreePath)) {
       throw new Error(`Session workspace not found: ${worktreePath}`);
     }
@@ -164,7 +171,9 @@ export class SessionWorkspace {
     if (sharedLockKey) lockArgs["shared-lock-key"] = sharedLockKey;
     await SessionWorkspace.runPython("lock", lockArgs);
 
-    activeWorkspaces.add(ws);
+    if (options?.registerActive !== false) {
+      activeWorkspaces.add(ws);
+    }
     return ws;
   }
 
@@ -246,11 +255,16 @@ export class SessionWorkspace {
 
   async releaseLock(): Promise<void> {
     const args: Record<string, string | number> = {
-        repo: this.repoRoot,
-        "owner-pid": process.pid,
+      repo: this.repoRoot,
+      "owner-pid": process.pid,
     };
     if (this.sharedLockKey) args["shared-lock-key"] = this.sharedLockKey;
-    try { await SessionWorkspace.runPython("release", args); } catch {}
+    try {
+      await SessionWorkspace.runPython("release", args);
+    } catch {
+      // best-effort release
+    }
+    activeWorkspaces.delete(this);
   }
 
   destroySync(): void {

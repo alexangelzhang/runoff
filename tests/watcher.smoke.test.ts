@@ -153,7 +153,7 @@ test("watcher smoke: text task completes end-to-end", async () => {
 
     const result = await waitForJsonFile(resultFile);
     assert.equal(result.status, "success");
-    assert.equal(result.schemaVersion, 5);
+    assert.equal(result.schemaVersion, 6);
     assert.match(result.content, /text provider cwd=/);
     assert.match(result.content, /hello watcher/);
     console.log("WATCHER OUTPUT:", watcher.output()); assert.equal((watcher.output().match(/Started task/g) ?? []).length, 1);
@@ -207,7 +207,7 @@ test("watcher smoke: agent-write runs in isolated worktree and reapplies patch t
     const logContent = readFileSync(logFile, "utf-8");
 
     assert.equal(result.status, "success");
-    assert.equal(result.schemaVersion, 5);
+    assert.equal(result.schemaVersion, 6);
     assert.match(result.summary, /agent cwd=/);
     assert.match(result.summary, /ship it/);
     assert.match(result.changes, /updated by agent/);
@@ -279,7 +279,7 @@ test("watcher smoke: agent-write defer keeps source repo clean and returns works
     const result = await waitForJsonFile(resultFile, 15_000);
 
     assert.equal(result.status, "success");
-    assert.equal(result.schemaVersion, 5);
+    assert.equal(result.schemaVersion, 6);
     assert.equal(typeof result.workspacePath, "string");
     assert.equal(result.workspaceRepoRoot, repoDir);
     assert.equal(typeof result.workspaceBaseRef, "string");

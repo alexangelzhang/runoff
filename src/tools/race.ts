@@ -4,12 +4,19 @@
 
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { execFileSync } from "node:child_process";
+import { existsSync, realpathSync } from "node:fs";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
+import { loadCheckpoint, saveCheckpoint, type PipelineState } from "../state.js";
 import { updateTrace } from "../trace.js";
-import { raceSessions, type RaceCandidateSnapshot } from "../race-registry.js";
+import {
+  deleteRaceSession,
+  getRaceSession,
+  type RaceCandidateSnapshot,
+  type RaceSession,
+} from "../race-registry.js";
 import { SessionWorkspace } from "../workspace.js";
 
 function applyPatchText(applyTargetPath: string, patchText: string): void {
@@ -35,6 +42,17 @@ function hasWorkspaceArtifact(candidate: RaceCandidateSnapshot): boolean {
   return Boolean(candidate.workspacePath && candidate.workspaceRepoRoot && candidate.workspaceBaseRef);
 }
 
+function sameWorkspacePath(a?: string, b?: string): boolean {
+  if (!a || !b) return false;
+  if (a === b) return true;
+  try {
+    if (!existsSync(a) || !existsSync(b)) return false;
+    return realpathSync(a) === realpathSync(b);
+  } catch {
+    return false;
+  }
+}
+
 async function resumeCandidateWorkspace(candidate: RaceCandidateSnapshot): Promise<SessionWorkspace> {
   if (!hasWorkspaceArtifact(candidate)) {
     throw new Error(`Candidate ${candidate.providerName} does not have workspace metadata.`);
@@ -45,7 +63,35 @@ async function resumeCandidateWorkspace(candidate: RaceCandidateSnapshot): Promi
     candidate.workspaceBaseRef!,
     candidate.providerName,
     candidate.workspaceSharedLockKey,
+    { registerActive: false },
   );
+}
+
+/** Apply global session worktree (standalone agent-write steps) before race winner patch. */
+async function applyCheckpointSessionWorkspace(session: RaceSession): Promise<number> {
+  if (!session.sessionId) return 0;
+  const checkpoint = await loadCheckpoint(session.sessionId);
+  if (!checkpoint?.workspacePath || !checkpoint.workspaceRepoRoot || !checkpoint.workspaceBaseRef) {
+    return 0;
+  }
+  const sharedWithRace = session.candidates.some((candidate) =>
+    sameWorkspacePath(candidate.workspacePath, checkpoint.workspacePath),
+  );
+  if (sharedWithRace) {
+    return 0;
+  }
+  // Standalone draft lives in the global session worktree; race winner worktrees
+  // already include those changes via parent_patch. Only release the global lock here.
+  const workspace = await SessionWorkspace.resume(
+    checkpoint.workspacePath,
+    checkpoint.workspaceRepoRoot,
+    checkpoint.workspaceBaseRef,
+    checkpoint.traceId ?? session.sessionId,
+    undefined,
+    { registerActive: false },
+  );
+  await workspace.releaseLock();
+  return 1; // standalone draft session present; winner worktree carries merged changes
 }
 
 async function cleanupCandidateWorkspace(candidate: RaceCandidateSnapshot): Promise<boolean> {
@@ -53,6 +99,60 @@ async function cleanupCandidateWorkspace(candidate: RaceCandidateSnapshot): Prom
   const workspace = await resumeCandidateWorkspace(candidate);
   await workspace.destroy();
   return true;
+}
+
+async function updateCheckpointAfterRaceDecision(
+  session: RaceSession,
+  status: "approved" | "aborted",
+): Promise<string[]> {
+  const warnings: string[] = [];
+  if (!session.sessionId) return warnings;
+
+  const checkpoint = await loadCheckpoint(session.sessionId);
+  if (!checkpoint) {
+    warnings.push(`checkpoint not found for session ${session.sessionId}`);
+    return warnings;
+  }
+
+  let workspaceCleared = false;
+  if (checkpoint.workspacePath && checkpoint.workspaceRepoRoot && checkpoint.workspaceBaseRef) {
+    try {
+      const workspace = await SessionWorkspace.resume(
+        checkpoint.workspacePath,
+        checkpoint.workspaceRepoRoot,
+        checkpoint.workspaceBaseRef,
+        checkpoint.traceId,
+        undefined,
+        { registerActive: false },
+      );
+      await workspace.destroy();
+      workspaceCleared = true;
+    } catch (err: unknown) {
+      warnings.push(`pipeline workspace: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
+  const nextState: PipelineState = {
+    ...checkpoint,
+    approved: status === "approved",
+    status,
+    timestamp: new Date().toISOString(),
+    pendingRaceTraceId: undefined,
+    raceCandidates: undefined,
+    ...(workspaceCleared
+      ? {
+          workspacePath: undefined,
+          workspaceRepoRoot: undefined,
+          workspaceBaseRef: undefined,
+        }
+      : {}),
+  };
+
+  const saved = await saveCheckpoint(session.sessionId, nextState);
+  if (!saved) {
+    warnings.push(`failed to save checkpoint for session ${session.sessionId}`);
+  }
+  return warnings;
 }
 
 export async function applyRaceSession(traceId: string, winnerIndex: number): Promise<{
@@ -66,7 +166,7 @@ export async function applyRaceSession(traceId: string, winnerIndex: number): Pr
   workspacesCleaned: number;
   cleanupErrors: string[];
 }> {
-  const session = raceSessions.get(traceId);
+  const session = getRaceSession(traceId);
   if (!session) {
     throw new Error(`No active race session found for traceId "${traceId}". It may have expired or already been applied.`);
   }
@@ -77,63 +177,63 @@ export async function applyRaceSession(traceId: string, winnerIndex: number): Pr
   const winner = session.candidates[winnerIndex];
   let appliedVia: "workspace" | "patch" = "workspace";
   const cleanupErrors: string[] = [];
-  let workspacesCleaned = 0;
+  let workspacesCleaned = await applyCheckpointSessionWorkspace(session);
 
-  try {
-    if (hasWorkspaceArtifact(winner)) {
-      const workspace = await resumeCandidateWorkspace(winner);
-      try {
-        const patch = await workspace.collectPatch();
-        await workspace.applyToSource(patch.patch);
-      } finally {
-        await workspace.destroy();
+  if (hasWorkspaceArtifact(winner)) {
+    const workspace = await resumeCandidateWorkspace(winner);
+    try {
+      const patch = await workspace.collectPatch();
+      await workspace.applyToSource(patch.patch);
+    } finally {
+      await workspace.destroy();
+      workspacesCleaned += 1;
+    }
+  } else if (winner.patchText) {
+    appliedVia = "patch";
+    applyPatchText(session.applyTargetPath, winner.patchText);
+  } else {
+    throw new Error("Winning candidate did not include workspace metadata or a patch diff to apply.");
+  }
+
+  for (let idx = 0; idx < session.candidates.length; idx++) {
+    if (idx === winnerIndex) continue;
+    const candidate = session.candidates[idx];
+    if (!hasWorkspaceArtifact(candidate)) continue;
+    try {
+      if (await cleanupCandidateWorkspace(candidate)) {
         workspacesCleaned += 1;
       }
-    } else if (winner.patchText) {
-      appliedVia = "patch";
-      applyPatchText(session.applyTargetPath, winner.patchText);
-    } else {
-      throw new Error("Winning candidate did not include workspace metadata or a patch diff to apply.");
+    } catch (err: unknown) {
+      cleanupErrors.push(`${candidate.providerName}: ${err instanceof Error ? err.message : String(err)}`);
     }
-
-    for (let idx = 0; idx < session.candidates.length; idx++) {
-      if (idx == winnerIndex) continue;
-      const candidate = session.candidates[idx];
-      if (!hasWorkspaceArtifact(candidate)) continue;
-      try {
-        if (await cleanupCandidateWorkspace(candidate)) {
-          workspacesCleaned += 1;
-        }
-      } catch (err: unknown) {
-        cleanupErrors.push(`${candidate.providerName}: ${err instanceof Error ? err.message : String(err)}`);
-      }
-    }
-
-    updateTrace(traceId, {
-      finalStatus: "approved",
-      candidates: session.candidates.map((c: RaceCandidateSnapshot, idx: number) => ({
-        provider: c.providerName,
-        durationMs: 0,
-        filesModified: c.filesModified,
-        diffStat: c.diffStat,
-        isWinner: idx === winnerIndex,
-      })),
-    });
-
-    return {
-      status: "applied",
-      traceId,
-      winnerIndex,
-      winnerProvider: winner.providerName,
-      appliedVia,
-      filesModified: winner.filesModified,
-      diffStat: winner.diffStat,
-      workspacesCleaned,
-      cleanupErrors,
-    };
-  } finally {
-    raceSessions.delete(traceId);
   }
+
+  cleanupErrors.push(...(await updateCheckpointAfterRaceDecision(session, "approved")));
+
+  updateTrace(traceId, {
+    finalStatus: "approved",
+    candidates: session.candidates.map((candidate, idx) => ({
+      provider: candidate.providerName,
+      durationMs: 0,
+      filesModified: candidate.filesModified,
+      diffStat: candidate.diffStat,
+      isWinner: idx === winnerIndex,
+    })),
+  });
+
+  deleteRaceSession(traceId);
+
+  return {
+    status: "applied",
+    traceId,
+    winnerIndex,
+    winnerProvider: winner.providerName,
+    appliedVia,
+    filesModified: winner.filesModified,
+    diffStat: winner.diffStat,
+    workspacesCleaned,
+    cleanupErrors,
+  };
 }
 
 export async function abortRaceSession(traceId: string, reason?: string): Promise<{
@@ -143,39 +243,40 @@ export async function abortRaceSession(traceId: string, reason?: string): Promis
   workspacesCleaned: number;
   cleanupErrors: string[];
 }> {
-  const session = raceSessions.get(traceId);
+  const session = getRaceSession(traceId);
   if (!session) {
     throw new Error(`No active race session found for traceId "${traceId}". It may have expired.`);
   }
 
   let workspacesCleaned = 0;
   const cleanupErrors: string[] = [];
-  try {
-    for (const candidate of session.candidates) {
-      if (!hasWorkspaceArtifact(candidate)) continue;
-      try {
-        if (await cleanupCandidateWorkspace(candidate)) {
-          workspacesCleaned += 1;
-        }
-      } catch (err: unknown) {
-        cleanupErrors.push(`${candidate.providerName}: ${err instanceof Error ? err.message : String(err)}`);
+
+  for (const candidate of session.candidates) {
+    if (!hasWorkspaceArtifact(candidate)) continue;
+    try {
+      if (await cleanupCandidateWorkspace(candidate)) {
+        workspacesCleaned += 1;
       }
+    } catch (err: unknown) {
+      cleanupErrors.push(`${candidate.providerName}: ${err instanceof Error ? err.message : String(err)}`);
     }
-
-    updateTrace(traceId, {
-      finalStatus: "aborted",
-    });
-
-    return {
-      status: "aborted",
-      traceId,
-      reason,
-      workspacesCleaned,
-      cleanupErrors,
-    };
-  } finally {
-    raceSessions.delete(traceId);
   }
+
+  cleanupErrors.push(...(await updateCheckpointAfterRaceDecision(session, "aborted")));
+
+  updateTrace(traceId, {
+    finalStatus: "aborted",
+  });
+
+  deleteRaceSession(traceId);
+
+  return {
+    status: "aborted",
+    traceId,
+    reason,
+    workspacesCleaned,
+    cleanupErrors,
+  };
 }
 
 export function register(server: McpServer) {

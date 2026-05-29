@@ -6,6 +6,7 @@ import os
 import subprocess
 import sys
 import tempfile
+from datetime import datetime, timezone
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
@@ -14,6 +15,7 @@ TASK_PAYLOAD_FIELD_NAMES = (
     "prompt",
     "mode",
     "timestamp",
+    "startedAt",
     "system",
     "staticContext",
     "dynamicContext",
@@ -48,11 +50,13 @@ TASK_RESULT_FIELD_NAMES = (
     "schemaVersion",
     "insights",
     "nextSteps",
+    "startedAt",
+    "endedAt",
 )
 
 IPC_MODES = frozenset({"text", "agent-read", "agent-write"})
 TASK_PAYLOAD_SCHEMA_VERSION = 6
-TASK_RESULT_SCHEMA_VERSION = 5
+TASK_RESULT_SCHEMA_VERSION = 6
 GIT_DIFF_TIMEOUT_SEC = 120
 DELEGATE_EXEC_TIMEOUT_SEC = int(os.environ.get("LLM_PIPELINE_DELEGATE_TIMEOUT_SEC", "900"))
 SCRIPT_DIR = os.path.dirname(os.path.realpath(os.path.abspath(__file__)))
@@ -69,6 +73,7 @@ class TaskPayload:
     prompt: str
     mode: str
     timestamp: str
+    startedAt: Optional[str] = None
     system: Optional[str] = None
     staticContext: Optional[str] = None
     dynamicContext: Optional[str] = None
@@ -153,6 +158,7 @@ class TaskPayload:
             prompt=data["prompt"],
             mode=data["mode"],
             timestamp=data["timestamp"],
+            startedAt=data.get("startedAt"),
             system=data.get("system"),
             staticContext=data.get("staticContext"),
             dynamicContext=data.get("dynamicContext"),
@@ -188,6 +194,8 @@ class TaskResult:
     schemaVersion: int = TASK_RESULT_SCHEMA_VERSION
     insights: Optional[Dict[str, str]] = None
     nextSteps: Optional[List[Dict[str, Any]]] = None
+    startedAt: Optional[str] = None
+    endedAt: Optional[str] = None
 
     def to_dict(self) -> Dict[str, Any]:
         data: Dict[str, Any] = {
@@ -219,7 +227,21 @@ class TaskResult:
             data["insights"] = self.insights
         if self.nextSteps is not None:
             data["nextSteps"] = self.nextSteps
+        if self.startedAt is not None:
+            data["startedAt"] = self.startedAt
+        if self.endedAt is not None:
+            data["endedAt"] = self.endedAt
         return data
+
+
+def _task_started_at(task: TaskPayload) -> str:
+    return task.startedAt or task.timestamp
+
+
+def _attach_ipc_timing(result: TaskResult, task: TaskPayload) -> TaskResult:
+    result.startedAt = _task_started_at(task)
+    result.endedAt = datetime.now(timezone.utc).isoformat()
+    return result
 
 
 def _atomic_write_json(filepath: str, data: dict) -> None:
@@ -263,6 +285,20 @@ def _resolve_repo_root(path: str) -> str:
     return normalize_path(_git_output(["rev-parse", "--show-toplevel"], path).strip())
 
 
+def _resolve_source_repo_root(path: str) -> str:
+    # git rev-parse --git-common-dir may return an absolute path like /repo/.git (main worktree)
+    # or /repo/.git/worktrees/<name> (linked worktree). In both cases the source repo is the
+    # directory containing the .git component.
+    common_dir_raw = _git_output(["rev-parse", "--git-common-dir"], path).strip()
+    common_dir = normalize_path(common_dir_raw)
+    parts = common_dir.replace("\\", "/").split("/")
+    try:
+        git_idx = next(i for i in range(len(parts) - 1, -1, -1) if parts[i] == ".git")
+        return normalize_path("/".join(parts[:git_idx]))
+    except StopIteration:
+        return normalize_path(path)
+
+
 def _is_inside_linked_worktree(path: str) -> bool:
     git_dir = _git_output(["rev-parse", "--git-dir"], path).strip().replace("\\", "/")
     return "/worktrees/" in git_dir or ".git/worktrees" in git_dir
@@ -271,9 +307,13 @@ def _is_inside_linked_worktree(path: str) -> bool:
 def _run_workspace_manager(cmd: str, **kwargs: Any) -> Dict[str, Any]:
     argv = ["python3", WORKSPACE_MANAGER_PATH, cmd]
     for key, value in kwargs.items():
-        if value is None or value == "":
+        if value is None or value is False or value == "":
             continue
-        argv.extend([f"--{key.replace('_', '-')}", str(value)])
+        flag = f"--{key.replace('_', '-')}"
+        if value is True:
+            argv.append(flag)
+            continue
+        argv.extend([flag, str(value)])
 
     proc = subprocess.run(argv, capture_output=True, text=True)
     output = (proc.stdout or "").strip()
@@ -365,10 +405,9 @@ def _build_summary(delegate_out: str, work_dir: str) -> str:
 def _execute_agent_task(task: TaskPayload, work_dir: str, final_prompt: str) -> TaskResult:
     repo_root = _resolve_repo_root(work_dir)
     defer_finalize = task.finalizeStrategy == "defer"
+    inside_linked_worktree = _is_inside_linked_worktree(work_dir)
 
-    if _is_inside_linked_worktree(work_dir):
-        if defer_finalize:
-            raise RuntimeError("finalizeStrategy=defer is not supported when workDir already points at an existing linked worktree")
+    if inside_linked_worktree and not defer_finalize:
         worktree_root = _resolve_repo_root(work_dir)
         print(f"Session workspace (reusing): {worktree_root}", flush=True)
         delegate_out = _execute_delegate_or_stub(task, work_dir, final_prompt)
@@ -383,20 +422,47 @@ def _execute_agent_task(task: TaskPayload, work_dir: str, final_prompt: str) -> 
         )
 
     session_id = task.id if defer_finalize else (task.sessionId or task.id)
+    create_repo_root = repo_root
+    result_repo_root = repo_root
+    base_ref_override: Optional[str] = None
+    parent_patch_bytes = b""
+
+    if defer_finalize and inside_linked_worktree:
+        create_repo_root = _resolve_repo_root(work_dir)
+        result_repo_root = _resolve_source_repo_root(create_repo_root)
+        base_ref_override = _git_output(["rev-parse", "HEAD"], create_repo_root).strip()
+        parent_collect = _run_workspace_manager(
+            "collect",
+            worktree=create_repo_root,
+            base_ref=base_ref_override,
+        )
+        parent_patch_bytes = _decode_patch_bytes(parent_collect.get("patch"))
+
     create_result = _run_workspace_manager(
         "create",
-        repo=repo_root,
+        repo=create_repo_root,
         session=session_id,
         owner_pid=os.getpid(),
         shared_lock_key=task.sharedLockKey,
+        base_ref=base_ref_override,
+        allow_dirty=True if (defer_finalize and inside_linked_worktree) else None,
     )
     worktree_root = normalize_path(str(create_result["worktreePath"]))
+    # Use create_result["baseRef"] as canonical; when base_ref_override was supplied
+    # (defer+linked path) workspace_manager echoes it back unchanged, so both are consistent.
     base_ref = str(create_result["baseRef"])
-    exec_dir = _map_workdir_to_worktree(work_dir, repo_root, worktree_root)
+    # Sanity-check: override and result must agree when both are set.
+    if base_ref_override and base_ref_override != base_ref:
+        raise RuntimeError(
+            f"base_ref mismatch: requested {base_ref_override!r} but workspace returned {base_ref!r}"
+        )
+    exec_dir = _map_workdir_to_worktree(work_dir, create_repo_root, worktree_root)
     print(f"Isolated worktree: {worktree_root}", flush=True)
 
     should_destroy = True
     try:
+        if parent_patch_bytes:
+            _apply_patch_to_repo(worktree_root, parent_patch_bytes)
         delegate_out = _execute_delegate_or_stub(task, exec_dir, final_prompt)
         diff, files, stat = run_git_diff(worktree_root)
         collect_result = _run_workspace_manager("collect", worktree=worktree_root, base_ref=base_ref)
@@ -409,11 +475,12 @@ def _execute_agent_task(task: TaskPayload, work_dir: str, final_prompt: str) -> 
             diffStat=stat if isinstance(stat, str) else str(stat or ""),
         )
         if defer_finalize:
-            should_destroy = False
             result.workspacePath = worktree_root
-            result.workspaceRepoRoot = repo_root
+            # Source repo for apply/lock; create_repo_root may be a linked parent worktree.
+            result.workspaceRepoRoot = result_repo_root
             result.workspaceBaseRef = base_ref
             result.workspaceSharedLockKey = task.sharedLockKey
+            should_destroy = False  # set last — any exception above still triggers destroy
             return result
         if task.mode == "agent-write":
             _apply_patch_to_repo(repo_root, _decode_patch_bytes(collect_result.get("patch")))
@@ -423,7 +490,7 @@ def _execute_agent_task(task: TaskPayload, work_dir: str, final_prompt: str) -> 
             try:
                 _run_workspace_manager(
                     "destroy",
-                    repo=repo_root,
+                    repo=create_repo_root,
                     worktree=worktree_root,
                     owner_pid=os.getpid(),
                     shared_lock_key=task.sharedLockKey,
@@ -456,9 +523,10 @@ def execute_oneshot(task_file: str, result_file: str) -> None:
         else:
             content = _execute_delegate_or_stub(task, work_dir, final_prompt)
             result = TaskResult(id=task.id, status="success", content=content)
-        _atomic_write_json(result_file, result.to_dict())
+        _atomic_write_json(result_file, _attach_ipc_timing(result, task).to_dict())
     except Exception as err:
-        _atomic_write_json(result_file, TaskResult(id=task.id, status="error", error=str(err)).to_dict())
+        err_result = TaskResult(id=task.id, status="error", error=str(err))
+        _atomic_write_json(result_file, _attach_ipc_timing(err_result, task).to_dict())
 
 
 if __name__ == "__main__":
