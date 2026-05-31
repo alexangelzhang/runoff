@@ -33,6 +33,7 @@
 
 ### Features
 
+- [race-mode.md](features/race-mode.md) — running multiple LLMs on the same step, picking or merging the best result
 - [observability.md](features/observability.md) · [observability-eval.md](features/observability-eval.md)
 - [memory-production.md](features/memory-production.md) · [memory-dream-roadmap.md](features/memory-dream-roadmap.md)
 - [dream.md](features/dream.md) · [dreamify.md](features/dreamify.md)

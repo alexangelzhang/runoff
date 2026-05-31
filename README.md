@@ -116,6 +116,7 @@ Full index: [**docs/README.md**](docs/README.md) · repo root files: [docs/repo-
 | [**getting-started-30min.md**](docs/guides/getting-started-30min.md) | First run → real repo |
 | [**differentiation.md**](docs/reference/differentiation.md) | vs LangGraph, CrewAI, AutoGen, OpenHands |
 | [**coding-agent-backends.md**](docs/guides/coding-agent-backends.md) | Codex, Gemini, Claude Code, OpenCode |
+| [**race-mode.md**](docs/features/race-mode.md) | Running multiple LLMs on the same step |
 | [**observability.md**](docs/features/observability.md) | Trace + experiment (not LangSmith UI) |
 | [**security-model.md**](docs/architecture/security-model.md) | Threat model (self-hosted) |
 | [**execution-layers.md**](docs/architecture/execution-layers.md) | TS / Python / IPC ownership |
