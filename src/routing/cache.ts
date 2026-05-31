@@ -214,7 +214,7 @@ export class ResponseCache {
   }
 }
 
-/** Module-level singleton cache */
+// Lazy singletons — reset via clearResponseCache() in tests.
 let _cache: ResponseCache | null = null;
 let _l2Store: ResponseCacheL2Store | null = null;
 

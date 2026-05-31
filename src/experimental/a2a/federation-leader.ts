@@ -5,6 +5,7 @@
  * Pull sync on all nodes; push to peers only when local node is leader.
  */
 
+import { logger } from "../../core/logger.js";
 import { probeFederationPeers } from "./federation-ha.js";
 import {
   federationLeasePath,
@@ -111,9 +112,7 @@ export async function resolveFederationLeaderRole(options: {
         if (!quorum.confirmed) {
           releaseFederationLease(options.nodeId, { leasePath });
           isLeader = false;
-          console.warn(
-            `[federation] lease quorum not met: votes=${quorum.votes} need=${quorum.quorumMin}`,
-          );
+          logger.warn("federation", `lease quorum not met: votes=${quorum.votes} need=${quorum.quorumMin}`);
         }
       }
     }

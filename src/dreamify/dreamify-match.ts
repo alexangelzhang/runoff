@@ -5,7 +5,7 @@
 import type { AgentMemory, MemoryEntry, MemoryScope } from "../orchestration/memory.js";
 import { agentId } from "../orchestration/multi-agent-types.js";
 import { hashPrompt, type ExecutionPattern } from "../orchestration/pattern-cache.js";
-import { findRelatedPatternEntryIds } from "../orchestration/pattern-links.js";
+import { asExecutionPattern, findRelatedPatternEntryIds } from "../orchestration/pattern-links.js";
 import type { DreamifyRetrievalParams, ResolvedDreamifyRetrieval } from "./dreamify-params.js";
 import { DEFAULT_DREAMIFY_RETRIEVAL } from "./dreamify-params.js";
 import { matchPatternEntriesMultiStrategy } from "./dreamify-multi-retrieve.js";
@@ -81,8 +81,9 @@ export function countAssociativePatterns(
   });
   const seen = new Set<string>();
   for (const entry of primary) {
-    const p = entry.metadata as unknown as ExecutionPattern;
+    const p = asExecutionPattern(entry.metadata);
     if (p?.promptHash) seen.add(p.promptHash);
+    if (!p) continue;
     const relatedIds = findRelatedPatternEntryIds(
       all,
       p,
@@ -91,7 +92,7 @@ export function countAssociativePatterns(
     );
     for (const id of relatedIds) {
       const other = all.find((e) => e.id === id);
-      const hp = other?.metadata as unknown as ExecutionPattern;
+      const hp = asExecutionPattern(other?.metadata);
       if (hp?.promptHash) seen.add(hp.promptHash);
     }
   }

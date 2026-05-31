@@ -30,7 +30,7 @@ export function filesIntersectionCount(a: string[], b: string[]): number {
   return n;
 }
 
-function asExecutionPattern(metadata: Record<string, unknown> | undefined): ExecutionPattern | null {
+export function asExecutionPattern(metadata: Record<string, unknown> | undefined): ExecutionPattern | null {
   if (!metadata || typeof metadata !== "object") return null;
   if (!Array.isArray(metadata.stepHints)) return null;
   return metadata as unknown as ExecutionPattern;

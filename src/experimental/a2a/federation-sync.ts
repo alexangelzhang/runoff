@@ -2,6 +2,7 @@
  * B5 — Multi-node federation sync, conflict resolution, and directory helpers.
  */
 
+import { logger } from "../../core/logger.js";
 import type { A2AAgentCard } from "./agent-card.js";
 import {
   appendToFederationStore,
@@ -256,16 +257,12 @@ export async function syncFederationFromPeers(options: {
         strategy: options.skillDepsPruneStrategy,
         storePath: options.storePath,
       }) ?? undefined;
-    console.warn(
-      `[federation] pruned ${skillDepsPruned} cyclic skill dep(s) receipt=${skillDepsPruneReceipt?.receiptId ?? "n/a"}`,
-    );
+    logger.warn("federation", `pruned ${skillDepsPruned} cyclic skill dep(s) receipt=${skillDepsPruneReceipt?.receiptId ?? "n/a"}`);
   } else if (depReconcile.blocked) {
     skillDepsBlocked = true;
     skillDepsCycle = depReconcile.cycle;
     merged = local;
-    console.warn(
-      `[federation] skill dep cycle blocked sync: ${depReconcile.cycle?.join(" -> ")}`,
-    );
+    logger.warn("federation", `skill dep cycle blocked sync: ${depReconcile.cycle?.join(" -> ")}`);
   }
 
   if (
@@ -292,9 +289,7 @@ export async function syncFederationFromPeers(options: {
       splitBrain.detected &&
       options.splitBrainAlert !== false
     ) {
-      console.warn(
-        `[federation] split-brain detected: holders=${splitBrain.conflictingHolders.join(",")}`,
-      );
+      logger.warn("federation", `split-brain detected: holders=${splitBrain.conflictingHolders.join(",")}`);
     }
     if (options.leaseArbitration !== false) {
       const localLease = readFederationLease(federationLeasePath(options.storePath));
@@ -333,7 +328,7 @@ export async function syncFederationFromPeers(options: {
       if (leaseDowngrade.downgraded) {
         isLeader = false;
         leaderNodeId = leaseArbitration.winnerHolder ?? leaderNodeId;
-        console.warn(`[federation] lease auto-downgrade: ${leaseDowngrade.reason}`);
+        logger.warn("federation", `lease auto-downgrade: ${leaseDowngrade.reason}`);
       }
     }
 
@@ -431,9 +426,7 @@ export function mergeRemoteCardsIntoFederationStore(
     pruneStrategy: options.skillDepsPruneStrategy,
   });
   if (depReconcile.blocked) {
-    console.warn(
-      `[federation] skill dep cycle blocked merge: ${depReconcile.cycle?.join(" -> ")}`,
-    );
+    logger.warn("federation", `skill dep cycle blocked merge: ${depReconcile.cycle?.join(" -> ")}`);
     return 0;
   }
   const toPersist = depReconcile.cards;
@@ -444,9 +437,7 @@ export function mergeRemoteCardsIntoFederationStore(
       strategy: options.skillDepsPruneStrategy,
       storePath: options.storePath,
     });
-    console.warn(
-      `[federation] pruned ${depReconcile.pruned.length} cyclic skill dep(s) on merge receipt=${receipt?.receiptId ?? "n/a"}`,
-    );
+    logger.warn("federation", `pruned ${depReconcile.pruned.length} cyclic skill dep(s) on merge receipt=${receipt?.receiptId ?? "n/a"}`);
   }
   if (added > 0 || conflicts > 0 || depReconcile.pruned.length > 0) {
     persistFederatedAgentCards(toPersist, options.storePath, options.nodeId);

@@ -13,7 +13,7 @@ import { createHash } from "node:crypto";
 import type { PipelineTrace, StepTrace } from "../observability/trace.js";
 import type { AgentMemory, MemoryEntry, MemoryScope } from "./memory.js";
 import { agentId } from "./multi-agent-types.js";
-import { getLinkedPatterns, linkPatternByFiles } from "./pattern-links.js";
+import { asExecutionPattern, getLinkedPatterns, linkPatternByFiles } from "./pattern-links.js";
 import { isLayeredAgentMemory } from "../memory/memory-backend-status.js";
 import { LayeredAgentMemory } from "./http-memory-client.js";
 import { loadConfig } from "../core/config.js";
@@ -229,7 +229,7 @@ export class PatternCache {
     };
 
     for (const entry of entries) {
-      const p = entry.metadata as unknown as ExecutionPattern;
+      const p = asExecutionPattern(entry.metadata);
       addPattern(p);
       for (const linked of getLinkedPatterns(this.memory, entry, this.scope)) {
         addPattern(linked);
@@ -293,7 +293,7 @@ export class PatternCache {
 
   matchPatterns(prompt: string, limit?: number): ExecutionPattern[] {
     return this.matchPatternEntries(prompt, limit).map(
-      (e) => e.metadata as unknown as ExecutionPattern,
+      (e) => asExecutionPattern(e.metadata)!,
     );
   }
 

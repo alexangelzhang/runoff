@@ -109,6 +109,53 @@ import {
   resolvePipelineStages,
 } from "./pipeline-runner-helpers.js";
 
+/** Attempt reflect-driven replan after a round. Returns true if the plan was updated. */
+async function tryReflectReplan(opts: {
+  runtimeConfig: PipelineConfig;
+  orchestrator: Orchestrator;
+  orchestrationContext: OrchestrationContext;
+  executionPlan: ExecutionPlan;
+  agentGraph: AgentGraph;
+  state: MutablePipelineRunState;
+  round: number;
+  stepFailed: boolean;
+  eventLog?: EventLog;
+  traceId: string;
+}): Promise<boolean> {
+  const { runtimeConfig, orchestrator, orchestrationContext, executionPlan, agentGraph, state, round, stepFailed, eventLog, traceId } = opts;
+  const trigger = stepFailed ? "step_failure" : "review_revision";
+  if (!shouldReflectOnTrigger(runtimeConfig, trigger)) return false;
+
+  orchestrationContext.round = round + 1;
+  orchestrationContext.sharedKnowledge = { ...state.globalKnowledge };
+  const failedStep = stepFailed
+    ? Object.entries(state.stepResults).find(([, sr]) => sr.status === "failed")?.[0]
+    : undefined;
+  try {
+    const replanned = await applyReflectReplan({
+      config: runtimeConfig,
+      orchestrator,
+      context: orchestrationContext,
+      executionPlan,
+      agentGraph,
+      trigger,
+      details: {
+        focusStep: failedStep,
+        errorMessage: state.lastRetryFailure?.error,
+        reviewFeedback: state.lastReviewFeedback,
+      },
+      eventLog,
+      traceId,
+    });
+    if (replanned) {
+      logger.info("orchestrator", `Reflect re-plan applied (${trigger})`);
+      return true;
+    }
+  } catch {
+    // non-critical
+  }
+  return false;
+}
 
 /**
  * Round-based DAG execution: parallel stages within each wave, dynamic step injection, review gating.
@@ -587,37 +634,21 @@ export async function runPipelineDAGLoop(
       !state.approved &&
       round < maxRounds
     ) {
-      const trigger = stepFailed ? "step_failure" : "review_revision";
-      if (shouldReflectOnTrigger(runtimeConfig, trigger)) {
-        orchestrationContext.round = round + 1;
-        orchestrationContext.sharedKnowledge = { ...state.globalKnowledge };
-        const failedStep = stepFailed
-          ? Object.entries(state.stepResults).find(([, sr]) => sr.status === "failed")?.[0]
-          : undefined;
-        try {
-          const replanned = await applyReflectReplan({
-            config: runtimeConfig,
-            orchestrator,
-            context: orchestrationContext,
-            executionPlan,
-            agentGraph,
-            trigger,
-            details: {
-              focusStep: failedStep,
-              errorMessage: state.lastRetryFailure?.error,
-              reviewFeedback: state.lastReviewFeedback,
-            },
-            eventLog,
-            traceId,
-          });
-          if (replanned) {
-            logger.info("orchestrator", `Reflect re-plan applied (${trigger})`);
-            stepFailed = false;
-            finalStatus = "running";
-          }
-        } catch {
-          // non-critical
-        }
+      const replanned = await tryReflectReplan({
+        runtimeConfig,
+        orchestrator,
+        orchestrationContext,
+        executionPlan,
+        agentGraph,
+        state,
+        round,
+        stepFailed,
+        eventLog,
+        traceId,
+      });
+      if (replanned) {
+        stepFailed = false;
+        finalStatus = "running";
       }
     }
 

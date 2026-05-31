@@ -3,6 +3,9 @@
   "version": "3.0.0",
   "description": "Multi-LLM pipeline MCP server - Claude orchestrates OpenAI code generation",
   "license": "MIT",
+  "repository": { "type": "git", "url": "https://github.com/<org>/llm-pipeline.git" },
+  "keywords": ["mcp", "llm", "pipeline", "orchestration", "ai-agent", "dag"],
+  "homepage": "https://github.com/<org>/llm-pipeline#readme",
   "type": "module",
   "main": "dist/index.js",
   "scripts": {

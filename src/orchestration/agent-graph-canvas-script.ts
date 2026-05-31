@@ -1,5 +1,6 @@
 /**
  * Client-side script for AgentGraph SVG canvas (embedded in generated HTML).
+ * Long-term: extract to a standalone .html/.js asset and inline at build time.
  */
 export const AGENT_GRAPH_CANVAS_SCRIPT = `
 (function () {

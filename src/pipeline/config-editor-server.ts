@@ -3,6 +3,7 @@
  */
 
 import { createServer, type Server } from "node:http";
+import { logger } from "../core/logger.js";
 import { execFile } from "node:child_process";
 import { basename, resolve } from "node:path";
 import type { AgentGraphSnapshot } from "../orchestration/agent-graph-io.js";
@@ -118,6 +119,7 @@ export function startConfigEditorServer(
         jsonResponse(res, 200, { ok: true, configPath: result.configPath });
       } catch (err: unknown) {
         const message = err instanceof Error ? err.message : String(err);
+        logger.error("config-editor", "save failed", { error: message });
         jsonResponse(res, 500, { ok: false, error: message });
       }
       return;

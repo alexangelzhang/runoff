@@ -13,6 +13,7 @@ import {
 import { PersistentAgentMemory } from "../orchestration/persistent-memory.js";
 import { createRemoteMemoryClient } from "../orchestration/memory-transport.js";
 
+// Lazy singleton — reset via resetPipelineMemoryRegistry() in tests.
 let _localMemory: PersistentAgentMemory | null = null;
 const _layeredByKey = new Map<string, LayeredAgentMemory>();
 

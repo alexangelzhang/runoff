@@ -3,6 +3,7 @@
  */
 
 import { execFileSync } from "node:child_process";
+import { logger } from "../core/logger.js";
 import { existsSync } from "node:fs";
 import { loadConfigFromPath } from "../core/config.js";
 import { cleanupOrphanWorkspaces, scanOrphanWorkspaces } from "./workspace-orphans.js";
@@ -113,10 +114,12 @@ export function runDoctor(options?: {
           });
         }
       } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
+        logger.warn("pipeline-doctor", "config check failed", { error: message });
         checks.push({
           name: "config",
           status: "fail",
-          message: err instanceof Error ? err.message : String(err),
+          message,
         });
       }
     }
