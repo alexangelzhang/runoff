@@ -1,5 +1,7 @@
 # Phase 7 Code Review — Clean Code & Architecture Audit
 
+> **Status: CLOSED**（2026-05-28）。**7.16** 与 issue6 **6.8** 一并收口（`resolveStepKind`）。
+
 Date: 2026-03-29
 Scope: Full `src/` directory, all `.ts` files + `scripts/task_runner.py`
 Status: **All 24 items resolved.** `tsc --noEmit` clean, 160/160 tests passing.

@@ -1,5 +1,7 @@
 # Phase 5 Review — 完整清单
 
+> **Status: CLOSED**（2026-05-28）。**5.10** WONTFIX（`package.json` `comments.typescript-in-deps`）；其余已修复。
+
 ## P0 — IPC 合约 & 安全
 
 | # | 问题 | 文件 | 说明 |

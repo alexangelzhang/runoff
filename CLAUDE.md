@@ -27,36 +27,78 @@ src/tools/race.ts      — llm_race_apply / llm_race_abort tools (race session f
 src/tools/show-config.ts — llm_show_config tool
 src/tools/query-traces.ts — llm_query_traces tool
 src/tools/helpers.ts   — Shared types, serialization helpers, race session registry
-src/ipc.ts             — Shared IPC schema (TaskPayload, TaskResult, field manifests)
+src/core/              — config, ipc, state, paths, candidate, verdict, logger
+src/runtime/           — workspace, pipeline-workdir, race-registry, race-execution
+src/routing/           — router, cache, pricing, retry, circuit breaker
+src/observability/     — trace, experiment-log, prompt-version, trace-exporter
+src/memory/            — pipeline-memory, dream-state, memory-backend-status
+src/pipeline/          — pipeline-hooks, prompt composer, real-provider smoke
+src/infra/ast_utils.ts — TypeScript syntax check at runtime
 src/providers/cli.ts   — CLI provider, bridges TS↔Python via JSON files
 src/providers/types.ts — LLMRequest, LLMResponse (TextResponse | AgentResponse), ProviderMode
-src/workspace.ts       — Session workspace isolation (delegates to Python workspace_manager)
-src/state.ts           — Checkpoint save/load/resume, state machine transitions
-src/trace.ts           — Execution trace recording and querying
-src/config.ts          — Pipeline config loading and validation
-src/router.ts          — Complexity scoring and provider routing
-src/candidate.ts       — Unified candidate model (code/changes/filesModified)
-src/cache.ts           — LRU response cache
-src/verdict.ts         — Review verdict parsing
-src/paths.ts           — Home/tasks/traces directory resolution
-scripts/task_runner.py — Python task execution (subprocess, worktree, patch, lock)
-scripts/workspace_manager.py — Centralized workspace backend (worktree, lock, patch apply)
-scripts/watcher.sh     — Watcher process for polling task files
-scripts/check-ipc-sync.ts — CI helper: TS/Python IPC constants must match
+src/orchestration/     — DAG, agents, governance, durable CP (see docs/structure.md)
+scripts/python/task_runner.py — Python task execution (subprocess, worktree, patch, lock)
+scripts/python/workspace_manager.py — Centralized workspace backend (worktree, lock, patch apply)
+scripts/shell/watcher.sh     — Watcher process for polling task files
+scripts/ts/ci/check-ipc-sync.ts — CI helper: TS/Python IPC constants must match
 ```
 
 ## Architecture
 
 - TypeScript: MCP tool API, orchestration, routing, retry, candidate state, trace, judge
 - Python: subprocess execution, timeout management, diff collection, workspace management (worktree + locking)
-- IPC: file-based JSON (`*.task.json` → `*.result.json`), schema in `src/ipc.ts`
+- IPC: file-based JSON (`*.task.json` → `*.result.json`), schema in `src/core/ipc.ts`
 - Shared schema enforced by `tests/ipc-schema.test.ts` — adding IPC fields requires updating both sides
-- **`npm run check-ipc-sync`** — compares `src/ipc.ts` with `scripts/task_runner.py` (schema versions + field manifests); run after IPC changes
-- **`typescript` in `dependencies`** (not only devDependencies) because `src/ast_utils.ts` imports the compiler API (`import ts from "typescript"`) for `isSyntaxValid` at runtime in the MCP server
+- **`npm run check-ipc-sync`** — compares `src/core/ipc.ts` with `scripts/python/task_runner.py` (schema versions + field manifests); run after IPC changes
+- **`typescript` in `dependencies`** (not only devDependencies) because `src/infra/ast_utils.ts` imports the compiler API (`import ts from "typescript"`) for `isSyntaxValid` at runtime in the MCP server
+- Layer map: **`docs/structure.md`**
 - Workspace isolation: Python `workspace_manager.py` owns all physical git worktree ops and cross-process locking
 
 ## Testing
 
 - Run all: `npx tsx --test tests/*.test.ts`
 - Run single: `npx tsx --test tests/<name>.test.ts`
-- 106 tests, smoke tests involve git worktree ops (~10s)
+- ~540 tests, smoke tests involve git worktree ops (~10s)
+
+## Common Tasks → Files
+
+| 要做什么 | 看哪里 |
+|----------|--------|
+| 加新 MCP tool | `src/tools/` 新建 .ts → `src/index.ts` 注册 |
+| 改 MCP pipeline 会话 | `src/orchestration/pipeline-mcp-run.ts`；工具注册 `src/tools/run-pipeline.ts` |
+| 改单步执行 | `src/tools/run-step.ts`；核心逻辑 `src/orchestration/step-execution.ts` |
+| 改 race mode | `src/tools/race.ts` → `src/tools/helpers.ts`（race session registry） |
+| 改 provider 路由 / 复杂度评分 | `src/routing/router.ts` |
+| 改 IPC 协议 | `src/core/ipc.ts`（TS 侧）→ `scripts/python/task_runner.py`（Python 侧）→ 跑 `npm run check-ipc-sync` |
+| 改 workspace 隔离 | `src/runtime/workspace.ts`（TS 委托）→ `scripts/python/workspace_manager.py`（Python 实现） |
+| 改 checkpoint / 状态恢复 | `src/core/state.ts` |
+| 改 trace 记录 / 查询 | `src/observability/trace.ts` → `src/tools/query-traces.ts` |
+| 改 LRU 缓存 | `src/routing/cache.ts` |
+| 改 candidate 模型 | `src/core/candidate.ts` |
+| 改 orchestration / OODA loop | `src/orchestration/orchestrator.ts` |
+| 改 AgentGraph 编译/动态注入 | `src/orchestration/agent-graph.ts` |
+| 改编排层单步 / Agent 执行 (B8) | `step-execution.ts`, `pipeline-step-agent.ts`, `step-runner.ts` |
+| Provider race 合并 | `src/orchestration/race-merge.ts` |
+| 并行 stage 合并 | `src/orchestration/stage-merge.ts` |
+| AgentGraph 导出/编辑/可视化 | `agent-graph-io.ts`、`agent-graph-viz.ts`；MCP `llm_show_agent_graph` |
+| 外置记忆 HTTP | `memory-factory.ts`、`http-memory-client.ts` |
+| A2A 联邦 HA/鉴权 | `federation-ha.ts`、`docs/a2a-federation.md` |
+| Pipeline Hooks | `src/pipeline/pipeline-hooks.ts` |
+| 改 A2A 联邦同步 (B5) | `src/orchestration/a2a/federation-sync.ts` |
+| 改 agent 抽象 | `src/orchestration/agent.ts` / `agent-state.ts` / `registry.ts` |
+| 改治理框架 | `src/orchestration/policy.ts` / `approval.ts` / `guardrails.ts` / `guardrail-scan.ts` |
+| 改 Python 执行后端 | `scripts/python/task_runner.py`（子进程）→ `scripts/python/workspace_manager.py`（worktree + lock） |
+| 改 A2A HTTP/mTLS/发现/联邦 | `src/orchestration/a2a/http-transport.ts`, `external-registry.ts`, `federated-registry-store.ts` |
+| CI gates | `npm run ci:gates`（`scripts/ts/ci/run-ci-gates.ts`）, `npm run test:gates` |
+| 行业对标钉版本 | `npm run check-benchmark-pins`（ci:gates）；刷新 `npm run refresh-benchmark-pins` |
+| 改 prompt 版本回放 | `src/observability/prompt-version.ts`（`~/.llm-pipeline/prompt-versions/`） |
+| 改 trace 实体图 | `src/orchestration/trace-entities.ts` |
+| OTel OTLP 导出 | `src/observability/trace-exporter.ts`（`runtime.otelEndpoint`, `OTEL_EXPORTER_OTLP_ENDPOINT`） |
+| Orchestrator 驱波 | `src/orchestration/plan-scheduler.ts`, `pipeline-execution.ts` → `executionPlan` |
+
+## 不要做的事
+
+- 不要修改 src/core/ipc.ts 而不同步更新 scripts/python/task_runner.py（跑 npm run check-ipc-sync 验证）
+- 不要在 src/tools/run-pipeline.ts 里加超过 50 行的新功能 — 该文件已 800 行，新功能应拆到独立模块
+- 不要删除 mock provider（tests 依赖它）
+- 不要改 workspace isolation 逻辑而不跑 smoke tests

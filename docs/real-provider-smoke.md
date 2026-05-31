@@ -1,6 +1,6 @@
 # Real Provider Smoke
 
-`tests/real-provider.integration.test.ts` 负责打真实 CLI provider 的 opt-in 集成 smoke，`scripts/run-real-provider-smoke.ts` 负责把这组测试包装成可落地的 runner：生成汇总报告、失败诊断和 sandbox artifact，并提供 `manual`、`nightly`、`pre-release` 三种执行模式。
+`tests/real-provider.integration.test.ts` 负责打真实 CLI provider 的 opt-in 集成 smoke；`src/real-provider-smoke-runner.ts` 提供 runner 参数解析与汇总判定；`scripts/run-real-provider-smoke.ts` 负责把这组测试包装成可落地的 runner；`tests/real-provider-smoke.test.ts` 在常规 `npm test` 中校验 runner 契约（无需真实 CLI）：生成汇总报告、失败诊断和 sandbox artifact，并提供 `manual`、`nightly`、`pre-release` 三种执行模式。
 
 ## 什么时候跑
 
