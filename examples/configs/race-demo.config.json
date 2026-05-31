@@ -1,0 +1,22 @@
+{
+  "_comment": "Race demo: two mock providers compete on the implement step. Run: npm run demo:race",
+  "providers": {
+    "mock-a": { "type": "mock", "tier": "full" },
+    "mock-b": { "type": "mock", "tier": "lite" }
+  },
+  "pipeline": {
+    "implement": [["mock-a", "mock-b"]],
+    "review":    ["mock-a", "implement"]
+  },
+  "retry": {
+    "maxRounds": 2,
+    "reviewStep": "review"
+  },
+  "runtime": {
+    "raceFinalize": "defer",
+    "controlPlane": "file"
+  },
+  "orchestration": {
+    "raceEarlyTermination": true
+  }
+}

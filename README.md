@@ -82,6 +82,32 @@ npm run dev
 }
 ```
 
+## Race mode in 30 seconds
+
+Put two providers in an array for any pipeline step — they run in parallel, each in its own git worktree, and you pick the winner:
+
+```json
+{
+  "pipeline": {
+    "implement": [["codex", "gemini"]],
+    "review":    ["codex", "implement"]
+  }
+}
+```
+
+The pipeline pauses at `awaiting_judge`. You see both diffs:
+
+```
+candidate 0  (codex)  — added retry loop inline, 23 lines
+candidate 1  (gemini) — delegated to existing api.retry(), 6 lines
+
+  npm run pipeline:race:apply -- --session abc123 --winner 1
+```
+
+Gemini found `api.retry()` already in the codebase. You wouldn't have known to look. That's the point.
+
+→ Full mechanics: [**docs/features/race-mode.md**](docs/features/race-mode.md)
+
 ## MCP tools (main path)
 
 | Tool | Purpose |

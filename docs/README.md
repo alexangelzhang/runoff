@@ -55,6 +55,7 @@
 ### Reference
 
 - [OPEN_SOURCE.md](reference/OPEN_SOURCE.md)
+- [benchmarks.md](reference/benchmarks.md) — why there's no SWE-bench number, and what is measurable
 - [industry-benchmark.md](reference/industry-benchmark.md) · [benchmark-pins.json](reference/benchmark-pins.json)
 - [supported-backends.md](reference/supported-backends.md)
 

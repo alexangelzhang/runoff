@@ -9,6 +9,7 @@ Copy into your target repo as `pipeline.config.json`, or scaffold with `npm run 
 | File | Use case | Providers |
 |------|----------|-----------|
 | [quickstart.config.json](configs/quickstart.config.json) | `npm run demo` | mock |
+| [race-demo.config.json](configs/race-demo.config.json) | `npm run demo:race` — two providers compete | mock-a, mock-b |
 | [feature.config.json](configs/feature.config.json) | implement → review | mock |
 | [bugfix.config.json](configs/bugfix.config.json) | diagnose → fix → review | mock |
 | [refactor.config.json](configs/refactor.config.json) | analyze → refactor (race) → review | mock |
