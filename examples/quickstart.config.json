@@ -1,0 +1,13 @@
+{
+  "providers": {
+    "mock": { "type": "mock" }
+  },
+  "pipeline": {
+    "implement": ["mock"],
+    "review": ["mock", "implement"]
+  },
+  "retry": { "maxRounds": 2, "reviewStep": "review" },
+  "runtime": {
+    "controlPlane": "file"
+  }
+}

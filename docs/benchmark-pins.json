@@ -1,0 +1,41 @@
+{
+  "auditedAt": "2026-05-26",
+  "auditor": "scripts/refresh-benchmark-pins.sh",
+  "llmPipeline": {
+    "repo": "local",
+    "ref": "8ef46e624dfb2aaa382722474bac79d67586d20d",
+    "note": "Workspace HEAD at refresh time"
+  },
+  "frameworks": [
+    {
+      "id": "openai-agents-sdk",
+      "repo": "openai/openai-agents-python",
+      "ref": "6d5b888f6f57b8356398bea883b45172fec54b95",
+      "refDate": "2026-05-26T08:53:21Z"
+    },
+    {
+      "id": "langgraph",
+      "repo": "langchain-ai/langgraph",
+      "ref": "d1e2ff0561a8b0b09212d0795c9d7b390a5de23a",
+      "refDate": "2026-05-22T16:52:05Z"
+    },
+    {
+      "id": "google-adk",
+      "repo": "google/adk-python",
+      "ref": "7ad7994744de18f2394e4bcb961cd5c7a24afb4b",
+      "refDate": "2026-05-22T23:44:41Z"
+    },
+    {
+      "id": "crewai",
+      "repo": "crewAIInc/crewAI",
+      "ref": "bad64b1ee67a2f6279b901292d018248657aafda",
+      "refDate": "2026-05-26T08:05:25Z"
+    },
+    {
+      "id": "deer-flow",
+      "repo": "bytedance/deer-flow",
+      "ref": "f68bcb771c01caa53ba4b3dd59b41ebb00d00cfa",
+      "refDate": "2026-05-26T01:37:51Z"
+    }
+  ]
+}
