@@ -37,6 +37,8 @@ export interface DreamBatchItem {
   costSummaryUSD?: number;
   /** Joined experiment log row when available. */
   experiment?: ExperimentEntry;
+  /** Orchestrator blackboard at run end (when persisted on trace). */
+  globalKnowledge?: Record<string, string>;
 }
 
 export interface CollectDreamBatchOptions {
@@ -78,6 +80,7 @@ export function structureTraceForDream(
     verdict: experiment?.verdict,
     costSummaryUSD: trace.costSummary?.totalCostUSD,
     experiment: experiment ?? undefined,
+    globalKnowledge: trace.globalKnowledge,
   };
 }
 

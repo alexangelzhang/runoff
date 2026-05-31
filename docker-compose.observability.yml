@@ -1,0 +1,11 @@
+# Optional: OTel collector via Docker (not required).
+# Prefer: npm run otel-collector:start (Homebrew / binary download / PATH).
+# See docs/operations/observability-collector-local.md
+services:
+  otel-collector:
+    image: otel/opentelemetry-collector:0.120.0
+    command: ["--config=/etc/otel-collector-config.yaml"]
+    volumes:
+      - ./config/otel-collector-config.yaml:/etc/otel-collector-config.yaml:ro
+    ports:
+      - "4318:4318"

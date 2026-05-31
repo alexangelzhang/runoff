@@ -3,10 +3,13 @@ dist/
 .env
 .venv/
 __pycache__/
+**/__pycache__/
 *.py[cod]
 *.pyc
 .claude/
-tmp/real-provider-smoke/
-tmp/kp.txt
-tmp/run-dream-offline.ts
-tmp/seed-and-run-dream-demo.ts
+.pytest_cache/
+.vscode/
+tmp/
+tests/.tmp-traces-*/
+tests/traces/
+!tests/traces/.gitkeep

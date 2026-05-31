@@ -1,14 +1,11 @@
 # Contributing
 
-Thanks for helping improve **llm-pipeline** — a repo-native, MCP-first code pipeline (not a generic chat-agent framework). See [`docs/differentiation.md`](docs/differentiation.md).
+Thanks for helping improve **llm-pipeline** — repo-native, MCP-first code pipelines. See [`docs/reference/differentiation.md`](docs/reference/differentiation.md).
 
 ## Prerequisites
 
-- **Node.js** 20+
-- **Python** 3
-- **Git** (required for smoke tests and `agent-write` worktrees)
-
 ```bash
+npm run check-prereqs   # Node 20+, Python 3, Git
 npm install
 ```
 
@@ -18,35 +15,41 @@ npm install
 npm run ci:gates
 ```
 
-This runs IPC sync check, gate2/gate3 e2e tests, and the full unit suite (~700+ tests).
+Runs: `check-ipc-sync`, gate2/gate3 e2e, full unit suite, **`npm run typecheck`**.
 
-Optional (when touching CLI providers):
+Optional (CLI providers):
 
 ```bash
-npm run smoke:real   # requires env vars — see docs/real-provider-smoke.md
+npm run smoke:real   # see docs/operations/real-provider-smoke.md
 ```
+
+Use the [PR template](.github/pull_request_template.md) checklist.
 
 ## Quick local verification
 
 ```bash
-npm run demo          # mock pipeline, no API keys
-npm test              # full suite
-npm run check-ipc-sync   # after changing src/ipc.ts or scripts/python/task_runner.py
+npm run demo
+npm test
+npm run check-ipc-sync   # after src/core/ipc.ts or scripts/python/task_runner.py
 ```
 
-## Project layout
+Test layout: [`docs/guides/testing.md`](docs/guides/testing.md).
 
-| Area | Path |
-|------|------|
-| MCP tools | `src/tools/` |
-| Orchestration | `src/orchestration/` |
-| Providers | `src/providers/` |
-| Python executor | `scripts/python/task_runner.py`, `scripts/python/workspace_manager.py` |
-| Tests | `tests/` |
+## Where to change what
+
+| Change | Read first | Path |
+|--------|------------|------|
+| IPC schema | Field manifests must match | `src/core/ipc.ts`, `scripts/python/task_runner.py` |
+| Worktree / locks | Ownership diagram | [`docs/architecture/execution-layers.md`](docs/architecture/execution-layers.md) |
+| MCP tool surface | Keep tools thin | `src/tools/` → logic in `src/orchestration/` or layers |
+| New pipeline feature | Layer map | [`docs/architecture/structure.md`](docs/architecture/structure.md) |
+| Config / DAG | Declaration SoT | `src/core/config.ts`, `pipeline.config.json` |
+
+**Do not** add large blocks to `src/tools/run-pipeline.ts` — register only; implement under `src/orchestration/pipeline-mcp-run.ts` or related modules.
 
 ## IPC changes
 
-If you modify `src/ipc.ts`, update `scripts/python/task_runner.py` field manifests and run:
+Update both sides and run:
 
 ```bash
 npm run check-ipc-sync
@@ -54,17 +57,30 @@ npm run check-ipc-sync
 
 ## TypeScript
 
-Production entry uses **tsx** (`npm run dev`, `npm start` after build). `npx tsc --noEmit` is tracked but not fully green yet — fix TS errors when you touch related files.
+- Dev/runtime: **tsx** (`npm run dev`)
+- CI: **`npm run typecheck`** (`tsc --noEmit`) must pass
+- Production build: `npm run build` → `dist/`
+
+## `issues/` directory
+
+Short-lived notes (smoke failures, triage, close-out checklists). Not a substitute for `ROADMAP.md` or `docs/`. Index: [`issues/README.md`](issues/README.md) · open: [`issues/OPEN-BACKLOG.md`](issues/OPEN-BACKLOG.md).
+
+## `examples/` directory
+
+Config templates in [`examples/configs/`](examples/configs/) (see [`examples/README.md`](examples/README.md)). Do not enable experimental flags in example configs — CI enforces via `check:examples-experimental`.
 
 ## Docs
 
-- User-facing: `README.md`, `docs/differentiation.md`, `docs/coding-agent-backends.md`
-- Agents editing this repo: `AGENTS.md`, `CLAUDE.md`
+- Users: `README.md`, `docs/guides/getting-started-30min.md`, `docs/reference/differentiation.md`
+- Layout: [`docs/architecture/structure.md`](docs/architecture/structure.md)
+- Agents: `AGENTS.md`, `CLAUDE.md`
+- Security: `docs/architecture/security-model.md`
 
 ## Release (maintainers)
 
-1. Update `CHANGELOG.md`
-2. `npm run ci:gates`
-3. Tag `v*` → GitHub Release workflow publishes notes
+See [`docs/operations/release-workflow-template.md`](docs/operations/release-workflow-template.md) and [`docs/reference/OPEN_SOURCE.md`](docs/reference/OPEN_SOURCE.md).
 
-See [`docs/OPEN_SOURCE.md`](docs/OPEN_SOURCE.md).
+1. `CHANGELOG.md`
+2. `npm run ci:gates`
+3. `npm run smoke:real:pre-release` (when CLI backends claimed)
+4. Tag `v*` → GitHub Release workflow

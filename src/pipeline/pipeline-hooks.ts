@@ -10,7 +10,7 @@ import type { PipelineConfig } from "../core/config.js";
 import { calculateConfigHash } from "../core/config.js";
 import { estimateCost } from "../routing/pricing.js";
 import type { PipelineTrace, StepTrace } from "../observability/trace.js";
-import { loadTraceById } from "../observability/trace.js";
+import { loadTraceById, updateTrace } from "../observability/trace.js";
 import type { PipelineCostAccumulator } from "../routing/pricing.js";
 import type { AgentMemory } from "../orchestration/memory.js";
 import { PatternCache, hashPrompt } from "../orchestration/pattern-cache.js";
@@ -28,14 +28,22 @@ import {
   type TraceExporter,
 } from "../observability/trace-exporter.js";
 import { feedbackRelevanceFromTrace } from "../orchestration/memory-relevance.js";
-import { storeEntityTriplesFromTrace } from "../orchestration/trace-entities.js";
 import { getPipelineMemory, resetPipelineMemoryRegistry } from "../memory/pipeline-memory.js";
-import { isLayeredAgentMemory } from "../memory/memory-backend-status.js";
+import {
+  enqueuePipelineMemoryFormation,
+  flushPipelineMemoryFormationQueue,
+  resetPipelineMemoryFormationQueue,
+  resolveMemoryFormationOptions,
+  runPipelineMemoryFormationNow,
+} from "../memory/pipeline-memory-formation-queue.js";
 
 /** Reset pipeline memory registry (for tests). */
 export function resetSharedMemory(): void {
   resetPipelineMemoryRegistry();
+  resetPipelineMemoryFormationQueue();
 }
+
+export { flushPipelineMemoryFormationQueue };
 
 /** Test hook: local file memory backing all pipeline runs. */
 export function getPipelineSharedMemory(): AgentMemory {
@@ -43,6 +51,7 @@ export function getPipelineSharedMemory(): AgentMemory {
 }
 
 let _otelExporter: TraceExporter | null = null;
+let _otelExporterConfigHash: string | undefined;
 
 /** OTel exporter used when `runtime.otelExport` is enabled (tests). */
 export function getPipelineOtelExporter(): TraceExporter | null {
@@ -56,6 +65,7 @@ export function getPipelineOtelMemoryExporter(): InMemoryTraceExporter | null {
 
 export function resetPipelineOtelExporter(): void {
   _otelExporter = null;
+  _otelExporterConfigHash = undefined;
 }
 
 // --- Context types ---
@@ -82,15 +92,31 @@ export interface PipelineEndContext {
   /** When set, merges orchestration replay into trace if not already present. */
   eventLog?: EventLog;
   runId?: string;
+  /** Final orchestrator blackboard — persisted on trace for Dream promotion. */
+  globalKnowledge?: Record<string, string>;
+  /** Non-fatal warnings surfaced to MCP/CLI callers. */
+  warnings?: string[];
 }
 
-/** Merge pattern-cache context into the user context string. */
-export function composeEffectivePipelineContext(
-  context: string | undefined,
-  patternContext: string,
-): string | undefined {
-  if (!patternContext) return context;
-  return context ? `${context}\n\n${patternContext}` : patternContext;
+/** Fields persisted at pipeline end — single list to avoid enrichment drift. */
+function buildTraceEndPatch(
+  trace: PipelineTrace,
+  sessionId: string,
+): Parameters<typeof updateTrace>[1] {
+  return {
+    sessionId,
+    experiment: trace.experiment,
+    costSummary: trace.costSummary,
+    orchestrationEvents: trace.orchestrationEvents,
+    handoffs: trace.handoffs,
+    approvals: trace.approvals,
+    globalKnowledge: trace.globalKnowledge,
+  };
+}
+
+function pushWarning(ctx: PipelineEndContext, message: string): void {
+  if (!ctx.warnings) ctx.warnings = [];
+  ctx.warnings.push(message);
 }
 
 export interface PipelineStartResult {
@@ -140,8 +166,7 @@ export class PipelineHooks {
     let patternContext = "";
     try {
       const orch = ctx.config.orchestration;
-      const hybridDefault = isLayeredAgentMemory(this.memory);
-      const hybridRetrieve = orch?.memoryHybridRetrieve ?? hybridDefault;
+      const hybridRetrieve = orch?.memoryHybridRetrieve === true;
       const timeoutMs = orch?.memoryHybridRetrieveTimeoutMs ?? 800;
       patternContext = await this.patternCache.buildAssociativeContextAsync(ctx.prompt, 3, {
         hybridRetrieve,
@@ -189,18 +214,18 @@ export class PipelineHooks {
     }
   }
 
-  onPipelineFailed(ctx: PipelineEndContext): void {
-    this.finishPipelineTrace(ctx, { judgeBaseline: false });
+  async onPipelineFailed(ctx: PipelineEndContext): Promise<void> {
+    await this.finishPipelineTrace(ctx, { judgeBaseline: false });
   }
 
-  onPipelineEnd(ctx: PipelineEndContext): void {
-    this.finishPipelineTrace(ctx, { judgeBaseline: true });
+  async onPipelineEnd(ctx: PipelineEndContext): Promise<void> {
+    await this.finishPipelineTrace(ctx, { judgeBaseline: true });
   }
 
-  private finishPipelineTrace(
+  private async finishPipelineTrace(
     ctx: PipelineEndContext,
     options: { judgeBaseline: boolean },
-  ): void {
+  ): Promise<void> {
     let { trace } = ctx;
     if (ctx.eventLog && ctx.runId && !trace.orchestrationEvents?.length) {
       try {
@@ -250,36 +275,56 @@ export class PipelineHooks {
       logger.warn("pipeline-hooks", `Experiment log failed: ${err instanceof Error ? err.message : String(err)}`);
     }
 
-    try {
-      if (trace.finalStatus === "approved") {
-        this.patternCache.storeFromTrace(trace);
-      }
-      feedbackRelevanceFromTrace(this.memory, trace, { project: "default" });
-    } catch {
-      // Non-critical
-    }
-
-    try {
-      storeEntityTriplesFromTrace(this.memory, trace, { project: "default" });
-    } catch {
-      // Non-critical
-    }
-
     const cfg = ctx.config ?? this.config;
-    if (cfg.orchestration?.memoryAutoCompact) {
+    const formationOpts = resolveMemoryFormationOptions(cfg);
+    const formationJob = {
+      config: cfg,
+      sessionId: this.sessionId,
+      trace,
+      autoCompact: formationOpts.autoCompact,
+      hotPathForget: formationOpts.hotPathForget,
+    };
+    if (formationOpts.async) {
+      enqueuePipelineMemoryFormation(formationJob);
+    } else {
       try {
-        this.memory.compact();
+        await runPipelineMemoryFormationNow(formationJob);
       } catch {
         // Non-critical
       }
+    }
+
+    trace.sessionId = this.sessionId;
+    if (ctx.globalKnowledge && Object.keys(ctx.globalKnowledge).length > 0) {
+      trace.globalKnowledge = ctx.globalKnowledge;
+    }
+    const traceUpdated = updateTrace(trace.id, buildTraceEndPatch(trace, this.sessionId));
+    if (!traceUpdated) {
+      const msg = `Failed to persist trace enrichment for ${trace.id}`;
+      logger.warn("pipeline-hooks", msg);
+      pushWarning(ctx, msg);
     }
 
     if (cfg.runtime?.otelExport) {
       try {
-        if (!_otelExporter) _otelExporter = createTraceExporterFromConfig(cfg);
-        if (_otelExporter) void _otelExporter.export(trace);
-      } catch {
-        // Non-critical
+        const cfgHash = calculateConfigHash(cfg);
+        if (!_otelExporter || _otelExporterConfigHash !== cfgHash) {
+          _otelExporter = createTraceExporterFromConfig(cfg);
+          _otelExporterConfigHash = cfgHash;
+        }
+        if (_otelExporter) {
+          await _otelExporter.export(trace).catch((err: unknown) => {
+            logger.warn(
+              "pipeline-hooks",
+              `OTel export failed: ${err instanceof Error ? err.message : String(err)}`,
+            );
+          });
+        }
+      } catch (err: unknown) {
+        logger.warn(
+          "pipeline-hooks",
+          `OTel export setup failed: ${err instanceof Error ? err.message : String(err)}`,
+        );
       }
     }
 

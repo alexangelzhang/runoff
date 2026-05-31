@@ -186,7 +186,7 @@ function tripwireFinding(
 }
 
 /** Blocks API keys / tokens in prompts and model output. */
-export class SecretLeakageGuardrail implements InputGuardrail, OutputGuardrail {
+export class SecretLeakageGuardrail implements InputGuardrail {
   readonly name = "SecretLeakageGuardrail";
 
   async check(input: AgentTask): Promise<GuardrailResult> {
@@ -211,7 +211,7 @@ export class SecretLeakageOutputGuardrail implements OutputGuardrail {
 }
 
 /** Blocks PII patterns in prompts and model output. */
-export class PiiGuardrail implements InputGuardrail, OutputGuardrail {
+export class PiiGuardrail implements InputGuardrail {
   readonly name = "PiiGuardrail";
 
   async check(input: AgentTask): Promise<GuardrailResult> {

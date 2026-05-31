@@ -5,10 +5,10 @@
 
 import type { PipelineConfig } from "../core/config.js";
 import {
-  createPipelineMemory,
   resolveMemoryBackendConfig,
   type MemoryBackendConfig,
 } from "../orchestration/memory-factory.js";
+import { getPipelineMemory } from "../memory/pipeline-memory.js";
 import { LayeredAgentMemory } from "../orchestration/http-memory-client.js";
 import type { AgentMemory, MemoryEntry, MemoryQuery } from "../orchestration/memory.js";
 import { createRemoteMemoryClient } from "../orchestration/memory-transport.js";
@@ -128,7 +128,7 @@ export async function queryPipelineMemoryMerged(
   query: MemoryQuery,
   options?: MemoryBackendDescribeOptions,
 ): Promise<{ entries: MemoryEntry[]; layered: boolean }> {
-  const mem = createPipelineMemory(config, options);
+  const mem = getPipelineMemory(config, options?.pipelineSessionId);
   if (isLayeredAgentMemory(mem)) {
     const entries = await mem.retrieveMerged(query);
     return { entries, layered: true };

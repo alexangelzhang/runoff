@@ -21,9 +21,14 @@ import {
   type RealProviderSmokeSummary,
   type RealSmokeCaseMetadata,
 } from "../../../src/pipeline/real-provider-smoke-runner.js";
+import {
+  applyRealProviderArgvDefaults,
+  formatPrecheckIssues,
+  precheckRealProviderCliEnv,
+} from "../../../src/pipeline/real-provider-cli-precheck.js";
 
-const ROOT_DIR = resolve(fileURLToPath(new URL("..", import.meta.url)));
-const TEST_ENTRY = join(ROOT_DIR, "tests", "real-provider.integration.test.ts");
+const ROOT_DIR = resolve(fileURLToPath(new URL("../../..", import.meta.url)));
+const TEST_ENTRY = join(ROOT_DIR, "tests", "integration", "real-provider.integration.test.ts");
 const HOME_SNAPSHOT_DIRS = ["traces", "sessions", "tasks"] as const;
 
 type Options = RealProviderSmokeOptions;
@@ -243,6 +248,21 @@ async function main(): Promise<void> {
   const options = parseArgs(process.argv.slice(2));
   ensureDir(options.reportDir);
 
+  applyRealProviderArgvDefaults();
+  const precheck = precheckRealProviderCliEnv();
+  if (precheck.length) {
+    writeText(join(options.reportDir, "precheck.txt"), formatPrecheckIssues(precheck));
+    const errors = precheck.filter((i) => i.severity === "error");
+    if (errors.length && options.mode !== "manual") {
+      console.error(formatPrecheckIssues(errors));
+      process.exitCode = 1;
+      return;
+    }
+    for (const issue of precheck) {
+      console.warn(`[real-provider-precheck] ${issue.envVar}: ${issue.message}`);
+    }
+  }
+
   let commandExitCode = 1;
   let runnerError: string | undefined;
   try {
@@ -285,14 +305,14 @@ async function main(): Promise<void> {
   writeJson(join(options.reportDir, "summary.json"), summary);
   writeText(join(options.reportDir, "summary.md"), renderRealProviderSmokeSummaryMarkdown(summary));
 
-  if (overallStatus === "passed" && !options.keepSuccessSandboxes) {
+  if (summary.overallStatus === "passed" && !options.keepSuccessSandboxes) {
     rmSync(join(options.reportDir, "sandboxes"), { recursive: true, force: true });
   }
 
-  console.log(`real-provider-smoke: ${overallStatus.toUpperCase()} (${options.mode})`);
+  console.log(`real-provider-smoke: ${summary.overallStatus.toUpperCase()} (${options.mode})`);
   console.log(`real-provider-smoke: report dir ${options.reportDir}`);
 
-  if (overallStatus !== "passed") {
+  if (summary.overallStatus !== "passed") {
     process.exitCode = 1;
   }
 }

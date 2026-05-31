@@ -2,7 +2,7 @@
  * P5 — Optional Mem0/Zep npm SDK transport (falls back to REST adapters).
  */
 
-import type { MemoryEntry, MemoryQuery } from "./memory.js";
+import type { MemoryEntry, MemoryQuery, MemoryScope } from "./memory.js";
 import { agentId } from "./multi-agent-types.js";
 import { HttpMemoryClient } from "./http-memory-client.js";
 import { Mem0MemoryClient, type Mem0MemoryConfig } from "./mem0-memory-client.js";
@@ -27,31 +27,35 @@ function mapMem0SdkResults(body: unknown, userId?: string): MemoryEntry[] {
       ? (body as { results: unknown[] }).results
       : [];
   const now = Date.now();
-  return arr
-    .map((item, i) => {
-      if (!item || typeof item !== "object") return null;
-      const row = item as Record<string, unknown>;
-      const content =
-        typeof row.memory === "string"
-          ? row.memory
-          : typeof row.text === "string"
-            ? row.text
-            : typeof row.content === "string"
-              ? row.content
-              : "";
-      if (!content) return null;
-      return {
-        id: String(row.id ?? `mem0-sdk-${i}`),
-        agentId: agentId("mem0"),
-        scope: { user: typeof row.user_id === "string" ? row.user_id : userId },
-        category: "context" as const,
-        content,
-        createdAt: now,
-        lastAccessedAt: now,
-        metadata: { source: "mem0-sdk" },
-      };
-    })
-    .filter((e): e is MemoryEntry => e !== null);
+  const out: MemoryEntry[] = [];
+  for (let i = 0; i < arr.length; i++) {
+    const item = arr[i];
+    if (!item || typeof item !== "object") continue;
+    const row = item as Record<string, unknown>;
+    const content =
+      typeof row.memory === "string"
+        ? row.memory
+        : typeof row.text === "string"
+          ? row.text
+          : typeof row.content === "string"
+            ? row.content
+            : "";
+    if (!content) continue;
+    const scope: MemoryScope = {
+      user: typeof row.user_id === "string" ? row.user_id : userId,
+    };
+    out.push({
+      id: String(row.id ?? `mem0-sdk-${i}`),
+      agentId: agentId("mem0"),
+      scope,
+      category: "context",
+      content,
+      createdAt: now,
+      lastAccessedAt: now,
+      metadata: { source: "mem0-sdk" },
+    });
+  }
+  return out;
 }
 
 async function tryMem0SdkClient(config: Mem0MemoryConfig): Promise<RemoteMemoryClient | null> {
@@ -118,29 +122,31 @@ async function tryZepSdkClient(config: ZepMemoryConfig): Promise<RemoteMemoryCli
               ? (raw as { results: unknown[] }).results
               : [];
           const now = Date.now();
-          return rows
-            .map((item, i) => {
-              if (!item || typeof item !== "object") return null;
-              const row = item as Record<string, unknown>;
-              const content =
-                typeof row.content === "string"
-                  ? row.content
-                  : typeof row.message === "string"
-                    ? row.message
-                    : "";
-              if (!content) return null;
-              return {
-                id: `zep-sdk-${i}`,
-                agentId: agentId("zep"),
-                scope: { user: config.userId },
-                category: "context" as const,
-                content,
-                createdAt: now,
-                lastAccessedAt: now,
-                metadata: { source: "zep-sdk" },
-              };
-            })
-            .filter((e): e is MemoryEntry => e !== null);
+          const out: MemoryEntry[] = [];
+          for (let i = 0; i < rows.length; i++) {
+            const item = rows[i];
+            if (!item || typeof item !== "object") continue;
+            const row = item as Record<string, unknown>;
+            const content =
+              typeof row.content === "string"
+                ? row.content
+                : typeof row.message === "string"
+                  ? row.message
+                  : "";
+            if (!content) continue;
+            const scope: MemoryScope = { user: config.userId };
+            out.push({
+              id: `zep-sdk-${i}`,
+              agentId: agentId("zep"),
+              scope,
+              category: "context",
+              content,
+              createdAt: now,
+              lastAccessedAt: now,
+              metadata: { source: "zep-sdk" },
+            });
+          }
+          return out;
         } catch {
           return [];
         }

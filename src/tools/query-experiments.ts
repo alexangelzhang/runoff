@@ -4,25 +4,16 @@
 
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import type { PipelineStatus } from "../core/state.js";
+import { PIPELINE_STATUS_FILTERS } from "../core/state.js";
 import { queryExperiments, summarizeExperiment } from "../observability/experiment-log.js";
 import {
   buildExperimentEvalReport,
   buildExperimentDatasetRows,
   exportExperimentDatasetJsonl,
 } from "../observability/observability-dataset.js";
+import { mcpJson, mcpError, mcpErrorFrom } from "./mcp-response.js";
 
-const STATUS_FILTER = [
-  "approved",
-  "failed",
-  "max_rounds",
-  "running",
-  "queued",
-  "aborted",
-  "awaiting_judge",
-  "awaiting_approval",
-  "awaiting_plan_approval",
-] as const satisfies readonly PipelineStatus[];
+const STATUS_FILTER = PIPELINE_STATUS_FILTERS;
 
 const VERDICT_FILTER = ["keep", "discard", "regression"] as const;
 
@@ -54,27 +45,27 @@ export function register(server: McpServer) {
 
         if (fmt === "summary") {
           if (!experimentId) {
-            return errorResponse("experimentId is required for format=summary");
+            return mcpError("Experiment query error", "experimentId is required for format=summary");
           }
           const summary = summarizeExperiment(experimentId);
-          return ok({ format: fmt, experimentId, variants: summary, count: summary.length });
+          return mcpJson({ format: fmt, experimentId, variants: summary, count: summary.length });
         }
 
         if (fmt === "eval-report") {
           if (!experimentId) {
-            return errorResponse("experimentId is required for format=eval-report");
+            return mcpError("Experiment query error", "experimentId is required for format=eval-report");
           }
           const report = buildExperimentEvalReport(experimentId);
-          return ok({ format: fmt, report });
+          return mcpJson({ format: fmt, report });
         }
 
         if (fmt === "dataset") {
           if (!experimentId) {
-            return errorResponse("experimentId is required for format=dataset");
+            return mcpError("Experiment query error", "experimentId is required for format=dataset");
           }
           const exported = exportExperimentDatasetJsonl(experimentId, { query });
           const preview = buildExperimentDatasetRows(experimentId, query).slice(0, 5);
-          return ok({
+          return mcpJson({
             format: fmt,
             experimentId,
             datasetPath: exported.path,
@@ -84,24 +75,10 @@ export function register(server: McpServer) {
         }
 
         const entries = queryExperiments(query);
-        return ok({ format: "entries", entries, count: entries.length });
+        return mcpJson({ format: "entries", entries, count: entries.length });
       } catch (err: unknown) {
-        const message = err instanceof Error ? err.message : String(err);
-        return errorResponse(message);
+        return mcpErrorFrom("Experiment query error", err);
       }
     },
   );
-}
-
-function ok(payload: unknown) {
-  return {
-    content: [{ type: "text" as const, text: JSON.stringify(payload, null, 2) }],
-  };
-}
-
-function errorResponse(message: string) {
-  return {
-    content: [{ type: "text" as const, text: `Experiment query error: ${message}` }],
-    isError: true,
-  };
 }

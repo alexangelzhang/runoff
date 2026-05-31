@@ -12,6 +12,8 @@ on:
         required: false
       OPENAI_API_KEY:
         required: false
+    # Optional repository variable (Settings → Variables):
+    #   LLM_PIPELINE_OTEL_ENDPOINT — corporate OTLP HTTP URL; skips local start/download.
 
 permissions:
   contents: read
@@ -46,6 +48,14 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      - name: Verify OTel export path
+        run: npm run verify:otel-export
+
+      - name: OTel collector pre-release gate
+        env:
+          LLM_PIPELINE_OTEL_ENDPOINT: ${{ vars.LLM_PIPELINE_OTEL_ENDPOINT }}
+        run: bash scripts/shell/pre-release-otel-gate.sh
 
       - name: Verify required CLI agents
         shell: bash

@@ -1,6 +1,6 @@
 #!/usr/bin/env npx tsx
 /**
- * Verifies TypeScript `src/ipc.ts` stays in sync with `scripts/python/task_runner.py`
+ * Verifies TypeScript `src/core/ipc.ts` stays in sync with `scripts/python/task_runner.py`
  * (schema versions + payload/result field manifests). Run from repo root:
  *   npm run check-ipc-sync
  */

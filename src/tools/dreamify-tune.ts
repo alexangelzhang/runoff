@@ -8,6 +8,7 @@ import { loadConfig } from "../core/config.js";
 import { getPipelineLocalMemory } from "../memory/pipeline-memory.js";
 import { runDreamifyTune } from "../dreamify/dreamify-tuner.js";
 import { getDreamifyBestParamsPath, loadDreamifyParamsFile } from "../dreamify/dreamify-params.js";
+import { mcpError, mcpJson, mcpErrorFrom } from "./mcp-response.js";
 
 export function register(server: McpServer) {
   server.tool(
@@ -24,19 +25,10 @@ export function register(server: McpServer) {
         const config = loadConfig();
         const exp = experimentId || config.orchestration?.dreamify?.experimentId;
         if (!exp) {
-          return {
-            content: [
-              {
-                type: "text",
-                text: JSON.stringify(
-                  { error: "experimentId required (arg or orchestration.dreamify.experimentId)" },
-                  null,
-                  2,
-                ),
-              },
-            ],
-            isError: true,
-          };
+          return mcpError(
+            "Dreamify tune error",
+            "experimentId required (arg or orchestration.dreamify.experimentId)",
+          );
         }
 
         const report = runDreamifyTune({
@@ -46,28 +38,13 @@ export function register(server: McpServer) {
           dryRun: dryRun ?? false,
         });
 
-        return {
-          content: [
-            {
-              type: "text",
-              text: JSON.stringify(
-                {
-                  report,
-                  bestParamsPath: getDreamifyBestParamsPath(),
-                  activeFile: loadDreamifyParamsFile(),
-                },
-                null,
-                2,
-              ),
-            },
-          ],
-        };
+        return mcpJson({
+          report,
+          bestParamsPath: getDreamifyBestParamsPath(),
+          activeFile: loadDreamifyParamsFile(),
+        });
       } catch (err: unknown) {
-        const message = err instanceof Error ? err.message : String(err);
-        return {
-          content: [{ type: "text", text: JSON.stringify({ error: message }, null, 2) }],
-          isError: true,
-        };
+        return mcpErrorFrom("Dreamify tune error", err);
       }
     },
   );

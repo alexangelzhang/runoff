@@ -8,6 +8,7 @@ import { loadConfig } from "../core/config.js";
 import { queryPipelineMemoryMerged } from "../memory/memory-backend-status.js";
 import { agentId } from "../orchestration/multi-agent-types.js";
 import type { MemoryCategory } from "../orchestration/memory.js";
+import { mcpJson, mcpErrorFrom } from "./mcp-response.js";
 
 const CATEGORIES = [
   "pattern",
@@ -49,36 +50,21 @@ export function register(server: McpServer) {
           pipelineSessionId: sessionId,
         });
 
-        return {
-          content: [
-            {
-              type: "text",
-              text: JSON.stringify(
-                {
-                  layered,
-                  count: entries.length,
-                  entries: entries.map((e) => ({
-                    id: e.id,
-                    agentId: e.agentId,
-                    category: e.category,
-                    relevance: e.relevance,
-                    content: e.content.slice(0, 500),
-                    scope: e.scope,
-                    createdAt: e.createdAt,
-                  })),
-                },
-                null,
-                2,
-              ),
-            },
-          ],
-        };
+        return mcpJson({
+          layered,
+          count: entries.length,
+          entries: entries.map((e) => ({
+            id: e.id,
+            agentId: e.agentId,
+            category: e.category,
+            relevance: e.relevance,
+            content: e.content.slice(0, 500),
+            scope: e.scope,
+            createdAt: e.createdAt,
+          })),
+        });
       } catch (err: unknown) {
-        const message = err instanceof Error ? err.message : String(err);
-        return {
-          content: [{ type: "text", text: JSON.stringify({ error: message }, null, 2) }],
-          isError: true,
-        };
+        return mcpErrorFrom("Query memory error", err);
       }
     },
   );

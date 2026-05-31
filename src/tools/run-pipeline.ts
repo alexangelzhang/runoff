@@ -2,6 +2,7 @@ import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { executePipelineRun } from "../orchestration/pipeline-mcp-run.js";
 import { PipelineResult, PipelineParams } from "./helpers.js";
+import { mcpJson, mcpErrorFrom, pipelineMcpIsError } from "./mcp-response.js";
 
 /**
  * Main entry point for pipeline execution with global timeout protection.
@@ -53,20 +54,9 @@ export function register(server: McpServer) {
     async (toolArgs) => {
       try {
         const result = await runPipelineMode({ ...toolArgs });
-        return {
-          content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
-          isError: result.status === "failed" || result.status === "aborted",
-        };
+        return mcpJson(result, { isError: pipelineMcpIsError(result.status) });
       } catch (err: unknown) {
-        return {
-          content: [
-            {
-              type: "text",
-              text: `Pipeline error: ${err instanceof Error ? err.message : String(err)}`,
-            },
-          ],
-          isError: true,
-        };
+        return mcpErrorFrom("Pipeline error", err);
       }
     },
   );

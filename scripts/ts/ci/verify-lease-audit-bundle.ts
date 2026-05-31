@@ -8,8 +8,8 @@
  */
 
 import { readFileSync } from "node:fs";
-import type { LeaseAuditSignedBundle } from "../../../src/orchestration/a2a/federation-lease-audit-export.ts";
-import { verifyLeaseAuditSignedBundle } from "../../../src/orchestration/a2a/federation-lease-audit-export.ts";
+import type { LeaseAuditSignedBundle } from "../../../src/experimental/a2a/federation-lease-audit-export.ts";
+import { verifyLeaseAuditSignedBundle } from "../../../src/experimental/a2a/federation-lease-audit-export.ts";
 
 function parseArgs(argv: string[]): {
   path: string;

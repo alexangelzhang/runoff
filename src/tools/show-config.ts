@@ -5,6 +5,7 @@ import { describeMemoryBackend } from "../memory/memory-backend-status.js";
 import { describeDreamifyStatus } from "../dreamify/dreamify-status.js";
 import { getDreamExportPath } from "../dream/dream-export.js";
 import { loadDreamState } from "../memory/dream-state.js";
+import { mcpJson, mcpErrorFrom } from "./mcp-response.js";
 
 export function register(server: McpServer) {
   server.tool(
@@ -37,6 +38,18 @@ export function register(server: McpServer) {
           routingRules: config.routing || [],
           retryPolicy: config.retry || { maxRounds: 1 },
           memoryBackend: describeMemoryBackend(config),
+          orchestration: {
+            memoryHybridRetrieve: config.orchestration?.memoryHybridRetrieve === true,
+            memoryHybridRetrieveTimeoutMs: config.orchestration?.memoryHybridRetrieveTimeoutMs,
+            memoryAutoCompact: config.orchestration?.memoryAutoCompact,
+            memoryFormationAsync: config.orchestration?.memoryFormationAsync !== false,
+            memoryHotPathForget: config.orchestration?.memoryHotPathForget !== false,
+            dream: config.orchestration?.dream,
+          },
+          runtime: {
+            governance: config.runtime?.governance,
+            otelExport: config.runtime?.otelExport,
+          },
           dreamify: describeDreamifyStatus(config),
           dream: {
             config: config.orchestration?.dream,
@@ -45,15 +58,9 @@ export function register(server: McpServer) {
           },
         };
 
-        return {
-          content: [{ type: "text", text: JSON.stringify(output, null, 2) }]
-        };
+        return mcpJson(output);
       } catch (err: unknown) {
-        const message = err instanceof Error ? err.message : String(err);
-        return {
-          content: [{ type: "text", text: `Error loading config: ${message}` }],
-          isError: true
-        };
+        return mcpErrorFrom("Error loading config", err);
       }
     }
   );

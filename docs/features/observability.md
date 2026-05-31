@@ -1,0 +1,171 @@
+# 可观测模块（本地、轻量）
+
+> **定位**：借鉴 **LangSmith、LangFuse、Phoenix** 等产品的**思路**（非 SDK/SaaS 接入），在 **llm-pipeline 自有存储与 MCP** 内做轻量闭环。  
+> **我们不是** LangSmith/Langfuse 的 UI 或托管替代 — 见下文「明确不做」。
+
+## 要回答的三个问题
+
+| 问题 | 模块 | 存储 / 入口 |
+|------|------|-------------|
+| 单次 pipeline 发生了什么？ | **Trace** | `~/.llm-pipeline/traces/` · MCP `llm_query_traces` |
+| 同一任务多配置/多 prompt 谁更好？ | **Experiment** | `~/.llm-pipeline/experiments.jsonl` · MCP `llm_query_experiments` |
+| 可选：给外部脚本或人工复盘？ | **Dataset 导出** | `~/.llm-pipeline/datasets/<experimentId>.jsonl` |
+
+成本与跨进程追踪（已有、非本模块核心）：
+
+- `trace.costSummary`、`CostGovernor` — pipeline 级花费
+- `runtime.otelExport` — 可选 OTLP，默认关
+
+## 数据流（主路径）
+
+```
+llm_run_pipeline
+  → PipelineHooks
+       ├─ persistRunningPipelineTrace / recordTrace     (trace, lifecycle: running|final)
+       ├─ appendExperimentEntry + judgeExperiment      (experiments.jsonl, 仅同 prompt 族)
+       ├─ pattern-cache / memory feedback              (成功 run 学习，非查询面)
+       └─ otelExport?                                  (可选)
+  → llm_query_traces / llm_query_experiments            (MCP 只读分析)
+```
+
+详见 [`trace-lifecycle.md`](architecture/trace-lifecycle.md)、[`observability-eval.md`](features/observability-eval.md)。
+
+## 代码地图（刻意保持小）
+
+| 职责 | 文件 |
+|------|------|
+| Trace 读写/聚合 | `src/observability/trace.ts` |
+| Postmortem + drift | `src/observability/trace-postmortem.ts` |
+| 人工 scores | `src/observability/trace-scores.ts` |
+| 实验 JSONL + 按 variant 汇总 | `src/observability/experiment-log.ts` |
+| keep/discard 规则 | `src/orchestration/experiment-judge.ts` |
+| 数据集行 + eval 报告 | `src/observability/observability-dataset.ts` |
+| 挂钩编排 | `src/pipeline/pipeline-hooks.ts` |
+| 本地 UI | `src/pipeline/observability-ui-server.ts` |
+| MCP | `src/tools/query-traces.ts`、`src/tools/query-experiments.ts`、`src/tools/score-trace.ts` |
+
+**不单独再拆「观测微服务」**；新能力优先落在上述文件，避免 parallel 抽象层。
+
+## 借鉴谁、借什么（概念对照）
+
+两家都适合做**产品思路**参考，本仓库只取与 MCP pipeline 主链重合的部分。
+
+| 概念 | LangSmith 侧重 | LangFuse 侧重 | 本仓库对应 | 状态 |
+|------|----------------|---------------|------------|------|
+| 单次运行记录 | Run / Run tree | Trace + Observation 层级 | `PipelineTrace` + `StepTrace` + `spanId` | ✅ 已有 |
+| 花费 | Token/cost 报表 | Generation 级 cost | `totalUsage`、`costSummary`、step `usage` | ✅ 已有 |
+| 实验 / 对比 | Datasets、Experiments | Datasets、Eval runs | `experiments.jsonl` + `eval-report` | ✅ TOP1 |
+| 自动评分 | Evaluators | Scores（含模型/人工） | `judgeExperiment` → `judgeScores` | ✅ 自动；人工分未做 |
+| Prompt 版本 | Prompt hub | Prompt 管理 + 关联 trace | `prompt-version.ts`、`StepTrace.promptVersionId` | ✅ 已有 |
+| 会话聚合 | Projects | **Session**（多 trace 一组） | `PipelineTrace.sessionId` + `llm_query_traces` / CLI `--session` | ✅ |
+| 标签过滤 | Metadata | **Tags** on trace | `ExperimentMeta.tags`；trace 级 tags 可扩展 | ⚠️ 实验侧有 |
+| 嵌套 span | 较完整 | Observation 树 | 扁平 `steps[]` + 可选 OTel 导出 | 够用即可，不追全树 |
+| UI 工作台 | 强 | 强 | 本地 `pipeline observability ui`（简易，可扩展） | ✅ 基础版 |
+| 人工 Score | Scores | `traces/scores.jsonl` + MCP `llm_score_trace` | ✅ |
+| 失败复盘 | — | `format=postmortem` + drift 提示 | ✅ `trace-postmortem.ts` |
+
+**LangFuse 借鉴已落地**：`traces/scores.jsonl` 记录 `traceId` + 数值/备注；eval-report 的 `traceInsights` 带一行 postmortem 摘要。
+
+**LangSmith 值得多借的一点**：**Dataset 行 ↔ Run** 一一对应、便于离线复现——已由 `llm-pipeline-eval-v1` + `traceId` 字段覆盖。
+
+## 明确不做（非目标）
+
+| 不做 |
+|------|
+| LangSmith / **LangFuse** / Phoenix / Arize **托管或官方 SDK 接入** |
+| 全功能协作评审台、多租户 SaaS 观测台 |
+| 在线 prompt playground |
+| 与 pipeline 无关的通用 Observation 语义层（除非 OTel 已够用） |
+
+## Optional OTLP export
+
+Off by default. Enable in `pipeline.config.json`:
+
+```json
+{
+  "runtime": {
+    "otelExport": true,
+    "otelEndpoint": "http://127.0.0.1:4318/v1/traces"
+  }
+}
+```
+
+Or set environment variable `OTEL_EXPORTER_OTLP_ENDPOINT` (see `src/observability/trace-exporter.ts`).
+
+Spans are derived from pipeline/step traces at end of run — suitable for Jaeger, Grafana Tempo, or any OTLP HTTP collector.
+
+**Self-hosted collector（pre-release / 本地）** — 详见 [`observability-collector-local.md`](operations/observability-collector-local.md)
+
+不强制 Docker：Homebrew / 官方二进制下载 / 公司已有 Collector URL / Docker 仅作兜底。
+
+```bash
+# 个人试用（无 Docker）
+brew install opentelemetry-collector   # macOS 可选
+LLM_PIPELINE_OTEL_DOWNLOAD=1 npm run otel-collector:start
+npm run verify:otel-collector:local
+
+# 仅连公司已有 Collector
+export OTEL_EXPORTER_OTLP_ENDPOINT=https://internal-collector:4318
+export LLM_PIPELINE_OTEL_SKIP_START=1
+LLM_PIPELINE_OTEL_COLLECTOR_REQUIRED=1 npm run verify:otel-collector
+```
+
+CI：`verify:otel-export` 必过；`verify:otel-collector` 无 listener 时 SKIP。pre-release 用 `otel-collector.sh start` + `LLM_PIPELINE_OTEL_DOWNLOAD=1`，验证失败会真实失败（不再 `continue-on-error`）。
+
+## 本地 UI（简易）
+
+```bash
+npm run pipeline:observability:ui
+# 或
+npx tsx scripts/ts/dev/pipeline-cli.ts observability ui --port 8765
+```
+
+浏览器：最近 traces 列表、单 trace postmortem JSON、experiment eval-report。后续可扩展过滤与图表。
+
+## CLI traces
+
+```bash
+npx tsx scripts/ts/dev/pipeline-cli.ts traces list --status failed --limit 10
+npx tsx scripts/ts/dev/pipeline-cli.ts traces show <traceId> --postmortem
+npx tsx scripts/ts/dev/pipeline-cli.ts traces tail
+```
+
+## MCP 用法摘要
+
+**Trace**
+
+```json
+{ "status": "failed", "limit": 20, "aggregate": true }
+```
+
+```json
+{ "traceId": "<id>", "format": "postmortem" }
+```
+
+```json
+{ "sessionId": "<checkpoint-session>", "detail": true, "format": "full" }
+```
+
+**Score**
+
+```json
+{ "traceId": "<id>", "name": "helpfulness", "value": 4, "comment": "clear fix" }
+```
+
+**Experiment**（需先有多轮 `llm_run_pipeline`，同 prompt 会共享 `experimentId`）
+
+```json
+{ "experimentId": "<id>", "format": "eval-report" }
+```
+
+```json
+{ "experimentId": "<id>", "format": "dataset" }
+```
+
+`variant` 由 hooks 根据 prompt+config 哈希生成；改 config 即新 variant，适合 A/B。
+
+## 扩展原则（后续 UI / 观测）
+
+- UI：在现有 HTTP server 上增加图表、trace↔experiment 深链、实时 tail WebSocket（可选）。
+- 严格写盘：`LLM_PIPELINE_TRACE_STRICT=1` 时 trace 写入失败会抛错（默认仅 warn）。
+- 避免：新配置文件层、重复 trace 存储、托管 SaaS 耦合。

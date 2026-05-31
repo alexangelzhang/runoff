@@ -33,6 +33,11 @@ export function getSessionsDir(): string {
   return join(getPipelineHomeDir(), "sessions");
 }
 
+/** Managed git worktrees (Python workspace_manager). */
+export function getManagedWorkspacesDir(): string {
+  return join(getPipelineHomeDir(), "workspaces");
+}
+
 export function getTracesDir(): string {
   return join(getPipelineHomeDir(), "traces");
 }

@@ -43,12 +43,12 @@ function pickStageMergeProvider(config: PipelineConfig, stepNames: string[]): LL
     if (!tuple) continue;
     const providerRef = Array.isArray(tuple[0]) ? tuple[0][0] : tuple[0];
     const pc = config.providers[providerRef];
-    if (pc) return createProvider(providerRef, pc);
+    if (pc) return createProvider(providerRef, pc) ?? undefined;
   }
   const firstKey = Object.keys(config.providers)[0];
   if (!firstKey) return undefined;
   const pc = config.providers[firstKey];
-  return pc ? createProvider(firstKey, pc) : undefined;
+  return pc ? (createProvider(firstKey, pc) ?? undefined) : undefined;
 }
 
 function candidateToMainArtifacts(candidate: Candidate): Artifact[] {

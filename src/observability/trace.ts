@@ -85,6 +85,8 @@ export interface CandidateTrace {
 
 export interface PipelineTrace {
   id: string;
+  /** Checkpoint / resume session (groups related runs). */
+  sessionId?: string;
   prompt: string;
   promptLength: number;
   mode: "pipeline" | "race";
@@ -112,6 +114,8 @@ export interface PipelineTrace {
   orchestrationEvents?: OrchestrationTraceRecord[];
   handoffs?: HandoffTraceRecord[];
   approvals?: ApprovalTraceRecord[];
+  /** Run-scoped orchestrator insights (persisted on trace for Dream promotion). */
+  globalKnowledge?: Record<string, string>;
 }
 
 export interface OrchestrationTraceRecord {
@@ -163,8 +167,12 @@ export function recordTrace(trace: PipelineTrace): void {
     const tmpFile = `${outputFile}.${process.pid}.tmp`;
     writeFileSync(tmpFile, JSON.stringify(trace, null, 2));
     renameSync(tmpFile, outputFile);
-  } catch {
-    // Non-critical — don't break pipeline if trace write fails
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    logger.warn("trace", `Failed to write trace ${trace.id}: ${message}`);
+    if (process.env.LLM_PIPELINE_TRACE_STRICT === "1") {
+      throw err;
+    }
   }
 }
 
@@ -237,12 +245,22 @@ export interface TraceQuery {
   since?: string;   // ISO date string
   until?: string;   // ISO date string
   limit?: number;
+  traceId?: string;
+  sessionId?: string;
 }
 
 /** Filter traces by status, mode, date range, and limit. */
 export function queryTraces(query: TraceQuery = {}): PipelineTrace[] {
+  if (query.traceId) {
+    const one = loadTraceById(query.traceId);
+    return one ? [one] : [];
+  }
+
   let traces = listTraces();
 
+  if (query.sessionId) {
+    traces = traces.filter((t) => t.sessionId === query.sessionId);
+  }
   if (query.status) {
     traces = traces.filter((t) => t.finalStatus === query.status);
   }

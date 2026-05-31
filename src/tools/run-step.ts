@@ -10,6 +10,7 @@ import { getSemanticCache } from "../routing/semantic-cache.js";
 import { isAgentMode, isTextResponse } from "../providers/types.js";
 import { serializeResponse, type PipelineConfig } from "./helpers.js";
 import { ensureWorkDirForStep } from "../runtime/pipeline-workdir.js";
+import { mcpJson, mcpErrorFrom } from "./mcp-response.js";
 
 export function register(server: McpServer, initialConfig: PipelineConfig) {
   server.tool(
@@ -28,33 +29,26 @@ export function register(server: McpServer, initialConfig: PipelineConfig) {
         const config = loadConfig();
         const result = getProviderForStep(step, config);
         if (!result) {
-          return {
-            content: [{
-              type: "text" as const,
-              text: JSON.stringify({
-                status: "skip",
-                step,
-                reason: `Step "${step}" is configured as builtin — handle it in Claude Code directly.`,
-              }, null, 2),
-            }],
-          };
+          return mcpJson({
+            status: "skip",
+            step,
+            reason: `Step "${step}" is configured as builtin — handle it in Claude Code directly.`,
+          });
         }
 
         ensureWorkDirForStep(step, config, workDir);
 
         if (!result.provider || Array.isArray(result.provider)) {
-          return {
-            content: [{
-              type: "text" as const,
-              text: JSON.stringify({
-                status: "error",
-                step,
-                reason: Array.isArray(result.provider)
-                  ? `Step "${step}" is a race step — use llm_run_pipeline instead.`
-                  : `No provider available for step "${step}".`,
-              }, null, 2),
-            }],
-          };
+          return mcpJson(
+            {
+              status: "error",
+              step,
+              reason: Array.isArray(result.provider)
+                ? `Step "${step}" is a race step — use llm_run_pipeline instead.`
+                : `No provider available for step "${step}".`,
+            },
+            { isError: true },
+          );
         }
 
         const provider = result.provider;
@@ -79,37 +73,29 @@ export function register(server: McpServer, initialConfig: PipelineConfig) {
             ? cache.get(cacheKey, cacheLookup)
             : cache.get(cacheKey);
           if (cached) {
-            return {
-              content: [{
-                type: "text" as const,
-                text: JSON.stringify({
-                  status: "success",
-                  step,
-                  provider: result.providerName,
-                  cached: true,
-                  ...serializeResponse(cached),
-                }, null, 2),
-              }],
-            };
+            return mcpJson({
+              status: "success",
+              step,
+              provider: result.providerName,
+              cached: true,
+              ...serializeResponse(cached),
+            });
           }
         }
 
         const response = await provider.execute({ prompt, language, context, workDir });
 
         if (response.failed) {
-          return {
-            content: [{
-              type: "text" as const,
-              text: JSON.stringify({
-                status: "error",
-                step,
-                provider: result.providerName,
-                error: response.error ?? "Unknown execution error",
-                ...serializeResponse(response),
-              }, null, 2),
-            }],
-            isError: true,
-          };
+          return mcpJson(
+            {
+              status: "error",
+              step,
+              provider: result.providerName,
+              error: response.error ?? "Unknown execution error",
+              ...serializeResponse(response),
+            },
+            { isError: true },
+          );
         }
 
         // Only cache text mode responses
@@ -121,23 +107,14 @@ export function register(server: McpServer, initialConfig: PipelineConfig) {
           }
         }
 
-        return {
-          content: [{
-            type: "text" as const,
-            text: JSON.stringify({
-              status: "success",
-              step,
-              provider: result.providerName,
-              ...serializeResponse(response),
-            }, null, 2),
-          }],
-        };
+        return mcpJson({
+          status: "success",
+          step,
+          provider: result.providerName,
+          ...serializeResponse(response),
+        });
       } catch (err: unknown) {
-        const message = err instanceof Error ? err.message : String(err);
-        return {
-          content: [{ type: "text" as const, text: `Step "${step}" error: ${message}` }],
-          isError: true,
-        };
+        return mcpErrorFrom(`Step "${step}" error`, err);
       }
     }
   );

@@ -1,0 +1,16 @@
+{
+  "providers": {
+    "lite": { "type": "mock", "tier": "lite" },
+    "full": { "type": "mock", "tier": "full" }
+  },
+  "pipeline": {
+    "analyze": ["lite"],
+    "refactor": [["full", "lite"], "analyze"],
+    "review": ["full", "refactor"]
+  },
+  "retry": {
+    "maxRounds": 3,
+    "reviewStep": "review"
+  },
+  "routing": []
+}

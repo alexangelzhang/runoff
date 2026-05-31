@@ -1,7 +1,7 @@
 #!/bin/bash
 # Optional: register llm-pipeline MCP server in Claude Code CLI.
 # Preferred quick start: npm install && npm run demo
-# Docs: docs/coding-agent-backends.md, docs/differentiation.md
+# Docs: docs/guides/coding-agent-backends.md, docs/reference/differentiation.md
 
 set -e
 
@@ -9,14 +9,22 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 echo "=== llm-pipeline setup ==="
 echo ""
+if [ -x "$SCRIPT_DIR/scripts/shell/check-prereqs.sh" ]; then
+  bash "$SCRIPT_DIR/scripts/shell/check-prereqs.sh" || exit 1
+  echo ""
+fi
 echo "Quick start (no API keys):"
 echo "  cd $SCRIPT_DIR && npm install && npm run demo"
+echo ""
+echo "MCP config snippet (Cursor / Claude Desktop / Claude Code):"
+echo "  npm run setup:mcp"
+echo "  npm run setup:mcp -- --install --host claude-code   # optional one-click"
 echo ""
 echo "MCP server (stdio, uses tsx — no build required):"
 echo "  npm run dev"
 echo ""
 echo "Run on your git repo without IDE:"
-echo "  npm run pipeline:run -- --prompt '...' --work-dir /path/to/repo --config $SCRIPT_DIR/examples/cli.config.json"
+echo "  npm run pipeline:run -- --prompt '...' --work-dir /path/to/repo --config $SCRIPT_DIR/examples/configs/cli.config.json"
 echo ""
 
 if ! command -v claude &>/dev/null; then
@@ -41,4 +49,4 @@ claude mcp add llm-pipeline $ENV_ARGS -- node "$SCRIPT_DIR/dist/index.js"
 
 echo ""
 echo "Done. Restart Claude Code if needed."
-echo "Config template: examples/cli.config.json → copy to your target repo as pipeline.config.json"
+echo "Config template: examples/configs/cli.config.json → copy to your target repo as pipeline.config.json"

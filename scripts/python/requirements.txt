@@ -1,0 +1,3 @@
+# llm-pipeline Python sidecar (S3.4)
+# workspace_manager.py and task_runner.py use stdlib only.
+# Pin interpreter in devcontainer / CI: Python 3.11+

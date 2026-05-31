@@ -16,7 +16,7 @@ import { buildExperimentEvalReport } from "../../../src/observability/observabil
 import { loadTraceById } from "../../../src/observability/trace.js";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "../../..");
-const CONFIG_SRC = join(ROOT, "examples", "quickstart.config.json");
+const CONFIG_SRC = join(ROOT, "examples", "configs", "quickstart.config.json");
 
 async function main(): Promise<void> {
   const home = mkdtempSync(join(tmpdir(), "llm-pipeline-demo-"));

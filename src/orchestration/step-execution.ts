@@ -77,6 +77,8 @@ export interface StepOutcome {
   artifacts?: Artifact[];
   awaitingJudge?: boolean;
   raceSession?: RaceSession;
+  /** Index into raceSession.candidates when awaitingJudge (for auto-pick). */
+  raceWinnerIndex?: number;
   nextSteps?: NextStep[];
 }
 
@@ -317,6 +319,11 @@ export async function executePipelineStep(
       : {}),
   };
 
+  const raceWinnerIndex =
+    isAgentRace && awaitingJudge
+      ? Math.max(0, responses.findIndex((r) => r.provider.name === racePick.entry.providerName))
+      : undefined;
+
   let raceSession: RaceSession | undefined;
   if (isAgentRace && awaitingJudge) {
     trace.raceParticipants = providerNames;
@@ -371,6 +378,7 @@ export async function executePipelineStep(
     artifacts: artifacts.length > 0 ? artifacts : undefined,
     awaitingJudge,
     raceSession,
+    raceWinnerIndex,
     nextSteps: filterValidNextSteps(response.nextSteps),
   };
 }

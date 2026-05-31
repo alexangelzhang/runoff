@@ -4,6 +4,7 @@ import { platform } from "node:os";
 import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { createTaskPayload, parseTaskResult, type TaskResult } from "../core/ipc.js";
+import { normalizeDelegateArgv } from "./delegate-argv.js";
 import { getTaskRunnerScriptPath, getTasksDir } from "../core/paths.js";
 import {
   LLMProvider,
@@ -141,7 +142,8 @@ export class CLIProvider implements LLMProvider {
     const resultFile = join(tasksDir, `${this.name}.${taskId}.result.json`);
 
     const trimmedCmd = this.command.trim();
-    const delegateArgv = trimmedCmd !== "" ? [trimmedCmd, ...this.args] : undefined;
+    const rawArgv = trimmedCmd !== "" ? [trimmedCmd, ...this.args] : undefined;
+    const delegateArgv = rawArgv ? normalizeDelegateArgv(rawArgv) : undefined;
     const deferFinalize = req.finalizeStrategy === "defer";
     const sharedLockKey = deferFinalize ? (req.sharedLockKey ?? req.sessionId) : req.sharedLockKey;
     const startedAt = new Date().toISOString();

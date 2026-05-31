@@ -8,7 +8,6 @@ import {
   agentGraphFromConfig,
   applyAgentGraphToPipeline,
   compileAgentGraphFromSnapshot,
-  parseAgentGraphSnapshot,
   serializeAgentGraph,
   parseAgentGraphFromMermaid,
   validateAgentGraphSnapshot,
@@ -17,6 +16,7 @@ import {
 import { agentGraphToCanvasHtml } from "../orchestration/agent-graph-canvas.js";
 import { agentGraphToEditorHtml } from "../orchestration/agent-graph-editor.js";
 import { agentGraphToHtml, agentGraphToMermaid } from "../orchestration/agent-graph-viz.js";
+import { mcpJson, mcpErrorFrom } from "./mcp-response.js";
 
 export function register(server: McpServer) {
   server.tool(
@@ -62,27 +62,15 @@ export function register(server: McpServer) {
                 : `missing deps: ${check.missingDeps?.join(", ")}`,
             );
           }
-          const parsed = parseAgentGraphSnapshot(raw);
-          applyAgentGraphToPipeline(parsed, config.pipeline, { skipValidation: true });
-          const graph = compileAgentGraphFromSnapshot(parsed, config.pipeline);
+          applyAgentGraphToPipeline(raw, config.pipeline, { skipValidation: true });
+          const graph = compileAgentGraphFromSnapshot(raw, config.pipeline);
           const snap = serializeAgentGraph(graph);
-          return {
-            content: [
-              {
-                type: "text",
-                text: JSON.stringify(
-                  {
-                    applied: true,
-                    pipeline: config.pipeline,
-                    graph: snap,
-                    mermaid: agentGraphToMermaid(snap),
-                  },
-                  null,
-                  2,
-                ),
-              },
-            ],
-          };
+          return mcpJson({
+            applied: true,
+            pipeline: config.pipeline,
+            graph: snap,
+            mermaid: agentGraphToMermaid(snap),
+          });
         }
 
         const graph = agentGraphFromConfig(config);
@@ -135,32 +123,13 @@ export function register(server: McpServer) {
           };
         }
 
-        return {
-          content: [
-            {
-              type: "text",
-              text: JSON.stringify(
-                {
-                  pipeline: config.pipeline,
-                  graph: snap,
-                  mermaid: agentGraphToMermaid(snap),
-                },
-                null,
-                2,
-              ),
-            },
-          ],
-        };
+        return mcpJson({
+          pipeline: config.pipeline,
+          graph: snap,
+          mermaid: agentGraphToMermaid(snap),
+        });
       } catch (err: unknown) {
-        return {
-          content: [
-            {
-              type: "text",
-              text: `Agent graph error: ${err instanceof Error ? err.message : String(err)}`,
-            },
-          ],
-          isError: true,
-        };
+        return mcpErrorFrom("Agent graph error", err);
       }
     },
   );

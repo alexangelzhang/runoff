@@ -1,54 +1,100 @@
 #!/usr/bin/env npx tsx
 /**
- * Run llm-pipeline without an MCP host (Claude Code, Codex, Cursor, etc. still work as cli providers).
+ * llm-pipeline CLI (no MCP host required).
  *
- *   pipeline run --prompt "..." --work-dir /path/to/git/repo [--config pipeline.config.json]
+ *   pipeline run | init | doctor | config edit | config validate
+ *   pipeline traces list|show|tail | observability ui
  */
 
-import { cpSync, existsSync, mkdtempSync } from "node:fs";
+import { cpSync, existsSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { clearConfigCache } from "../../../src/core/config.js";
+import { clearConfigCache, loadConfigFromPath, validateConfig } from "../../../src/core/config.js";
 import { executePipelineRun } from "../../../src/orchestration/pipeline-mcp-run.js";
 import { getPipelineHomeDir } from "../../../src/core/paths.js";
+import {
+  openInBrowser,
+  startConfigEditorServer,
+} from "../../../src/pipeline/config-editor-server.js";
+import { formatDoctorReport, runDoctor } from "../../../src/pipeline/pipeline-doctor.js";
+import { formatPipelineRunOutcomeHints } from "../../../src/pipeline/run-outcome-hints.js";
+import { pipelineInit, type InitProfile } from "../../../src/pipeline/pipeline-init.js";
+import {
+  applyRaceSession,
+  abortRaceSession,
+  resolveRaceTraceId,
+} from "../../../src/runtime/race-finalize.js";
+import { startObservabilityUiServer } from "../../../src/pipeline/observability-ui-server.js";
+import { tracesList, tracesShow, tracesTail } from "../../../src/pipeline/trace-cli.js";
+import type { PipelineStatus } from "../../../src/core/state.js";
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), "../../..");
 
+const INIT_PROFILES = ["mock", "feature", "bugfix", "refactor", "cli-detected"] as const;
+
 function printHelp(): void {
-  console.log(`llm-pipeline CLI — run code pipelines without an IDE host
+  console.log(`llm-pipeline CLI
 
 Usage:
-  npx tsx scripts/ts/dev/pipeline-cli.ts run --prompt <text> --work-dir <git-repo> [options]
-
-Options:
-  --config <path>   pipeline.config.json (default: ./pipeline.config.json in work-dir)
-  --max-rounds <n>  override retry.maxRounds
-  --home <path>     LLM_PIPELINE_HOME (default: ~/.llm-pipeline)
+  pipeline run --prompt <text> --work-dir <git-repo> [--config <path>]
+  pipeline init --work-dir <dir> [--profile mock|feature|bugfix|refactor|cli-detected]
+  pipeline doctor [--config <path>] [--cleanup-orphans]
+  pipeline config edit [--config <path>] [--port <n>] [--no-open]
+  pipeline config validate [--config <path>]
+  pipeline race apply --trace-id <id> --winner <n>
+  pipeline race apply --session <checkpointId> --winner <n>
+  pipeline race abort --trace-id <id> [--reason <text>]
+  pipeline traces list [--status <status>] [--session <id>] [--limit <n>] [--json]
+  pipeline traces show <traceId> [--postmortem] [--json]
+  pipeline traces tail [--once]
+  pipeline observability ui [--port <n>] [--no-open]
 
 Examples:
-  cd my-repo && npx tsx ../llm-pipeline/scripts/ts/dev/pipeline-cli.ts run \\
-    --prompt "Add tests for hello()" --work-dir .
+  npm run pipeline:init -- --work-dir ../my-repo --profile feature
+  npm run pipeline:doctor -- --config ../my-repo/pipeline.config.json
+  npm run pipeline:config:edit -- --config examples/configs/feature.config.json
 
-  npm run pipeline:run -- --prompt "Refactor auth" --work-dir /path/to/repo \\
-    --config /path/to/examples/cli.config.json
-
-Docs:
-  docs/coding-agent-backends.md  — Codex, Gemini, Claude Code, OpenCode
-  docs/differentiation.md        — vs LangGraph, CrewAI, AutoGen, OpenHands
+Docs: docs/guides/getting-started-30min.md, docs/guides/mcp-host-setup.md
 `);
 }
 
-function parseArgs(argv: string[]): {
+type CliArgs = {
   command: string;
+  sub?: string;
   prompt?: string;
   workDir?: string;
   config?: string;
+  profile?: InitProfile;
   maxRounds?: number;
   home?: string;
-} {
-  const out: ReturnType<typeof parseArgs> = { command: argv[0] ?? "help" };
-  for (let i = 1; i < argv.length; i++) {
+  port?: number;
+  noOpen?: boolean;
+  traceId?: string;
+  sessionId?: string;
+  winner?: number;
+  reason?: string;
+  cleanupOrphans?: boolean;
+  json?: boolean;
+  postmortem?: boolean;
+  once?: boolean;
+  status?: PipelineStatus;
+  sessionFilter?: string;
+  limit?: number;
+};
+
+function parseArgs(argv: string[]): CliArgs {
+  const out: CliArgs = { command: argv[0] ?? "help" };
+  if (out.command === "config" || out.command === "race" || out.command === "traces" || out.command === "observability") {
+    out.sub = argv[1] ?? "help";
+  }
+  const multiSub =
+    out.command === "config" || out.command === "race" || out.command === "traces" || out.command === "observability";
+  const start = multiSub ? 2 : 1;
+  if (out.command === "traces" && out.sub === "show" && argv[2] && !argv[2].startsWith("-")) {
+    out.traceId = argv[2];
+  }
+  for (let i = start; i < argv.length; i++) {
     const a = argv[i];
     const next = () => {
       const v = argv[++i];
@@ -58,30 +104,45 @@ function parseArgs(argv: string[]): {
     if (a === "--prompt") out.prompt = next();
     else if (a === "--work-dir") out.workDir = next();
     else if (a === "--config") out.config = next();
-    else if (a === "--max-rounds") out.maxRounds = Number(next());
+    else if (a === "--profile") {
+      const p = next();
+      if (!INIT_PROFILES.includes(p as InitProfile)) {
+        throw new Error(`--profile must be one of: ${INIT_PROFILES.join(", ")}`);
+      }
+      out.profile = p as InitProfile;
+    } else if (a === "--max-rounds") out.maxRounds = Number(next());
     else if (a === "--home") out.home = next();
+    else if (a === "--port") out.port = Number(next());
+    else if (a === "--no-open") out.noOpen = true;
+    else if (a === "--trace-id") out.traceId = next();
+    else if (a === "--session") out.sessionId = next();
+    else if (a === "--winner") out.winner = Number(next());
+    else if (a === "--reason") out.reason = next();
+    else if (a === "--cleanup-orphans") out.cleanupOrphans = true;
+    else if (a === "--json") out.json = true;
+    else if (a === "--postmortem") out.postmortem = true;
+    else if (a === "--once") out.once = true;
+    else if (a === "--status") out.status = next() as PipelineStatus;
+    else if (a === "--session") out.sessionFilter = next();
+    else if (a === "--limit") out.limit = Number(next());
     else if (a === "--help" || a === "-h") out.command = "help";
     else throw new Error(`Unknown argument: ${a}`);
   }
   return out;
 }
 
-async function cmdRun(args: ReturnType<typeof parseArgs>): Promise<void> {
+async function cmdRun(args: CliArgs): Promise<void> {
   if (!args.prompt?.trim()) throw new Error("--prompt is required");
-  if (!args.workDir?.trim()) throw new Error("--work-dir is required (must be a git repo for agent-write)");
+  if (!args.workDir?.trim()) throw new Error("--work-dir is required");
 
   const workDir = resolve(args.workDir);
   if (!existsSync(workDir)) throw new Error(`work-dir not found: ${workDir}`);
 
-  if (args.home) {
-    process.env.LLM_PIPELINE_HOME = resolve(args.home);
-  }
+  if (args.home) process.env.LLM_PIPELINE_HOME = resolve(args.home);
 
   const configPath = resolve(args.config ?? join(workDir, "pipeline.config.json"));
   if (!existsSync(configPath)) {
-    throw new Error(
-      `Config not found: ${configPath}\nCopy examples/cli.config.json from the llm-pipeline repo and edit providers.`,
-    );
+    throw new Error(`Config not found: ${configPath}\nRun: npm run pipeline:init -- --work-dir ${workDir}`);
   }
 
   const runDir = mkdtempSync(join(tmpdir(), "llm-pipeline-cli-cwd-"));
@@ -100,14 +161,127 @@ async function cmdRun(args: ReturnType<typeof parseArgs>): Promise<void> {
     maxRounds: args.maxRounds,
   });
 
-  console.log("\nResult:");
-  console.log(`  status:   ${result.status}`);
-  console.log(`  traceId:  ${result.traceId ?? "(none)"}`);
-  console.log(`  session:  ${result.sessionId ?? "(none)"}`);
-  if (result.status === "awaiting_judge") {
-    console.log("\nRace paused — use MCP llm_race_apply / llm_race_abort or resume with sessionId.");
-  }
+  console.log(formatPipelineRunOutcomeHints(result, { sessionId: result.checkpointFile }));
   process.exit(result.status === "approved" ? 0 : 1);
+}
+
+function cmdInit(args: CliArgs): void {
+  if (!args.workDir?.trim()) throw new Error("--work-dir is required");
+  const profile = args.profile ?? "feature";
+  const result = pipelineInit(args.workDir, profile);
+  console.log("Created pipeline.config.json");
+  console.log(`  path:    ${result.configPath}`);
+  console.log(`  profile: ${result.profile}`);
+  console.log("\nNext:");
+  console.log(`  npm run pipeline:config:edit -- --config ${result.configPath}`);
+  console.log(`  npm run pipeline:doctor -- --config ${result.configPath}`);
+}
+
+function cmdDoctor(args: CliArgs): void {
+  const configPath = args.config ? resolve(args.config) : undefined;
+  const report = runDoctor({ configPath, cleanupOrphans: args.cleanupOrphans });
+  console.log(formatDoctorReport(report));
+  process.exit(report.ok ? 0 : 1);
+}
+
+function cmdConfigValidate(args: CliArgs): void {
+  const configPath = resolve(args.config ?? join(process.cwd(), "pipeline.config.json"));
+  if (!existsSync(configPath)) {
+    console.error(`Config not found: ${configPath}`);
+    process.exit(1);
+  }
+  try {
+    const raw = JSON.parse(readFileSync(configPath, "utf-8"));
+    if (!validateConfig(raw)) {
+      console.error("Invalid config (validateConfig returned false)");
+      process.exit(1);
+    }
+    loadConfigFromPath(configPath);
+    console.log(`OK: ${configPath}`);
+  } catch (err: unknown) {
+    console.error(err instanceof Error ? err.message : String(err));
+    process.exit(1);
+  }
+}
+
+async function cmdRaceApply(args: CliArgs): Promise<void> {
+  const traceId = await resolveRaceTraceId({
+    traceId: args.traceId,
+    sessionId: args.sessionId,
+  });
+  const winner = args.winner ?? 0;
+  const result = await applyRaceSession(traceId, winner);
+  console.log(JSON.stringify(result, null, 2));
+}
+
+async function cmdRaceAbort(args: CliArgs): Promise<void> {
+  const traceId = await resolveRaceTraceId({
+    traceId: args.traceId,
+    sessionId: args.sessionId,
+  });
+  const result = await abortRaceSession(traceId, args.reason);
+  console.log(JSON.stringify(result, null, 2));
+}
+
+function cmdTraces(args: CliArgs): void {
+  if (args.sub === "list") {
+    tracesList({
+      status: args.status,
+      sessionId: args.sessionFilter,
+      limit: args.limit,
+      json: args.json,
+    });
+    return;
+  }
+  if (args.sub === "show") {
+    const id = args.traceId;
+    if (!id) throw new Error("trace id required: pipeline traces show <traceId>");
+    tracesShow(id, { postmortem: args.postmortem, json: args.json });
+    return;
+  }
+  if (args.sub === "tail") {
+    tracesTail({ once: args.once });
+    return;
+  }
+  throw new Error("Usage: pipeline traces list|show|tail");
+}
+
+async function cmdObservabilityUi(args: CliArgs): Promise<void> {
+  if (args.home) process.env.LLM_PIPELINE_HOME = resolve(args.home);
+  const handle = await startObservabilityUiServer({ port: args.port });
+  console.log("Observability UI");
+  console.log(`  url:  ${handle.url}`);
+  console.log(`  home: ${getPipelineHomeDir()}\n`);
+  if (!args.noOpen) openInBrowser(handle.url);
+  await new Promise<void>((resolvePromise) => {
+    const onSignal = () => void handle.close().then(() => resolvePromise());
+    process.on("SIGINT", onSignal);
+    process.on("SIGTERM", onSignal);
+  });
+}
+
+async function cmdConfigEdit(args: CliArgs): Promise<void> {
+  const configPath = resolve(args.config ?? join(process.cwd(), "pipeline.config.json"));
+  if (!existsSync(configPath)) {
+    throw new Error(
+      `Config not found: ${configPath}\nRun: npm run pipeline:init -- --work-dir <dir> --profile feature`,
+    );
+  }
+
+  const handle = await startConfigEditorServer({ configPath, port: args.port });
+
+  console.log("Pipeline config editor (providers + DAG + retry)");
+  console.log(`  config: ${handle.configPath}`);
+  console.log(`  url:    ${handle.url}`);
+  console.log("\nClick **Save to config** in the browser. Ctrl+C to stop.\n");
+
+  if (!args.noOpen) openInBrowser(handle.url);
+
+  await new Promise<void>((resolvePromise) => {
+    const onSignal = () => void handle.close().then(() => resolvePromise());
+    process.on("SIGINT", onSignal);
+    process.on("SIGTERM", onSignal);
+  });
 }
 
 async function main(): Promise<void> {
@@ -118,6 +292,38 @@ async function main(): Promise<void> {
   }
   if (args.command === "run") {
     await cmdRun(args);
+    return;
+  }
+  if (args.command === "init") {
+    cmdInit(args);
+    return;
+  }
+  if (args.command === "doctor") {
+    cmdDoctor(args);
+    return;
+  }
+  if (args.command === "config" && args.sub === "edit") {
+    await cmdConfigEdit(args);
+    return;
+  }
+  if (args.command === "config" && args.sub === "validate") {
+    cmdConfigValidate(args);
+    return;
+  }
+  if (args.command === "race" && args.sub === "apply") {
+    await cmdRaceApply(args);
+    return;
+  }
+  if (args.command === "race" && args.sub === "abort") {
+    await cmdRaceAbort(args);
+    return;
+  }
+  if (args.command === "traces") {
+    cmdTraces({ ...args, traceId: args.traceId });
+    return;
+  }
+  if (args.command === "observability" && args.sub === "ui") {
+    await cmdObservabilityUi(args);
     return;
   }
   printHelp();

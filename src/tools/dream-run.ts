@@ -6,6 +6,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { loadConfig } from "../core/config.js";
 import { runDreamWorker } from "../dream/dream-worker.js";
+import { mcpJson, mcpErrorFrom } from "./mcp-response.js";
 
 export function register(server: McpServer) {
   server.tool(
@@ -28,15 +29,9 @@ export function register(server: McpServer) {
           sinceLastRun,
           batchLimit,
         });
-        return {
-          content: [{ type: "text", text: JSON.stringify(report, null, 2) }],
-        };
+        return mcpJson(report);
       } catch (err: unknown) {
-        const message = err instanceof Error ? err.message : String(err);
-        return {
-          content: [{ type: "text", text: JSON.stringify({ error: message }, null, 2) }],
-          isError: true,
-        };
+        return mcpErrorFrom("Dream run error", err);
       }
     },
   );

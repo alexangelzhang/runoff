@@ -143,8 +143,29 @@ export function loadRealProviderSmokeCases(caseDir: string): RealSmokeCaseMetada
     .map((name) => JSON.parse(readFileSync(join(caseDir, name), "utf-8")) as RealSmokeCaseMetadata);
 }
 
+/** Pre-release matrix: one passed case per backend + race defer + race auto-pick (S2.2). */
+export const PRE_RELEASE_REQUIRED_CASE_IDS = [
+  "codex-standalone",
+  "gemini-standalone",
+  "provider-race",
+  "provider-race-autopick",
+] as const;
+
+export function preReleaseMatrixFailures(cases: RealSmokeCaseMetadata[]): string[] {
+  const failures: string[] = [];
+  for (const caseId of PRE_RELEASE_REQUIRED_CASE_IDS) {
+    const row = cases.find((c) => c.caseId === caseId);
+    if (!row) {
+      failures.push(`missing smoke case "${caseId}"`);
+    } else if (row.result !== "passed") {
+      failures.push(`case "${caseId}" result=${row.result}${row.skipReason ? ` (${row.skipReason})` : ""}`);
+    }
+  }
+  return failures;
+}
+
 export function evaluateRealProviderSmokeOutcome(input: {
-  options: Pick<RealProviderSmokeOptions, "requireNoSkip">;
+  options: Pick<RealProviderSmokeOptions, "requireNoSkip" | "mode">;
   cases: RealSmokeCaseMetadata[];
   commandExitCode: number;
   runnerError?: string;
@@ -164,13 +185,18 @@ export function evaluateRealProviderSmokeOutcome(input: {
     failureReasons.push(`real-provider integration test process exited with code ${input.commandExitCode}`);
   }
   if (input.cases.length === 0) {
-    failureReasons.push("no case metadata was produced by tests/real-provider.integration.test.ts");
+    failureReasons.push("no case metadata was produced by tests/integration/real-provider.integration.test.ts");
   }
   if (failedCount > 0) {
     failureReasons.push(`${failedCount} smoke case(s) reported failed`);
   }
   if (input.options.requireNoSkip && skippedCount > 0) {
     failureReasons.push(`${skippedCount} smoke case(s) were skipped under strict mode`);
+  }
+  if (input.options.mode === "pre-release") {
+    for (const msg of preReleaseMatrixFailures(input.cases)) {
+      failureReasons.push(`pre-release matrix: ${msg}`);
+    }
   }
 
   return {

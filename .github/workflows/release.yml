@@ -1,5 +1,9 @@
 name: Release
 
+# Tag releases require green CI gates + pre-release real-provider smoke (self-hosted runner).
+# Configure repo secrets: LLM_PIPELINE_REAL_CODEX_ARGV_JSON, LLM_PIPELINE_REAL_GEMINI_ARGV_JSON
+# Runner labels: self-hosted, llm-pipeline-real-smoke
+
 on:
   push:
     tags:
@@ -8,8 +12,30 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
+  gates:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run ci:gates
+
+  pre-release-smoke:
+    needs: gates
+    uses: ./.github/workflows/real-provider-smoke-pre-release.yml
+    secrets: inherit
+
   release:
+    needs: [gates, pre-release-smoke]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

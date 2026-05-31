@@ -59,7 +59,12 @@ export async function runDreamWorker(options: DreamRunOptions): Promise<DreamRun
   const batch = collectDreamBatch({ since, limit: batchLimit });
   const memory = getPipelineLocalMemory();
 
-  const rules = applyDreamRules(memory, batch, { scope, dryRun });
+  const rules = applyDreamRules(memory, batch, {
+    scope,
+    dryRun,
+    promoteGlobalKnowledge: dreamCfg?.promoteGlobalKnowledge === true,
+    globalKnowledgeMinLength: dreamCfg?.globalKnowledgeMinLength,
+  });
 
   let llmProposals: DreamLlmProposal[] = [];
   let llmErrors: string[] = [];

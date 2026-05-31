@@ -7,6 +7,7 @@ import { z } from "zod";
 import { loadConfig } from "../core/config.js";
 import { getPipelineLocalMemory } from "../memory/pipeline-memory.js";
 import { exportDreamMemoryJsonl, getDreamExportPath } from "../dream/dream-export.js";
+import { mcpJson, mcpErrorFrom } from "./mcp-response.js";
 
 export function register(server: McpServer) {
   server.tool(
@@ -23,24 +24,9 @@ export function register(server: McpServer) {
           project: project ?? config.orchestration?.dreamify?.project ?? "default",
         };
         const result = exportDreamMemoryJsonl(getPipelineLocalMemory(), { scope, limit });
-        return {
-          content: [
-            {
-              type: "text",
-              text: JSON.stringify(
-                { ...result, defaultPath: getDreamExportPath() },
-                null,
-                2,
-              ),
-            },
-          ],
-        };
+        return mcpJson({ ...result, defaultPath: getDreamExportPath() });
       } catch (err: unknown) {
-        const message = err instanceof Error ? err.message : String(err);
-        return {
-          content: [{ type: "text", text: JSON.stringify({ error: message }, null, 2) }],
-          isError: true,
-        };
+        return mcpErrorFrom("Dream export error", err);
       }
     },
   );

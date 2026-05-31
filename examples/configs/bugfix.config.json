@@ -1,0 +1,16 @@
+{
+  "providers": {
+    "fixer": { "type": "mock" },
+    "reviewer": { "type": "mock" }
+  },
+  "pipeline": {
+    "diagnose": ["fixer"],
+    "fix": ["fixer", "diagnose"],
+    "review": ["reviewer", "fix"]
+  },
+  "retry": {
+    "maxRounds": 2,
+    "reviewStep": "review"
+  },
+  "routing": []
+}

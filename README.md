@@ -2,21 +2,17 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-**Multi-step code-change pipelines for coding agents** — git worktree isolation, provider races, local traces. Exposed as an **MCP server** and a small **CLI** (`pipeline run`).
+> **DAG orchestration for repo changes, not chat loops.**  
+> Race your providers, review in the pipeline, keep traces at home.
 
-**Version:** 3.0.0
+**Multi-step code-change pipelines for coding agents** — git worktree isolation, provider races, local traces. **MCP server** + **`pipeline run` CLI**.
 
-## Why llm-pipeline?
-
-Not another chat-loop framework. See **[`docs/differentiation.md`](docs/differentiation.md)** (vs LangGraph, CrewAI, **AutoGen**, OpenHands).
-
-| Differentiator | What it means |
-|----------------|---------------|
-| **Repo-native** | `agent-write` in git worktrees + cross-process locks (`workspace_manager.py`) |
-| **Config-first DAG** | `pipeline.config.json` — implement → review → retry, optional parallel/race |
-| **Host-agnostic** | MCP from Cursor, Claude Desktop, Claude Code, …; backends = Codex / Gemini / OpenCode / … |
-| **Local observability** | Traces + A/B `experiments.jsonl` — no LangSmith required |
-| **Production-shaped** | Guardrails, approvals, checkpoints, optional reflect re-plan |
+| | |
+|--|--|
+| **Repo-native** | Worktrees + locks (`scripts/python/workspace_manager.py`) |
+| **Config-first** | `pipeline.config.json` — implement → review → retry |
+| **Host-agnostic** | Cursor, Claude Desktop, Claude Code, … + Codex / Gemini / OpenCode CLIs |
+| **Local observability** | Traces + `experiments.jsonl` — no LangSmith required |
 
 ```
   IDE / CLI host (MCP)          llm-pipeline              coding-agent CLI
@@ -24,6 +20,15 @@ Not another chat-loop framework. See **[`docs/differentiation.md`](docs/differen
                                     │
                                     ▼
                             git worktree (target repo)
+```
+
+## Prerequisites
+
+**Node 20+**, **Python 3**, **Git**. Check:
+
+```bash
+bash scripts/shell/check-prereqs.sh   # or: npm run check-prereqs
+npm run setup:mcp                     # MCP JSON for Cursor / Claude Desktop / Claude Code
 ```
 
 ## Quick start (zero API keys)
@@ -34,34 +39,36 @@ npm install
 npm run demo
 ```
 
-Writes a mock **approved** run with trace + experiment under a temp `LLM_PIPELINE_HOME`.
+Mock **approved** run with trace + experiment under temp `LLM_PIPELINE_HOME`.
 
-Open source checklist: [`docs/OPEN_SOURCE.md`](docs/OPEN_SOURCE.md) · Contributing: [`CONTRIBUTING.md`](CONTRIBUTING.md)
+**30-minute path:** [`docs/guides/getting-started-30min.md`](docs/guides/getting-started-30min.md)
 
-## Run on your repo (real coding agents)
-
-1. Copy [`examples/cli.config.json`](examples/cli.config.json) → your repo as `pipeline.config.json`
-2. Edit `providers` (Codex, Gemini, Claude Code, OpenCode — see [`docs/coding-agent-backends.md`](docs/coding-agent-backends.md))
-3. Run:
+## Run on your repo
 
 ```bash
-cd /path/to/your/git/repo
-npx tsx /path/to/llm-pipeline/scripts/ts/dev/pipeline-cli.ts run \
+npm run pipeline:init -- --work-dir /path/to/repo --profile feature
+npm run pipeline:doctor -- --config /path/to/repo/pipeline.config.json
+npm run pipeline:run -- \
   --prompt "Add hello() with unit tests" \
-  --work-dir .
+  --work-dir /path/to/repo \
+  --config /path/to/repo/pipeline.config.json
 ```
 
-Or from llm-pipeline checkout: `npm run pipeline:run -- --prompt "..." --work-dir /path/to/repo --config ./examples/cli.config.json`
+Real CLIs: copy [`examples/configs/cli.config.json`](examples/configs/cli.config.json) → [`docs/guides/coding-agent-backends.md`](docs/guides/coding-agent-backends.md)
 
-Requires **Node 20+**, **Python 3**, **Git**.
+Example configs: `examples/configs/feature.config.json`, `examples/configs/bugfix.config.json`, `examples/configs/refactor.config.json`
 
-## MCP server (IDE hosts)
+**Edit config in a browser** (providers, DAG, retry — saves via local HTTP):
+
+```bash
+npm run pipeline:config:edit -- --config /path/to/pipeline.config.json
+```
+
+## MCP server
 
 ```bash
 npm run dev
 ```
-
-Register in any MCP client (`cwd` = directory that contains `pipeline.config.json`):
 
 ```json
 {
@@ -75,105 +82,71 @@ Register in any MCP client (`cwd` = directory that contains `pipeline.config.jso
 }
 ```
 
-Works with **Cursor**, **Claude Desktop**, **Claude Code** (MCP), and other MCP hosts — not Cursor-only.
-
-## Features
-
-- **DAG pipeline** — `pipeline.config.json` with deps and parallel provider races
-- **Orchestrator** — `AgentGraph` → plan gate → `AgentStepRunner` → `executePipelineStep`
-- **Providers** — `cli` (coding agents), `openai`, `mock`
-- **Workspace isolation** — Git worktrees + locking (Python)
-- **Race mode** — Pause at `awaiting_judge`; `llm_race_apply` / `llm_race_abort`
-- **Governance** — Policy → Guardrails → Approval
-- **Observability** — Traces, experiments, optional OTLP ([`docs/observability.md`](docs/observability.md))
-
-### Example config (mock, in repo root)
-
-```json
-{
-  "providers": {
-    "openai-lite": { "type": "mock" },
-    "openai-pro": { "type": "mock" }
-  },
-  "pipeline": {
-    "analyze": ["openai-lite"],
-    "refactor": [["openai-pro", "openai-lite"], "analyze"],
-    "review": ["openai-pro", "refactor"]
-  },
-  "retry": { "maxRounds": 3, "reviewStep": "review" }
-}
-```
-
-- **Parallel race:** `"implement": [["a", "b"], "deps"]`
-- **Governance:** [`docs/governance-config.md`](docs/governance-config.md)
-
-Data under `~/.llm-pipeline/` (override with `LLM_PIPELINE_HOME`).
-
-## MCP tools
+## MCP tools (main path)
 
 | Tool | Purpose |
 |------|---------|
-| `llm_run_pipeline` | Full pipeline: DAG, retries, checkpoints, race pause |
+| `llm_run_pipeline` | Full DAG + retries + checkpoints + race pause |
 | `llm_run_step` | Single step |
-| `llm_show_config` | Resolved config + memory/dreamify status |
-| `llm_query_traces` | Execution history |
-| `llm_query_experiments` | A/B log + eval ([`docs/observability.md`](docs/observability.md)) |
+| `llm_query_traces` / `llm_query_experiments` | Local observability |
 | `llm_race_apply` / `llm_race_abort` | Race finalization |
-| `llm_memory_status` / `llm_query_memory` | External memory backends |
-| `llm_dream_run` / `llm_dreamify_tune` | Offline memory evolution (optional) |
 
-## Architecture
+Full list + governance/memory tools: see [Features](#features) below.
 
-```mermaid
-flowchart LR
-  Host[MCP host or pipeline CLI]
-  Host --> MCP[MCP / executePipelineRun]
-  MCP --> Orch[Orchestrator + Governance]
-  Orch --> Step[AgentStepRunner]
-  Step --> Prov[Providers]
-  Prov --> CLI[CLI Provider]
-  CLI --> Py[task_runner.py]
-  Py --> WM[workspace_manager.py]
-  WM --> Git[Git worktrees]
-  Orch --> State[Checkpoints + Traces]
-```
+Optional: [Dev Container](docs/operations/devcontainer.md) for reproducible local dev.
 
-Details: [`docs/execution-layers.md`](docs/execution-layers.md)
+## Development & CI
 
-## Development
+| Command | Purpose |
+|---------|---------|
+| `npm test` | Full suite (~700+ tests) |
+| `npm run ci:gates` | IPC sync + gate e2e + unit tests |
+| `npm run ci:gates:smoke` | PR smoke (worktree; allow-skip without secrets) |
+| `npm run check-ipc-sync` | After `src/core/ipc.ts` changes |
+| `npm run typecheck` | `tsc --noEmit` (required in CI) |
 
-```bash
-npm test
-npm run ci:gates
-npm run check-ipc-sync   # after IPC schema changes
-```
+After publishing to GitHub, replace `<repo-url>` above and add a CI badge (see [`docs/reference/OPEN_SOURCE.md`](docs/reference/OPEN_SOURCE.md)).
 
 ## Documentation
 
+Full index: [**docs/README.md**](docs/README.md) · repo root files: [docs/repo-root.md](docs/repo-root.md)
+
 | Doc | Topic |
 |-----|--------|
-| [**differentiation.md**](docs/differentiation.md) | **Why us** — incl. AutoGen |
-| [**coding-agent-backends.md**](docs/coding-agent-backends.md) | Codex, Gemini, Claude Code, OpenCode |
-| [ROADMAP.md](ROADMAP.md) | Phases, gates |
-| [industry-benchmark.md](docs/industry-benchmark.md) | Pinned SHA benchmarks |
-| [observability.md](docs/observability.md) | Trace + experiment |
-| [deerflow-reflect.md](docs/deerflow-reflect.md) | Reflect re-plan MVP |
-| [real-provider-smoke.md](docs/real-provider-smoke.md) | Live CLI smoke |
+| [**getting-started-30min.md**](docs/guides/getting-started-30min.md) | First run → real repo |
+| [**differentiation.md**](docs/reference/differentiation.md) | vs LangGraph, CrewAI, AutoGen, OpenHands |
+| [**coding-agent-backends.md**](docs/guides/coding-agent-backends.md) | Codex, Gemini, Claude Code, OpenCode |
+| [**observability.md**](docs/features/observability.md) | Trace + experiment (not LangSmith UI) |
+| [**security-model.md**](docs/architecture/security-model.md) | Threat model (self-hosted) |
+| [**execution-layers.md**](docs/architecture/execution-layers.md) | TS / Python / IPC ownership |
+| [**timeouts.md**](docs/operations/timeouts.md) | Global / step / lock timeouts |
+| [**ci-branch-protection.md**](docs/operations/ci-branch-protection.md) | Required vs optional CI smoke |
+| [**supported-backends.md**](docs/reference/supported-backends.md) | Real CLI smoke matrix per release |
+| [**stability-boundaries.md**](docs/operations/stability-boundaries.md) | SLA scope / single-writer / non-goals |
+| [**structure.md**](docs/architecture/structure.md) | `src/` + `scripts/` layout |
+| [**advanced/**](docs/advanced/README.md) | A2A, Dream, Dreamify (optional) |
+| [CONTRIBUTING.md](CONTRIBUTING.md) | PR checklist |
+| [OPEN_SOURCE.md](docs/reference/OPEN_SOURCE.md) | Release checklist |
+
+## Features
+
+- DAG pipeline, orchestrator, provider race, governance, checkpoints
+- Optional: external memory, Dream offline worker, A2A federation (**experimental**)
+
+Data: `~/.llm-pipeline/` (`LLM_PIPELINE_HOME`).
 
 ## Project status
 
-**Open source (MIT).** Phase 0–8 complete; PR CI: `ci:gates` + optional smoke. Runtime via **tsx**; see [CHANGELOG.md](CHANGELOG.md).
+**Open source (MIT).** Phase 0–8 complete. Runtime via **tsx**; `npm run build` for `dist/`.
 
-**Not provided:** Docker/devcontainer images (install Node/Python/Git locally).
+**Not provided:** Docker images, multi-tenant SaaS, LangSmith-style UI.
 
-## Repository layout
+## Layout
 
 ```
-src/index.ts              MCP entry
-src/tools/                MCP tools
-src/orchestration/        Orchestrator, governance, memory
-src/providers/            openai, cli, mock
-scripts/python/task_runner.py    CLI execution + IPC
-scripts/ts/dev/pipeline-cli.ts   Non-MCP `run` command
-examples/                 quickstart + cli.config.json
+src/index.ts
+src/core/ src/runtime/ src/routing/ src/observability/ src/orchestration/
+scripts/python/  scripts/shell/  scripts/ts/
+examples/configs/  examples/workshop/
+issues/            (OPEN-BACKLOG + open/ + archive/)
 ```

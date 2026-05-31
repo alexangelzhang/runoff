@@ -143,7 +143,11 @@ class RepoLock:
                         time.sleep(sleep_time)
                         continue
                         
-                    raise RuntimeError(f"Repository is locked by another session (lock: {self.lock_dir})")
+                    waited_ms = int((time.time() - start_time) * 1000)
+                    raise RuntimeError(
+                        "REPO_LOCK_TIMEOUT "
+                        f"repo={self.repo_root} waited_ms={waited_ms} lock_dir={self.lock_dir}"
+                    )
                 raise
 
     def release(self, pid):

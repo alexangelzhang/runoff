@@ -9,4 +9,4 @@
 
 Resolve paths from TypeScript via `src/core/paths.ts` (`getTaskRunnerScriptPath`, `getWorkspaceManagerScriptPath`).
 
-Full map: [`docs/structure.md`](../docs/structure.md).
+Full map: [`docs/architecture/structure.md`](../docs/architecture/structure.md).

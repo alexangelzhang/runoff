@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Refresh docs/benchmark-pins.json with latest GitHub main SHAs.
+# Refresh docs/reference/benchmark-pins.json with latest GitHub main SHAs.
 # Usage: ./scripts/refresh-benchmark-pins.sh
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-OUT="$ROOT/docs/benchmark-pins.json"
+OUT="$ROOT/docs/reference/benchmark-pins.json"
 TODAY="$(date -u +%Y-%m-%d)"
 
 fetch_sha() {

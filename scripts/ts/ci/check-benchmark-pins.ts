@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * P0 — Warn when docs/benchmark-pins.json is stale (default 90 days).
+ * P0 — Warn when docs/reference/benchmark-pins.json is stale (default 90 days).
  * Usage:
  *   npx tsx scripts/check-benchmark-pins.ts
  *   npx tsx scripts/check-benchmark-pins.ts --strict   # exit 1 if stale
@@ -11,7 +11,7 @@ import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const ROOT = resolve(fileURLToPath(new URL("../../..", import.meta.url)));
-const PINS_PATH = resolve(ROOT, "docs/benchmark-pins.json");
+const PINS_PATH = resolve(ROOT, "docs/reference/benchmark-pins.json");
 const MAX_AGE_DAYS = Number(process.env.BENCHMARK_PINS_MAX_AGE_DAYS ?? "90");
 const strict = process.argv.includes("--strict");
 

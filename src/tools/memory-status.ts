@@ -8,6 +8,7 @@ import { loadConfig } from "../core/config.js";
 import { describeMemoryBackend, probeMemoryBackend } from "../memory/memory-backend-status.js";
 import { getPipelineMemorySessionKey } from "../memory/pipeline-memory.js";
 import { loadDreamState } from "../memory/dream-state.js";
+import { mcpJson, mcpErrorFrom } from "./mcp-response.js";
 
 export function register(server: McpServer) {
   server.tool(
@@ -38,15 +39,9 @@ export function register(server: McpServer) {
           body.probe = await probeMemoryBackend(config, { pipelineSessionId: sessionId });
         }
 
-        return {
-          content: [{ type: "text", text: JSON.stringify(body, null, 2) }],
-        };
+        return mcpJson(body);
       } catch (err: unknown) {
-        const message = err instanceof Error ? err.message : String(err);
-        return {
-          content: [{ type: "text", text: JSON.stringify({ error: message }, null, 2) }],
-          isError: true,
-        };
+        return mcpErrorFrom("Memory status error", err);
       }
     },
   );

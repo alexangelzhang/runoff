@@ -12,6 +12,7 @@ import type { StepTrace } from "../observability/trace.js";
 import { recordPipelineStepCost, type PipelineCostAccumulator } from "../routing/pricing.js";
 import { ensureWorkDirForStep } from "../runtime/pipeline-workdir.js";
 import { logger } from "../core/logger.js";
+import { applyRaceSession, abortRaceSession } from "../runtime/race-finalize.js";
 import type { SchedulerContext, StepOutcome } from "./step-execution.js";
 import type { ExecutionGovernance } from "./execution-governance.js";
 import {
@@ -101,53 +102,13 @@ export type PipelineDAGLoopOptions = {
   eventLog?: EventLog;
 };
 
-function failedStepOutcome(stepName: string, round: number, error: string): StepOutcome {
-  return {
-    stepName,
-    usedProvider: "governance",
-    upgraded: false,
-    durationMs: 0,
-    trace: { name: stepName, provider: "governance", durationMs: 0, round, error },
-    response: {
-      kind: "text",
-      model: "governance",
-      content: "",
-      code: "",
-      explanation: "",
-      failed: true,
-      error,
-    },
-  };
-}
+import {
+  failedStepOutcome,
+  isStepCompletedForRound,
+  outcomeToAgentResult,
+  resolvePipelineStages,
+} from "./pipeline-runner-helpers.js";
 
-function outcomeToAgentResult(outcome: StepOutcome): AgentResult {
-  return {
-    agentId: agentId(outcome.stepName),
-    stepName: outcome.stepName,
-    response: outcome.response,
-    durationMs: outcome.durationMs,
-  };
-}
-
-function isStepCompletedForRound(
-  stepResults: Record<string, StepResult>,
-  stepName: string,
-  round: number,
-): boolean {
-  const result = stepResults[stepName];
-  if (!result || result.round !== round) return false;
-  return result.status === "success" || result.status === "skipped";
-}
-
-function resolvePipelineStages(
-  runtimeConfig: PipelineConfig,
-  executionPlan?: ExecutionPlan,
-  agentGraph?: AgentGraph,
-): string[][] {
-  if (agentGraph) return agentGraphToStages(agentGraph);
-  if (executionPlan) return executionPlanToStages(executionPlan);
-  return getDagStages(runtimeConfig);
-}
 
 /**
  * Round-based DAG execution: parallel stages within each wave, dynamic step injection, review gating.
@@ -485,10 +446,35 @@ export async function runPipelineDAGLoop(
         }
 
         if (awaitingJudge) {
-          state.pendingRaceTraceId = raceSession?.traceId ?? traceId;
-          state.raceCandidates = raceSession?.candidates.map((candidate) => ({ ...candidate }));
-          finalStatus = "awaiting_judge";
-          break;
+          const raceFinalize = runtimeConfig.runtime?.raceFinalize ?? "defer";
+          if (raceFinalize === "auto-pick" && raceSession) {
+            const winnerIndex = outcome.raceWinnerIndex ?? 0;
+            logger.info("orchestrator", `Race auto-pick: applying winner index ${winnerIndex}`);
+            try {
+              await applyRaceSession(raceSession.traceId, winnerIndex);
+              if (candidateSnapshot) state.candidate = candidateSnapshot;
+              state.pendingRaceTraceId = undefined;
+              state.raceCandidates = undefined;
+            } catch (err: unknown) {
+              const message = err instanceof Error ? err.message : String(err);
+              logger.error("orchestrator", `Race auto-pick failed: ${message}`);
+              try {
+                await abortRaceSession(raceSession.traceId, `auto-pick failed: ${message}`);
+              } catch {
+                // best-effort cleanup
+              }
+              state.pendingRaceTraceId = undefined;
+              state.raceCandidates = undefined;
+              stepFailed = true;
+              finalStatus = "failed";
+              break;
+            }
+          } else {
+            state.pendingRaceTraceId = raceSession?.traceId ?? traceId;
+            state.raceCandidates = raceSession?.candidates.map((candidate) => ({ ...candidate }));
+            finalStatus = "awaiting_judge";
+            break;
+          }
         }
 
         if (orchestrator && orchestrationContext) {

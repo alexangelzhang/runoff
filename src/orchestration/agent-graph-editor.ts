@@ -318,17 +318,72 @@ const CLIENT_SCRIPT = `
     }
   });
   mermaidEl.addEventListener("input", refreshMermaidPreview);
+
+  const saveBtn = document.getElementById("saveToConfig");
+  if (saveBtn && window.__lpSaveUrl) {
+    saveBtn.addEventListener("click", async () => {
+      syncJson();
+      let snap;
+      try {
+        snap = JSON.parse(jsonEl.value);
+      } catch (e) {
+        statusEl.dataset.kind = "error";
+        statusEl.textContent = "Invalid JSON — sync first";
+        return;
+      }
+      statusEl.dataset.kind = "ok";
+      statusEl.textContent = "Saving…";
+      saveBtn.disabled = true;
+      try {
+        const res = await fetch(window.__lpSaveUrl, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ snapshot: snap }),
+        });
+        const data = await res.json();
+        if (!res.ok || !data.ok) {
+          statusEl.dataset.kind = "error";
+          statusEl.textContent = data.error || ("HTTP " + res.status);
+          return;
+        }
+        statusEl.dataset.kind = "ok";
+        statusEl.textContent = "Saved to " + (data.configPath || "config");
+      } catch (e) {
+        statusEl.dataset.kind = "error";
+        statusEl.textContent = e.message || String(e);
+      } finally {
+        saveBtn.disabled = false;
+      }
+    });
+  }
 })();
 `;
+
+export type AgentGraphEditorOptions = {
+  /** POST target for one-click save (local config editor server). */
+  saveUrl?: string;
+  configPathLabel?: string;
+};
 
 /** Interactive editor HTML (no build step; opens locally or via llm_show_agent_graph format=editor). */
 export function agentGraphToEditorHtml(
   snapshot: AgentGraphSnapshot,
   title = "AgentGraph Editor",
+  options?: AgentGraphEditorOptions,
 ): string {
   const initial = JSON.stringify(snapshot).replace(/</g, "\\u003c");
   const initialMermaid = JSON.stringify(agentGraphToMermaid(snapshot));
   const safeTitle = escapeHtml(title);
+  const saveUrl = options?.saveUrl ? JSON.stringify(options.saveUrl) : "null";
+  const configLabel = options?.configPathLabel
+    ? escapeHtml(options.configPathLabel)
+    : "";
+  const headerHint = options?.saveUrl
+    ? ` — editing <code>${configLabel}</code>; Save writes pipeline.config.json`
+    : " — edit nodes & waves; apply via MCP or pipeline config edit";
+  const saveButton = options?.saveUrl
+    ? `<button type="button" id="saveToConfig" class="primary">Save to config</button>`
+    : "";
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -366,11 +421,12 @@ export function agentGraphToEditorHtml(
 <body>
   <header>
     <strong>${safeTitle}</strong>
-    <span class="hint"> — edit nodes & waves; cycle check; apply via MCP</span>
+    <span class="hint">${headerHint}</span>
     <div id="status" data-kind="ok">—</div>
   </header>
   <main>
     <div class="actions">
+      ${saveButton}
       <button type="button" id="addNode">Add node</button>
       <button type="button" id="recomputeWaves">Recompute waves from deps</button>
       <button type="button" id="syncJson" class="primary">Sync → JSON</button>
@@ -395,6 +451,7 @@ export function agentGraphToEditorHtml(
     <button type="button" id="copyJson" class="primary">Copy JSON</button>
     <button type="button" id="loadJson">Load JSON → table</button>
   </aside>
+  <script>window.__lpSaveUrl = ${saveUrl};</script>
   <script>${CLIENT_SCRIPT}</script>
   <script>window.__agentGraphEditorInit(${initial}, ${initialMermaid});</script>
 </body>

@@ -19,6 +19,17 @@ import { getWorkspaceManagerScriptPath } from "../core/paths.js";
 const execFileAsync = promisify(execFile);
 const SCRIPT_PATH = getWorkspaceManagerScriptPath();
 
+function formatWorkspacePythonError(raw: string): string {
+  const m = raw.match(/REPO_LOCK_TIMEOUT repo=(\S+) waited_ms=(\d+) lock_dir=(\S+)/);
+  if (m) {
+    return (
+      `Repository lock timeout after ${m[2]}ms (repo=${m[1]}). ` +
+      `Another pipeline session may hold the repo lock. Lock dir: ${m[3]}`
+    );
+  }
+  return raw;
+}
+
 // --- Git helpers ---
 
 async function git(args: string[], cwd: string): Promise<string> {
@@ -102,7 +113,10 @@ export class SessionWorkspace {
             ? String((e as { stderr?: unknown }).stderr ?? "")
             : "";
         const message = e instanceof Error ? e.message : String(e);
-        throw new Error(`Workspace Python crashed: ${stderr || message}`);
+        throw new Error(
+          formatWorkspacePythonError(stderr || message) ||
+            `Workspace Python crashed: ${stderr || message}`,
+        );
       }
     }
 
@@ -115,7 +129,9 @@ export class SessionWorkspace {
         const parsed: unknown = JSON.parse(lines[i]);
         if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
           const result = parsed as Record<string, unknown>;
-          if (result.error != null) throw new Error(String(result.error));
+          if (result.error != null) {
+            throw new Error(formatWorkspacePythonError(String(result.error)));
+          }
           return result;
         }
       } catch (err) {

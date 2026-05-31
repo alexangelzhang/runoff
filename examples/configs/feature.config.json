@@ -1,0 +1,15 @@
+{
+  "providers": {
+    "implementer": { "type": "mock" },
+    "reviewer": { "type": "mock" }
+  },
+  "pipeline": {
+    "implement": ["implementer"],
+    "review": ["reviewer", "implement"]
+  },
+  "retry": {
+    "maxRounds": 3,
+    "reviewStep": "review"
+  },
+  "routing": []
+}

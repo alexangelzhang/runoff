@@ -2,7 +2,7 @@
  * Local experiment datasets + eval reports (Phase 9+ observability).
  *
  * Exportable JSONL and variant comparison from `experiments.jsonl`.
- * No external observability SaaS — see docs/observability.md.
+ * No external observability SaaS — see docs/features/observability.md.
  */
 
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
@@ -16,6 +16,8 @@ import {
   type VariantSummary,
 } from "./experiment-log.js";
 import { getPipelineHomeDir } from "../core/paths.js";
+import { loadTraceById } from "./trace.js";
+import { postmortemOneLiner } from "./trace-postmortem.js";
 
 export const OBSERVABILITY_DATASET_SCHEMA = "llm-pipeline-eval-v1" as const;
 
@@ -93,6 +95,14 @@ export function exportExperimentDatasetJsonl(
   return { path, rowCount: rows.length };
 }
 
+export type ExperimentTraceInsight = {
+  traceId: string;
+  variant: string;
+  status: PipelineStatus;
+  verdict?: ExperimentEntry["verdict"];
+  postmortemSummary: string;
+};
+
 export type ExperimentEvalReport = {
   experimentId: string;
   schema: typeof OBSERVABILITY_DATASET_SCHEMA;
@@ -102,6 +112,8 @@ export type ExperimentEvalReport = {
   variants: VariantSummary[];
   winnerVariant?: string;
   recommendation: string;
+  /** Failed / regression runs with one-line postmortem for dashboards. */
+  traceInsights?: ExperimentTraceInsight[];
 };
 
 function pickWinnerVariant(summaries: VariantSummary[]): string | undefined {
@@ -132,11 +144,31 @@ function buildRecommendation(
   );
 }
 
+function buildTraceInsights(entries: ExperimentEntry[]): ExperimentTraceInsight[] {
+  const interesting = entries.filter(
+    (e) => e.verdict === "regression" || e.status === "failed" || e.status === "max_rounds",
+  );
+  return interesting.slice(0, 20).map((e) => {
+    const trace = loadTraceById(e.traceId);
+    const postmortemSummary = trace
+      ? postmortemOneLiner(trace)
+      : `No trace file for ${e.traceId} (status=${e.status})`;
+    return {
+      traceId: e.traceId,
+      variant: e.variant,
+      status: e.status,
+      verdict: e.verdict,
+      postmortemSummary,
+    };
+  });
+}
+
 /** Aggregate variant stats + winner for A/B dashboards (Phase 9+). */
 export function buildExperimentEvalReport(experimentId: string): ExperimentEvalReport {
   const entries = queryExperiments({ experimentId });
   const variants = summarizeExperiment(experimentId);
   const winnerVariant = pickWinnerVariant(variants);
+  const traceInsights = buildTraceInsights(entries);
   return {
     experimentId,
     schema: OBSERVABILITY_DATASET_SCHEMA,
@@ -146,5 +178,6 @@ export function buildExperimentEvalReport(experimentId: string): ExperimentEvalR
     variants,
     winnerVariant,
     recommendation: buildRecommendation(experimentId, variants, winnerVariant),
+    ...(traceInsights.length ? { traceInsights } : {}),
   };
 }

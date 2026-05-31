@@ -26,6 +26,26 @@ export type PipelineStatus =
   | "awaiting_approval"
   | "awaiting_plan_approval";
 
+/** Shared MCP/query filter list for pipeline terminal and in-flight statuses. */
+export const PIPELINE_STATUS_FILTERS = [
+  "approved",
+  "failed",
+  "max_rounds",
+  "running",
+  "queued",
+  "aborted",
+  "awaiting_judge",
+  "awaiting_approval",
+  "awaiting_plan_approval",
+] as const satisfies readonly PipelineStatus[];
+
+/** Terminal failure statuses — MCP isError and query filters. */
+export const PIPELINE_TERMINAL_FAILURE_STATUSES = [
+  "failed",
+  "aborted",
+  "max_rounds",
+] as const satisfies readonly PipelineStatus[];
+
 const STEP_TRANSITIONS: Record<StepStatus, StepStatus[]> = {
   queued: ["running", "skipped", "cancelled"],
   running: ["success", "failed", "skipped", "cancelled"],
@@ -82,7 +102,7 @@ export interface StepResult {
   candidateSnapshot?: Partial<Candidate>;
   durationMs?: number;
   /** Typed artifacts for this step (Wave 7.5 / Gate 2.7). */
-  artifacts?: import("./orchestration/artifacts.js").Artifact[];
+  artifacts?: import("../orchestration/artifacts.js").Artifact[];
 }
 
 export interface ResumeMetadata {

@@ -24,7 +24,7 @@ export function findPipelineCycle(
   const steps = Object.keys(pipeline);
   const adj = new Map<string, string[]>();
   for (const [step, tuple] of Object.entries(pipeline)) {
-    adj.set(step, tuple.slice(1));
+    adj.set(step, tuple.slice(1) as string[]);
   }
 
   const state = new Map<string, 0 | 1 | 2>();

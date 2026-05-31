@@ -4,59 +4,32 @@
  */
 
 import { randomUUID } from "node:crypto";
-import { resolveRepoRoot, SessionWorkspace } from "../runtime/workspace.js";
 import { loadConfig, calculateConfigHash } from "../core/config.js";
 import { forkPipelineForRun, resolveReviewStepName } from "./runtime-pipeline.js";
 import { createControlPlane } from "./control-plane.js";
 import { createPipelineCostTracker, runPipelineExecution } from "./pipeline-execution.js";
 import { createExecutionGovernance } from "./execution-governance.js";
-import { resumePlanAfterApproval } from "./plan-control.js";
-import { resumeRunAfterApproval, syncRunStoreFromPipeline } from "./run-control.js";
-import { enrichTraceWithEventLog } from "./replay.js";
-import { emitDeferredApprovalResolved } from "./approval-audit.js";
-import { shouldFinalizeAgentWorkspace } from "./workspace-policy.js";
-import { applyWorkspaceFromArtifacts, collectRunArtifacts } from "./artifact-workspace.js";
+import { syncRunStoreFromPipeline } from "./run-control.js";
 import type { MutablePipelineRunState } from "./pipeline-runner.js";
-import {
-  saveCheckpoint,
-  loadCheckpoint,
-  assertResumeCompatible,
-  buildResumeMetadata,
-  type StepResult,
-  type PipelineStatus,
-  type PipelineState,
-} from "../core/state.js";
-import type { PipelineResult, PipelineParams } from "../tools/helpers.js";
+import { saveCheckpoint, buildResumeMetadata, type PipelineStatus } from "../core/state.js";
+import type { PipelineResult, PipelineParams } from "../core/pipeline-run-types.js";
 import { pipelineUsesGlobalSessionWorkspace } from "../runtime/pipeline-workdir.js";
+import { persistRunningPipelineTrace } from "../observability/trace.js";
+import { PipelineHooks } from "../pipeline/pipeline-hooks.js";
+import { composeEffectivePipelineContext } from "../pipeline/pipeline-context.js";
+import { buildPipelineCheckpointState } from "./pipeline-mcp-checkpoint.js";
+import { loadPipelineResumeState } from "./pipeline-mcp-resume.js";
+import { finalizePipelineRunResult } from "./pipeline-mcp-finalize.js";
 import {
-  recordTrace,
-  persistRunningPipelineTrace,
-  type PipelineTrace,
-  type StepTrace,
-} from "../observability/trace.js";
-import {
-  PipelineHooks,
-  composeEffectivePipelineContext,
-} from "../pipeline/pipeline-hooks.js";
-import { emptyCandidate, getCandidateContent, type Candidate } from "../core/candidate.js";
+  applyApprovedPipelineWorkspace,
+  cleanupPipelineWorkspaceInFinally,
+  openPipelineSessionWorkspace,
+  recordWorkspaceApplyFailure,
+  releasePausedPipelineWorkspace,
+} from "./pipeline-mcp-workspace.js";
+import type { SessionWorkspace } from "../runtime/workspace.js";
 
 export type PipelineRunParams = PipelineParams & { signal?: AbortSignal };
-
-function getLatestCandidate(stepResults: Record<string, StepResult>): Candidate {
-  const latest = Object.values(stepResults)
-    .filter((step) => step.candidateSnapshot)
-    .sort((left, right) => (left.round ?? 0) - (right.round ?? 0))
-    .pop();
-  return latest?.candidateSnapshot ? ({ ...latest.candidateSnapshot } as Candidate) : emptyCandidate();
-}
-
-function getResumeStartRound(state: PipelineState): number {
-  return state.status === "max_rounds" ? state.round + 1 : state.round;
-}
-
-function cloneRaceCandidates(state: PipelineState): PipelineState["raceCandidates"] {
-  return state.raceCandidates?.map((candidate) => ({ ...candidate }));
-}
 
 export async function executePipelineRun(args: PipelineRunParams): Promise<PipelineResult> {
   const baseConfig = loadConfig();
@@ -100,86 +73,32 @@ export async function executePipelineRun(args: PipelineRunParams): Promise<Pipel
   };
   const resumeMetadata = buildResumeMetadata(resumeRequest);
 
-  let stepResults: Record<string, StepResult> = {};
-  let candidate: Candidate = emptyCandidate();
-  let lastReviewFeedback = "";
-  let approved = false;
-  let startRound = 1;
-  let stepTraces: StepTrace[] = [];
-  let globalKnowledge: Record<string, string> = {};
-  let pendingRaceTraceId: string | undefined;
-  let raceCandidates: PipelineState["raceCandidates"];
-  let resumedState: PipelineState | null = null;
-  let skipPlanApproval = false;
-
-  if (originalSessionId) {
-    const checkpoint = await loadCheckpoint(originalSessionId);
-    if (checkpoint) {
-      resumedState = checkpoint;
-      if (checkpoint.status === "awaiting_plan_approval" || checkpoint.status === "awaiting_approval") {
-        if (!approvalDecision) {
-          throw new Error(
-            `Checkpoint ${originalSessionId} is awaiting ${checkpoint.status}; pass approvalDecision ("approve" | "reject") to resume`,
-          );
-        }
-        const response =
-          approvalDecision === "approve"
-            ? ({ decision: "approve" as const })
-            : ({ decision: "reject" as const, reason: approvalReason ?? "rejected by operator" });
-        const pendingRun = controlPlane.runStore.load(checkpoint.traceId);
-        if (pendingRun?.pendingApproval) {
-          emitDeferredApprovalResolved(controlPlane.eventLog, checkpoint.traceId, {
-            requestId:
-              pendingRun.pendingApproval.requestId ??
-              `resume-${pendingRun.pendingApproval.requestedAt}`,
-            agentId: pendingRun.pendingApproval.agentId,
-            action: pendingRun.pendingApproval.action,
-            phase:
-              pendingRun.pendingApproval.phase ??
-              (checkpoint.status === "awaiting_plan_approval" ? "plan" : "action"),
-            response,
-            respondedBy: "operator",
-          });
-        }
-        const updated =
-          checkpoint.status === "awaiting_plan_approval"
-            ? resumePlanAfterApproval(controlPlane.runStore, checkpoint.traceId, response)
-            : resumeRunAfterApproval(controlPlane.runStore, checkpoint.traceId, response);
-        if (!updated || updated.status === "failed") {
-          return {
-            status: "failed",
-            rounds: checkpoint.round,
-            totalDurationMs: Date.now() - startTime,
-            totalCostUSD: 0,
-            checkpointFile: originalSessionId,
-            traceId: checkpoint.traceId,
-            stepResults: checkpoint.stepResults,
-            usage: { promptTokens: 0, completionTokens: 0 },
-            costBreakdown: {},
-            error: response.decision === "reject" ? response.reason : "Approval resume failed",
-          };
-        }
-        resumedState = { ...checkpoint, status: "running" };
-        if (checkpoint.status === "awaiting_plan_approval") {
-          skipPlanApproval = true;
-        }
-      }
-      assertResumeCompatible(resumedState, resumeRequest);
-      traceId = resumedState.traceId;
-      stepResults = resumedState.stepResults;
-      candidate = getLatestCandidate(resumedState.stepResults);
-      lastReviewFeedback = resumedState.lastReviewFeedback;
-      approved = resumedState.approved;
-      startRound = getResumeStartRound(resumedState);
-      stepTraces = resumedState.stepTraces || [];
-      globalKnowledge = resumedState.globalKnowledge || {};
-      pendingRaceTraceId = resumedState.pendingRaceTraceId;
-      raceCandidates = cloneRaceCandidates(resumedState);
-      if (resumedState.dynamicPipeline) {
-        Object.assign(runtimeConfig.pipeline, resumedState.dynamicPipeline);
-      }
-    }
+  const resumeState = await loadPipelineResumeState({
+    originalSessionId,
+    initialTraceId: traceId,
+    approvalDecision,
+    approvalReason,
+    resumeRequest,
+    controlPlane,
+    runtimeConfig,
+    startTime,
+  });
+  if (resumeState.earlyResult) {
+    return resumeState.earlyResult;
   }
+
+  traceId = resumeState.traceId;
+  let stepResults = resumeState.stepResults;
+  let candidate = resumeState.candidate;
+  let lastReviewFeedback = resumeState.lastReviewFeedback;
+  let approved = resumeState.approved;
+  let startRound = resumeState.startRound;
+  let stepTraces = resumeState.stepTraces;
+  let globalKnowledge = resumeState.globalKnowledge;
+  let pendingRaceTraceId = resumeState.pendingRaceTraceId;
+  let raceCandidates = resumeState.raceCandidates;
+  const skipPlanApproval = resumeState.skipPlanApproval;
+  const resumedState = resumeState.resumedState;
 
   if (setPipelineTraceId) setPipelineTraceId(traceId);
 
@@ -221,48 +140,36 @@ export async function executePipelineRun(args: PipelineRunParams): Promise<Pipel
     raceCandidates,
   };
 
-  try {
-    if (shouldUseGlobalSessionWorkspace) {
-      if (resumedState?.workspacePath) {
-        workspace = await SessionWorkspace.resume(
-          resumedState.workspacePath,
-          resumedState.workspaceRepoRoot!,
-          resumedState.workspaceBaseRef!,
-          traceId,
-        );
-      } else {
-        const repoRoot = (await resolveRepoRoot(workDir)) ?? workDir;
-        workspace = await SessionWorkspace.create({ repoRoot, sessionId: traceId });
-      }
-      effectiveWorkDir = await workspace.resolveWorkDir(workDir);
-    }
-
-    const checkpointSnapshot = (currentRound: number, status: PipelineStatus = "running"): PipelineState => ({
+  const checkpointSnapshot = (currentRound: number, status: PipelineStatus = "running") =>
+    buildPipelineCheckpointState({
       sessionId,
       prompt,
-      round: currentRound,
+      currentRound,
       maxRounds,
-      lastCode: getCandidateContent(runState.candidate),
+      status,
+      resumeMetadata,
+      traceId,
+      candidate: runState.candidate,
       lastReviewFeedback: runState.lastReviewFeedback,
       approved: runState.approved,
       stepResults: runState.stepResults,
       stepTraces: runState.stepTraces,
       globalKnowledge: runState.globalKnowledge,
-      traceId,
-      timestamp: new Date().toISOString(),
-      status,
-      resume: resumeMetadata,
-      dynamicPipeline: runtimeConfig.pipeline,
+      runtimePipeline: runtimeConfig.pipeline,
       pendingRaceTraceId: runState.pendingRaceTraceId,
-      raceCandidates: runState.raceCandidates?.map((candidateInfo) => ({ ...candidateInfo })),
-      ...(workspace
-        ? {
-            workspacePath: workspace.worktreePath,
-            workspaceRepoRoot: workspace.repoRoot,
-            workspaceBaseRef: workspace.baseRef,
-          }
-        : {}),
+      raceCandidates: runState.raceCandidates,
+      workspace,
     });
+
+  try {
+    const opened = await openPipelineSessionWorkspace({
+      shouldUseGlobalSessionWorkspace,
+      workDir,
+      resumedState,
+      traceId,
+    });
+    workspace = opened.workspace;
+    effectiveWorkDir = opened.effectiveWorkDir ?? workDir;
 
     const loopResult = await runPipelineExecution({
       runtimeConfig,
@@ -298,6 +205,7 @@ export async function executePipelineRun(args: PipelineRunParams): Promise<Pipel
         const snap = costTracker.getSummary();
         persistRunningPipelineTrace({
           id: traceId,
+          sessionId,
           prompt,
           promptLength: prompt.length,
           mode: "pipeline",
@@ -359,128 +267,68 @@ export async function executePipelineRun(args: PipelineRunParams): Promise<Pipel
     pendingRaceTraceId = runState.pendingRaceTraceId;
     raceCandidates = runState.raceCandidates;
 
-    if (workspace && shouldFinalizeAgentWorkspace(finalStatus)) {
-      const finalizeWorkspace = workspace;
-      try {
-        await applyWorkspaceFromArtifacts(
-          finalizeWorkspace,
-          collectRunArtifacts({ sharedContext: runState.sharedContext, stepResults: runState.stepResults }),
-        );
-        await finalizeWorkspace.destroy();
-        workspace = null;
-      } catch (err: unknown) {
-        const message = err instanceof Error ? err.message : String(err);
-        finalStatus = "failed";
-        lastFinalStatus = finalStatus;
-        try {
-          await finalizeWorkspace.releaseLock();
-        } catch {
-          // best-effort unlock for recovery
-        }
+    if (workspace) {
+      const applyResult = await applyApprovedPipelineWorkspace({
+        workspace,
+        finalStatus,
+        runState,
+      });
+      finalStatus = applyResult.finalStatus;
+      lastFinalStatus = finalStatus;
+      workspace = applyResult.workspace;
+
+      if ("errorMessage" in applyResult) {
         await saveCheckpoint(sessionId, checkpointSnapshot(Math.min(endRound, maxRounds), finalStatus));
-        const errorTrace: PipelineTrace = {
-          id: traceId,
+        await recordWorkspaceApplyFailure({
+          traceId,
+          sessionId,
           prompt,
-          promptLength: prompt.length,
-          mode: "pipeline",
-          steps: stepTraces,
-          totalRounds: completedRounds,
-          finalStatus,
-          totalDurationMs: Date.now() - startTime,
-          timestamp: new Date().toISOString(),
-          hasVerifyResults: !!verifyResults,
-          totalUsage: { promptTokens: costTracker.getSummary().totalTokens, completionTokens: 0 },
-          lifecycle: "final",
-        };
-        recordTrace(errorTrace);
-        hooks.onPipelineFailed({
-          trace: errorTrace,
+          verifyResults,
+          stepTraces,
+          completedRounds,
+          startTime,
           costTracker,
-          config: runtimeConfig,
-          eventLog: controlPlane.mode === "file" ? controlPlane.eventLog : undefined,
-          runId: traceId,
+          runtimeConfig,
+          globalKnowledge,
+          eventLog: controlPlane.eventLog,
+          controlPlaneMode: controlPlane.mode,
+          hooks,
         });
-        throw new Error(`Failed to apply approved workspace to source repo: ${message}`);
+        throw new Error(`Failed to apply approved workspace to source repo: ${applyResult.errorMessage}`);
       }
-    } else if (workspace && !signal?.aborted) {
-      try {
-        await workspace.releaseLock();
-      } catch {
-        // best-effort unlock for checkpoint resume / judge follow-up
+
+      if (workspace) {
+        await releasePausedPipelineWorkspace(workspace, signal);
       }
     }
 
-    const summary = costTracker.getSummary();
-    const finalResult: PipelineResult = {
-      status: finalStatus,
-      rounds: completedRounds,
-      totalDurationMs: Date.now() - startTime,
-      totalCostUSD: summary.totalCostUSD,
-      checkpointFile: sessionId,
+    const finalResult = await finalizePipelineRunResult({
       traceId,
-      stepResults,
-      usage: { promptTokens: summary.totalTokens, completionTokens: 0 },
-      costBreakdown: {},
-      error: undefined,
-    };
-
-    let finalTrace: PipelineTrace = {
-      id: traceId,
+      sessionId,
       prompt,
-      promptLength: prompt.length,
-      mode: "pipeline",
-      steps: stepTraces,
-      totalRounds: completedRounds,
+      verifyResults,
+      stepTraces,
+      completedRounds,
       finalStatus,
-      totalDurationMs: Date.now() - startTime,
-      timestamp: new Date().toISOString(),
-      hasVerifyResults: !!verifyResults,
-      totalUsage: { promptTokens: summary.totalTokens, completionTokens: 0 },
-      lifecycle: "final",
-    };
-    if (controlPlane.mode === "file") {
-      finalTrace = enrichTraceWithEventLog(finalTrace, controlPlane.eventLog, traceId);
-    }
-    recordTrace(finalTrace);
-    if (finalStatus === "failed" || finalStatus === "aborted") {
-      hooks.onPipelineFailed({
-        trace: finalTrace,
-        costTracker,
-        config: runtimeConfig,
-        eventLog: controlPlane.mode === "file" ? controlPlane.eventLog : undefined,
-        runId: traceId,
-      });
-    } else {
-      hooks.onPipelineEnd({
-        trace: finalTrace,
-        costTracker,
-        config: runtimeConfig,
-        eventLog: controlPlane.mode === "file" ? controlPlane.eventLog : undefined,
-        runId: traceId,
-      });
-    }
+      startTime,
+      costTracker,
+      stepResults,
+      globalKnowledge,
+      runtimeConfig,
+      controlPlaneMode: controlPlane.mode,
+      eventLog: controlPlane.eventLog,
+      hooks,
+    });
 
     await saveCheckpoint(sessionId, checkpointSnapshot(Math.min(endRound, maxRounds), finalStatus));
     return finalResult;
   } finally {
-    if (workspace) {
-      if (signal?.aborted) {
-        try {
-          await workspace.destroy();
-        } catch {
-          /* best-effort */
-        }
-      } else if (shouldFinalizeAgentWorkspace(lastFinalStatus)) {
-        try {
-          await applyWorkspaceFromArtifacts(
-            workspace,
-            collectRunArtifacts({ sharedContext: runState.sharedContext, stepResults }),
-          );
-          await workspace.destroy();
-        } catch {
-          /* best-effort apply */
-        }
-      }
-    }
+    await cleanupPipelineWorkspaceInFinally({
+      workspace,
+      signal,
+      lastFinalStatus,
+      runState,
+      stepResults,
+    });
   }
 }

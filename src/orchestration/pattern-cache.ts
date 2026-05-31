@@ -251,7 +251,7 @@ export class PatternCache {
     if (exact.length > 0) return exact;
 
     const timeoutMs = options?.timeoutMs ?? DEFAULT_HYBRID_TIMEOUT_MS;
-    const hybrid = options?.hybridRetrieve !== false && isLayeredAgentMemory(this.memory);
+    const hybrid = options?.hybridRetrieve === true && isLayeredAgentMemory(this.memory);
 
     if (hybrid) {
       const layered = this.memory as LayeredAgentMemory;

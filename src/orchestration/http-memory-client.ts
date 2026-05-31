@@ -1,7 +1,7 @@
 /**
  * P3 — HTTP memory backend (Mem0/Zep-style REST adapter).
  *
- * Contract: docs/external-memory.md
+ * Contract: docs/features/external-memory.md
  */
 
 import type { AgentMemory, MemoryEntry, MemoryQuery, MemoryScope } from "./memory.js";

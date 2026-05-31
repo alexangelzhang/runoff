@@ -22,11 +22,11 @@
 ```
 src/index.ts           — MCP server entry point, tool registration (~57 lines)
 src/tools/run-step.ts  — llm_run_step tool (single step execution)
-src/tools/run-pipeline.ts — llm_run_pipeline tool (pipeline orchestration, largest file ~800 lines)
+src/tools/run-pipeline.ts — llm_run_pipeline tool registration (thin; logic in pipeline-mcp-run.ts)
 src/tools/race.ts      — llm_race_apply / llm_race_abort tools (race session finalization)
 src/tools/show-config.ts — llm_show_config tool
 src/tools/query-traces.ts — llm_query_traces tool
-src/tools/helpers.ts   — Shared types, serialization helpers, race session registry
+src/tools/helpers.ts   — Serialization helpers, race session registry (PipelineParams in core/pipeline-run-types.ts)
 src/core/              — config, ipc, state, paths, candidate, verdict, logger
 src/runtime/           — workspace, pipeline-workdir, race-registry, race-execution
 src/routing/           — router, cache, pricing, retry, circuit breaker
@@ -36,7 +36,7 @@ src/pipeline/          — pipeline-hooks, prompt composer, real-provider smoke
 src/infra/ast_utils.ts — TypeScript syntax check at runtime
 src/providers/cli.ts   — CLI provider, bridges TS↔Python via JSON files
 src/providers/types.ts — LLMRequest, LLMResponse (TextResponse | AgentResponse), ProviderMode
-src/orchestration/     — DAG, agents, governance, durable CP (see docs/structure.md)
+src/orchestration/     — DAG, agents, governance, durable CP (see docs/architecture/structure.md)
 scripts/python/task_runner.py — Python task execution (subprocess, worktree, patch, lock)
 scripts/python/workspace_manager.py — Centralized workspace backend (worktree, lock, patch apply)
 scripts/shell/watcher.sh     — Watcher process for polling task files
@@ -48,16 +48,16 @@ scripts/ts/ci/check-ipc-sync.ts — CI helper: TS/Python IPC constants must matc
 - TypeScript: MCP tool API, orchestration, routing, retry, candidate state, trace, judge
 - Python: subprocess execution, timeout management, diff collection, workspace management (worktree + locking)
 - IPC: file-based JSON (`*.task.json` → `*.result.json`), schema in `src/core/ipc.ts`
-- Shared schema enforced by `tests/ipc-schema.test.ts` — adding IPC fields requires updating both sides
+- Shared schema enforced by `tests/unit/ipc-schema.test.ts` — adding IPC fields requires updating both sides
 - **`npm run check-ipc-sync`** — compares `src/core/ipc.ts` with `scripts/python/task_runner.py` (schema versions + field manifests); run after IPC changes
 - **`typescript` in `dependencies`** (not only devDependencies) because `src/infra/ast_utils.ts` imports the compiler API (`import ts from "typescript"`) for `isSyntaxValid` at runtime in the MCP server
-- Layer map: **`docs/structure.md`**
+- Layer map: **`docs/architecture/structure.md`**
 - Workspace isolation: Python `workspace_manager.py` owns all physical git worktree ops and cross-process locking
 
 ## Testing
 
-- Run all: `npx tsx --test tests/*.test.ts`
-- Run single: `npx tsx --test tests/<name>.test.ts`
+- Run all: `npm test` (`tests/**/*.test.ts`)
+- Run single: `npx tsx --test tests/unit/<name>.test.ts` (or `tests/e2e/`, `tests/federation/`, `tests/integration/`)
 - ~540 tests, smoke tests involve git worktree ops (~10s)
 
 ## Common Tasks → Files
@@ -82,13 +82,13 @@ scripts/ts/ci/check-ipc-sync.ts — CI helper: TS/Python IPC constants must matc
 | 并行 stage 合并 | `src/orchestration/stage-merge.ts` |
 | AgentGraph 导出/编辑/可视化 | `agent-graph-io.ts`、`agent-graph-viz.ts`；MCP `llm_show_agent_graph` |
 | 外置记忆 HTTP | `memory-factory.ts`、`http-memory-client.ts` |
-| A2A 联邦 HA/鉴权 | `federation-ha.ts`、`docs/a2a-federation.md` |
+| A2A 联邦 HA/鉴权 | `federation-ha.ts`、`docs/features/a2a-federation.md` |
 | Pipeline Hooks | `src/pipeline/pipeline-hooks.ts` |
-| 改 A2A 联邦同步 (B5) | `src/orchestration/a2a/federation-sync.ts` |
+| 改 A2A 联邦同步 (B5) | `src/experimental/a2a/federation-sync.ts`（兼容：`experimental/a2a/` 重导出） |
 | 改 agent 抽象 | `src/orchestration/agent.ts` / `agent-state.ts` / `registry.ts` |
 | 改治理框架 | `src/orchestration/policy.ts` / `approval.ts` / `guardrails.ts` / `guardrail-scan.ts` |
 | 改 Python 执行后端 | `scripts/python/task_runner.py`（子进程）→ `scripts/python/workspace_manager.py`（worktree + lock） |
-| 改 A2A HTTP/mTLS/发现/联邦 | `src/orchestration/a2a/http-transport.ts`, `external-registry.ts`, `federated-registry-store.ts` |
+| 改 A2A HTTP/mTLS/发现/联邦 | `src/experimental/a2a/http-transport.ts`, `external-registry.ts`, `federated-registry-store.ts` |
 | CI gates | `npm run ci:gates`（`scripts/ts/ci/run-ci-gates.ts`）, `npm run test:gates` |
 | 行业对标钉版本 | `npm run check-benchmark-pins`（ci:gates）；刷新 `npm run refresh-benchmark-pins` |
 | 改 prompt 版本回放 | `src/observability/prompt-version.ts`（`~/.llm-pipeline/prompt-versions/`） |
@@ -99,6 +99,6 @@ scripts/ts/ci/check-ipc-sync.ts — CI helper: TS/Python IPC constants must matc
 ## 不要做的事
 
 - 不要修改 src/core/ipc.ts 而不同步更新 scripts/python/task_runner.py（跑 npm run check-ipc-sync 验证）
-- 不要在 src/tools/run-pipeline.ts 里加超过 50 行的新功能 — 该文件已 800 行，新功能应拆到独立模块
+- 不要在 src/tools/run-pipeline.ts 里堆编排逻辑 — 新功能放到 `src/orchestration/` 或 `src/pipeline/`
 - 不要删除 mock provider（tests 依赖它）
 - 不要改 workspace isolation 逻辑而不跑 smoke tests
