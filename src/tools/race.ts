@@ -9,15 +9,15 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
-import { loadCheckpoint, saveCheckpoint, type PipelineState } from "../state.js";
-import { updateTrace } from "../trace.js";
+import { loadCheckpoint, saveCheckpoint, type PipelineState } from "../core/state.js";
+import { updateTrace } from "../observability/trace.js";
 import {
   deleteRaceSession,
   getRaceSession,
   type RaceCandidateSnapshot,
   type RaceSession,
-} from "../race-registry.js";
-import { SessionWorkspace } from "../workspace.js";
+} from "../runtime/race-registry.js";
+import { SessionWorkspace } from "../runtime/workspace.js";
 
 function applyPatchText(applyTargetPath: string, patchText: string): void {
   if (!patchText.trim()) {

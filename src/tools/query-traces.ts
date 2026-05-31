@@ -4,8 +4,8 @@
 
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import type { PipelineStatus } from "../state.js";
-import { queryTraces, aggregateTraceStats, type TraceQuery } from "../trace.js";
+import type { PipelineStatus } from "../core/state.js";
+import { queryTraces, aggregateTraceStats, type TraceQuery } from "../observability/trace.js";
 
 const TRACE_STATUS_FILTER = [
   "approved",
@@ -15,6 +15,8 @@ const TRACE_STATUS_FILTER = [
   "queued",
   "aborted",
   "awaiting_judge",
+  "awaiting_approval",
+  "awaiting_plan_approval",
 ] as const satisfies readonly PipelineStatus[];
 
 export function register(server: McpServer) {

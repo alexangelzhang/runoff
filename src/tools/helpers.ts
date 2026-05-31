@@ -3,7 +3,7 @@
  */
 
 import { isTextResponse, LLMResponse, type AgentWorkspaceArtifact } from "../providers/types.js";
-import { type StepResult, type PipelineStatus } from "../state.js";
+import { type StepResult, type PipelineStatus } from "../core/state.js";
 
 // --- Pipeline interface types ---
 
@@ -19,6 +19,9 @@ export interface PipelineParams {
   maxRounds?: number;
   setPipelineTraceId?: (id: string) => void;
   signal?: AbortSignal;
+  /** Resume a run paused for human approval (`awaiting_approval`). */
+  approvalDecision?: "approve" | "reject";
+  approvalReason?: string;
 }
 
 export interface PipelineResult {
@@ -36,7 +39,7 @@ export interface PipelineResult {
 
 // --- Helper functions ---
 
-export type { PipelineConfig } from "../config.js";
+export type { PipelineConfig } from "../core/config.js";
 
 export type SerializedTextResponse = {
   kind: "text";

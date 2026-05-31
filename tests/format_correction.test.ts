@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { parseVerdict } from "../src/verdict.js";
+import { parseVerdict } from "../src/core/verdict.js";
 import { LLMProvider, LLMRequest, LLMResponse, isTextResponse } from "../src/providers/types.js";
 
 test("Resilience: Format Correction Loop (Step 3 Foundations)", async (t) => {

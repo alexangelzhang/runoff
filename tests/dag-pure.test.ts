@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { computePipelineStages } from "../src/orchestration/dag.ts";
-import { getDagStages, type PipelineConfig } from "../src/config.js";
+import { getDagStages, type PipelineConfig } from "../src/core/config.js";
 
 function assertStagesMatch(
   pipeline: Record<string, [string | string[], ...string[]]>,

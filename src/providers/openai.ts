@@ -8,7 +8,8 @@ import {
   type NextStep,
   filterValidNextSteps
 } from "./types.js";
-import { logger } from "../logger.js";
+import { logger } from "../core/logger.js";
+import { OPENAI_SYSTEM_PROMPT } from "../prompts/index.js";
 
 export class OpenAIProvider implements LLMProvider {
   name = "openai";
@@ -22,13 +23,7 @@ export class OpenAIProvider implements LLMProvider {
   }
 
   async execute(req: LLMRequest): Promise<LLMResponse> {
-    const systemPrompt = `You are an expert software engineer. Generate clean, production-ready code based on the specification provided.
-Rules:
-- Output ONLY the code in a single fenced code block, followed by a brief explanation
-- Use the specified language, or infer the best one from context
-- Follow best practices: proper error handling, clear naming, minimal complexity
-- To suggest follow-up tasks, use <NEXT_STEPS>[{"name": "...", "provider": "...", "dependsOn": []}]</NEXT_STEPS>
-- To provide architectural insights, use <INSIGHTS>{"key": "value"}</INSIGHTS>`;
+    const systemPrompt = OPENAI_SYSTEM_PROMPT();
 
     const userPrompt = [
       `## Specification\n${req.prompt}`,

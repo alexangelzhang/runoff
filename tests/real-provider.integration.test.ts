@@ -4,8 +4,8 @@ import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test, { type TestContext } from "node:test";
-import { clearConfigCache } from "../src/config.js";
-import { raceSessions } from "../src/race-registry.js";
+import { clearConfigCache } from "../src/core/config.js";
+import { raceSessions } from "../src/runtime/race-registry.js";
 import { abortRaceSession } from "../src/tools/race.js";
 import { runPipelineMode } from "../src/tools/run-pipeline.js";
 

@@ -6,16 +6,23 @@
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import { loadConfig } from "./config.js";
-import { activeWorkspaces } from "./workspace.js";
-import { raceSessions, cleanupStaleRaceSessions } from "./race-registry.js";
+import { loadConfig } from "./core/config.js";
+import { activeWorkspaces } from "./runtime/workspace.js";
+import { raceSessions, cleanupStaleRaceSessions } from "./runtime/race-registry.js";
 
 import { register as registerRunStep } from "./tools/run-step.js";
 import { register as registerShowConfig } from "./tools/show-config.js";
 import { register as registerQueryTraces } from "./tools/query-traces.js";
+import { register as registerQueryExperiments } from "./tools/query-experiments.js";
+import { register as registerMemoryStatus } from "./tools/memory-status.js";
+import { register as registerQueryMemory } from "./tools/query-memory.js";
+import { register as registerDreamRun } from "./tools/dream-run.js";
+import { register as registerDreamifyTune } from "./tools/dreamify-tune.js";
+import { register as registerDreamExport } from "./tools/dream-export.js";
 import { register as registerRace } from "./tools/race.js";
 import { register as registerRunPipeline } from "./tools/run-pipeline.js";
-import { logger } from "./logger.js";
+import { register as registerShowAgentGraph } from "./tools/show-agent-graph.js";
+import { logger } from "./core/logger.js";
 
 const initialConfig = loadConfig();
 
@@ -28,8 +35,15 @@ const server = new McpServer({
 registerRunStep(server, initialConfig);
 registerShowConfig(server);
 registerQueryTraces(server);
+registerQueryExperiments(server);
+registerMemoryStatus(server);
+registerQueryMemory(server);
+registerDreamRun(server);
+registerDreamifyTune(server);
+registerDreamExport(server);
 registerRace(server);
 registerRunPipeline(server);
+registerShowAgentGraph(server);
 
 async function main() {
   const transport = new StdioServerTransport();

@@ -1,14 +1,20 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { emptyCandidate } from "../src/candidate.js";
+import { emptyCandidate } from "../src/core/candidate.js";
 import {
   buildStructuredPromptForStep,
   isReviewStep,
+  resolveStepKind,
 } from "../src/orchestration/step-strategy.js";
 
 test("isReviewStep matches configured review step name", () => {
   assert.equal(isReviewStep("review", "review"), true);
   assert.equal(isReviewStep("generate", "review"), false);
+});
+
+test("resolveStepKind classifies review vs generate", () => {
+  assert.equal(resolveStepKind("review", "review"), "review");
+  assert.equal(resolveStepKind("generate", "review"), "generate");
 });
 
 test("buildStructuredPromptForStep uses review template for review step", () => {

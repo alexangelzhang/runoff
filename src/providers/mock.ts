@@ -1,5 +1,5 @@
 import { LLMProvider, LLMRequest, LLMResponse, ProviderMode } from "./types.js";
-import { logger } from "../logger.js";
+import { logger } from "../core/logger.js";
 
 export class MockProvider implements LLMProvider {
   name: string;
@@ -12,6 +12,47 @@ export class MockProvider implements LLMProvider {
   async execute(req: LLMRequest): Promise<LLMResponse> {
     const stepName = req.stepName || "unknown";
     logger.info("mock-provider", `Executing step: ${stepName}`, { provider: this.name });
+
+    if (stepName === "orchestrator-plan") {
+      const steps = (req.prompt.match(/Available steps: ([^\n]+)/)?.[1] ?? "implement,review")
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean);
+      const json = JSON.stringify({
+        steps: steps.length >= 2 ? [steps[0], steps[1]] : steps,
+        maxRounds: 4,
+      });
+      return {
+        kind: "text",
+        model: "mock-planner",
+        content: json,
+        code: "",
+        explanation: "Orchestrator plan",
+      };
+    }
+
+    if (stepName === "orchestrator-reflect") {
+      const steps = (req.prompt.match(/Available steps: ([^\n]+)/)?.[1] ?? "implement,review")
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean);
+      const implement = steps.find((s) => !/review|audit|verdict/i.test(s)) ?? steps[0];
+      const review = steps.find((s) => /review|audit|verdict/i.test(s)) ?? steps[1];
+      const ordered =
+        implement && review && implement !== review
+          ? [implement, review]
+          : steps.length >= 2
+            ? [steps[0], steps[1]]
+            : steps;
+      const json = JSON.stringify({ steps: ordered, maxRounds: 4 });
+      return {
+        kind: "text",
+        model: "mock-reflect",
+        content: json,
+        code: "",
+        explanation: "Orchestrator reflect re-plan",
+      };
+    }
 
     if (stepName === "analyze") {
       return {
@@ -47,6 +88,18 @@ export class MockProvider implements LLMProvider {
       };
     }
 
+    if (stepName.includes(":race-merge")) {
+      return {
+        kind: "agent",
+        model: "mock-merge",
+        summary: "LLM stage merge (mock)",
+        changes: "+merged\n",
+        filesModified: ["merged.ts"],
+        diffStat: "1 file",
+        failed: false,
+      };
+    }
+
     if (stepName === "verify_async") {
       return {
         kind: "text",
@@ -54,6 +107,28 @@ export class MockProvider implements LLMProvider {
         content: "All checks passed. Async verified.",
         code: "",
         explanation: "Dynamic step executed successfully."
+      };
+    }
+
+    if (stepName === "dream-enrich") {
+      const traceMatch = req.prompt.match(/"traceId"\s*:\s*"([^"]+)"/);
+      const traceId = traceMatch?.[1] ?? "unknown-trace";
+      const json = JSON.stringify({
+        proposals: [
+          {
+            action: "ADD",
+            category: "trace_summary",
+            content: "Mock dream summary: pipeline completed with lessons learned.",
+            evidenceTraceId: traceId,
+          },
+        ],
+      });
+      return {
+        kind: "text",
+        model: "mock-dream",
+        content: json,
+        code: "",
+        explanation: "Dream enrich (mock)",
       };
     }
 

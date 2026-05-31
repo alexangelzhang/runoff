@@ -13,7 +13,7 @@ export LLM_PIPELINE_HOME="${LLM_PIPELINE_HOME:-$HOME/.llm-pipeline}"
 TASKS_DIR="$LLM_PIPELINE_HOME/tasks"
 MAX_CONCURRENT="${LLM_PIPELINE_MAX_CONCURRENT:-2}"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-TASK_RUNNER="$SCRIPT_DIR/task_runner.py"
+TASK_RUNNER="$SCRIPT_DIR/../python/task_runner.py"
 
 mkdir -p "$TASKS_DIR"
 

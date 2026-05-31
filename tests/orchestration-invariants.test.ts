@@ -7,7 +7,7 @@ import assert from "node:assert/strict";
 import { join } from "node:path";
 import test, { type TestContext } from "node:test";
 import { pathToFileURL } from "node:url";
-import type { PipelineConfig } from "../src/config.js";
+import type { PipelineConfig } from "../src/core/config.js";
 import { computePipelineStages } from "../src/orchestration/dag.ts";
 
 async function withDag(
@@ -19,7 +19,7 @@ async function withDag(
 
 test("computePipelineStages matches getDagStages for the same pipeline (fresh config, no cache identity)", async (t) => {
   await withDag(t, async (computePipelineStages) => {
-    const { getDagStages } = await import("../src/config.ts");
+    const { getDagStages } = await import("../src/core/config.ts");
     const config = {
       providers: { m: { type: "mock" as const } },
       pipeline: {
@@ -34,7 +34,7 @@ test("computePipelineStages matches getDagStages for the same pipeline (fresh co
 
 test("after clearConfigCache + loadConfig, getDagStages matches compute on config.pipeline", async (t) => {
   await withDag(t, async (computePipelineStages) => {
-    const { loadConfig, getDagStages, clearConfigCache } = await import("../src/config.ts");
+    const { loadConfig, getDagStages, clearConfigCache } = await import("../src/core/config.ts");
     clearConfigCache();
     const config = loadConfig();
     const fromPure = computePipelineStages(config.pipeline);

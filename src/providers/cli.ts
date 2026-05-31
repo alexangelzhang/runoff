@@ -2,9 +2,9 @@ import { spawn, execSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { platform } from "node:os";
 import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
-import { join, dirname } from "node:path";
-import { createTaskPayload, parseTaskResult, type TaskResult } from "../ipc.js";
-import { getTasksDir } from "../paths.js";
+import { join } from "node:path";
+import { createTaskPayload, parseTaskResult, type TaskResult } from "../core/ipc.js";
+import { getTaskRunnerScriptPath, getTasksDir } from "../core/paths.js";
 import {
   LLMProvider,
   LLMRequest,
@@ -27,7 +27,8 @@ function atomicWriteJsonFile(filePath: string, data: unknown): void {
  * Refactored to manage the task_runner process directly for active cancellation.
  * Integrated with Resilience Edition: Windows support and proper IPC alignment.
  */
-async function executeTask(
+/** Exported for failure-path / abort contract tests (issue 6.11 / 6.18). */
+export async function executeCliRunnerTask(
   command: string, 
   args: string[], 
   taskFile: string, 
@@ -36,8 +37,7 @@ async function executeTask(
   signal?: AbortSignal
 ): Promise<TaskResult> {
   return new Promise((resolve, reject) => {
-    const scriptDir = dirname(new URL(import.meta.url).pathname);
-    const defaultRunnerPath = join(scriptDir, "../../scripts/task_runner.py");
+    const defaultRunnerPath = getTaskRunnerScriptPath();
 
     const useCommand = command || "python3";
     const useArgs = args.length > 0 ? [...args, taskFile, resultFile] : [defaultRunnerPath, taskFile, resultFile];
@@ -144,6 +144,7 @@ export class CLIProvider implements LLMProvider {
     const delegateArgv = trimmedCmd !== "" ? [trimmedCmd, ...this.args] : undefined;
     const deferFinalize = req.finalizeStrategy === "defer";
     const sharedLockKey = deferFinalize ? (req.sharedLockKey ?? req.sessionId) : req.sharedLockKey;
+    const startedAt = new Date().toISOString();
     const payload = createTaskPayload({
       id: taskId,
       prompt: req.prompt,
@@ -155,7 +156,8 @@ export class CLIProvider implements LLMProvider {
       sessionId: deferFinalize ? `${req.sessionId ?? "session"}-${this.name}-${taskId}` : req.sessionId,
       stepName: req.stepName,
       round: req.round ?? 1,
-      timestamp: new Date().toISOString(),
+      timestamp: startedAt,
+      startedAt,
       ...(delegateArgv ? { delegateArgv } : {}),
       ...(req.finalizeStrategy ? { finalizeStrategy: req.finalizeStrategy } : {}),
       ...(sharedLockKey ? { sharedLockKey } : {}),
@@ -167,7 +169,7 @@ export class CLIProvider implements LLMProvider {
     const timeoutMs = typeof timeoutOverride === "number" ? timeoutOverride : getResultTimeoutMs(this.mode);
 
     try {
-      const result = await executeTask("python3", [], taskFile, resultFile, timeoutMs, req.signal);
+      const result = await executeCliRunnerTask("python3", [], taskFile, resultFile, timeoutMs, req.signal);
       const failed = result.status === "error";
       
       const usage = result.usage || {

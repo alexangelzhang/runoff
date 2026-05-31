@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { runPipelineMode } from "../src/tools/run-pipeline.js";
-import { PipelineConfig } from "../src/config.js";
+import { PipelineConfig } from "../src/core/config.js";
 
 test("Wave 2: Dynamic DAG Expansion", async (t) => {
   const dynamicConfig: PipelineConfig = {

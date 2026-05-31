@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { parseVerdict } from "../src/verdict.ts";
+import { parseVerdict } from "../src/core/verdict.ts";
 
 // --- Structured sentinel ---
 

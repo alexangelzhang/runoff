@@ -1,4 +1,4 @@
-import type { PipelineStatus } from "../state.js";
+import type { PipelineStatus } from "../core/state.js";
 
 /**
  * Only successful review completion should merge agent worktree into the source repo and remove the worktree.

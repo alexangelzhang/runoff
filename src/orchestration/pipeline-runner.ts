@@ -1,12 +1,54 @@
-import type { PipelineConfig } from "../config.js";
-import { getDagStages, clearDagStagesCache } from "../config.js";
-import type { Candidate } from "../candidate.js";
-import type { StepResult, PipelineStatus } from "../state.js";
-import type { StepTrace } from "../trace.js";
-import { CostTracker } from "../pricing.js";
-import { ensureWorkDirForStep } from "../pipeline-workdir.js";
-import { logger } from "../logger.js";
-import { ExecutionScheduler, type SchedulerContext } from "../scheduler.js";
+import type { PipelineConfig } from "../core/config.js";
+import { getDagStages, clearDagStagesCache } from "../core/config.js";
+import type { Candidate } from "../core/candidate.js";
+import type { RaceCandidateSnapshot } from "../runtime/race-registry.js";
+import {
+  assertStepTransition,
+  type StepResult,
+  type StepStatus,
+  type PipelineStatus,
+} from "../core/state.js";
+import type { StepTrace } from "../observability/trace.js";
+import { recordPipelineStepCost, type PipelineCostAccumulator } from "../routing/pricing.js";
+import { ensureWorkDirForStep } from "../runtime/pipeline-workdir.js";
+import { logger } from "../core/logger.js";
+import type { SchedulerContext, StepOutcome } from "./step-execution.js";
+import type { ExecutionGovernance } from "./execution-governance.js";
+import {
+  PipelineAwaitingApprovalError,
+  PolicyDenialError,
+  roleForStep,
+  schedulerContextToAgentTask,
+} from "./execution-governance.js";
+import { TripwireError } from "./guardrails.js";
+import { agentId } from "./multi-agent-types.js";
+import type { AgentResult } from "./agent.js";
+import { SharedContext } from "./shared-context.js";
+import {
+  createParallelBranches,
+  mergeParallelStageBranchesAsync,
+  recordOutcomeOnBranch,
+  resolveStageMergeMode,
+} from "./context-integration.js";
+import { WorkspaceOwnershipRegistry } from "./ownership.js";
+import type { AgentRegistry } from "./registry.js";
+import type { AgentToolRegistry } from "./agent-tools.js";
+import { executeWorkflowParallelStage, useWorkflowAgents } from "./workflow-bridge.js";
+import { classifyStepFailure, type FailureReason } from "../routing/retry-strategy.js";
+import type { ExecutionPlan, OrchestrationContext, Orchestrator } from "./orchestrator.js";
+import {
+  appendNodeToAgentGraph,
+  agentGraphToStages,
+  syncExecutionPlanFromAgentGraph,
+  type AgentGraph,
+} from "./agent-graph.js";
+import {
+  appendStepToExecutionPlan,
+  executionPlanToStages,
+} from "./plan-scheduler.js";
+import { resolveStepRunner, type StepRunner } from "./step-runner.js";
+import type { EventLog } from "./event-log.js";
+import { applyReflectReplan, shouldReflectOnTrigger } from "./reflect.js";
 
 export type MutablePipelineRunState = {
   stepResults: Record<string, StepResult>;
@@ -15,18 +57,25 @@ export type MutablePipelineRunState = {
   candidate: Candidate;
   approved: boolean;
   lastReviewFeedback: string;
+  /** Phase 5.5: drives retry provider selection on round > 1. */
+  lastRetryFailure?: { reason: FailureReason; error?: string; provider?: string };
+  pendingRaceTraceId?: string;
+  raceCandidates?: RaceCandidateSnapshot[];
+  /** Parallel-stage branch/merge (Phase 7.4); recreated each round. */
+  sharedContext?: SharedContext;
 };
 
 export type PipelineDAGLoopOptions = {
   runtimeConfig: PipelineConfig;
-  scheduler: ExecutionScheduler;
-  costTracker: CostTracker;
+  /** B8: orchestration-layer step execution (required unless `agentRegistry` is set). */
+  stepRunner?: StepRunner;
+  costTracker: PipelineCostAccumulator;
   state: MutablePipelineRunState;
+  pipelineSessionId: string;
   startRound: number;
   maxRounds: number;
   /** Defaults to "review" when omitted. */
   reviewStepName?: string;
-  resumeSessionId?: string;
   traceId: string;
   prompt: string;
   language?: string;
@@ -37,23 +86,84 @@ export type PipelineDAGLoopOptions = {
   verifyResults?: string;
   signal?: AbortSignal;
   onRoundComplete: (round: number) => Promise<void>;
+  /** Called after each step completes (for cost tracking, event logging). */
+  onStepComplete?: (ctx: { stepTrace: StepTrace; stepName: string; provider: string; model: string; usage: { promptTokens: number; completionTokens: number } }) => void;
+  governance?: ExecutionGovernance;
+  agentRegistry?: AgentRegistry;
+  agentTools?: AgentToolRegistry;
+  /** Backlog B3: orchestrator-owned execution plan (replaces getDagStages for wave order). */
+  executionPlan?: ExecutionPlan;
+  /** B7: runtime agent topology; when set, wave order follows `agentGraph.waves`. */
+  agentGraph?: AgentGraph;
+  orchestrator?: Orchestrator;
+  orchestrationContext?: OrchestrationContext;
+  /** Optional event log for plan_revision events after reflect. */
+  eventLog?: EventLog;
 };
+
+function failedStepOutcome(stepName: string, round: number, error: string): StepOutcome {
+  return {
+    stepName,
+    usedProvider: "governance",
+    upgraded: false,
+    durationMs: 0,
+    trace: { name: stepName, provider: "governance", durationMs: 0, round, error },
+    response: {
+      kind: "text",
+      model: "governance",
+      content: "",
+      code: "",
+      explanation: "",
+      failed: true,
+      error,
+    },
+  };
+}
+
+function outcomeToAgentResult(outcome: StepOutcome): AgentResult {
+  return {
+    agentId: agentId(outcome.stepName),
+    stepName: outcome.stepName,
+    response: outcome.response,
+    durationMs: outcome.durationMs,
+  };
+}
+
+function isStepCompletedForRound(
+  stepResults: Record<string, StepResult>,
+  stepName: string,
+  round: number,
+): boolean {
+  const result = stepResults[stepName];
+  if (!result || result.round !== round) return false;
+  return result.status === "success" || result.status === "skipped";
+}
+
+function resolvePipelineStages(
+  runtimeConfig: PipelineConfig,
+  executionPlan?: ExecutionPlan,
+  agentGraph?: AgentGraph,
+): string[][] {
+  if (agentGraph) return agentGraphToStages(agentGraph);
+  if (executionPlan) return executionPlanToStages(executionPlan);
+  return getDagStages(runtimeConfig);
+}
 
 /**
  * Round-based DAG execution: parallel stages within each wave, dynamic step injection, review gating.
+ * When `executionPlan` + `orchestrator` are set, waves follow the plan and callbacks drive next actions (B3).
  */
 export async function runPipelineDAGLoop(
   opts: PipelineDAGLoopOptions
 ): Promise<{ finalStatus: PipelineStatus; completedRounds: number; endRound: number }> {
   const {
     runtimeConfig,
-    scheduler,
     costTracker,
     state,
+    pipelineSessionId,
     startRound,
     maxRounds,
     reviewStepName: reviewStepNameOpt,
-    resumeSessionId,
     traceId,
     prompt,
     language,
@@ -64,97 +174,308 @@ export async function runPipelineDAGLoop(
     verifyResults,
     signal,
     onRoundComplete,
+    onStepComplete,
+    governance,
+    agentRegistry,
+    executionPlan,
+    agentGraph,
+    orchestrator,
+    orchestrationContext,
+    eventLog,
   } = opts;
 
+  const stepRunner = resolveStepRunner(opts);
+
   const reviewStepName = reviewStepNameOpt ?? "review";
+  const workflowMode = useWorkflowAgents(runtimeConfig);
+  const initialPipelineSize = Object.keys(runtimeConfig.pipeline).length;
 
   let round = startRound;
   let finalStatus: PipelineStatus = "running";
+  let pausedForApproval = false;
   let completedRounds = 0;
+  const workspaceLeases = new WorkspaceOwnershipRegistry();
+  const stageMergeMode = resolveStageMergeMode(runtimeConfig);
 
   for (; round <= maxRounds; round++) {
     let stepFailed = false;
     const completedThisRound = new Set<string>();
+    state.pendingRaceTraceId = undefined;
+    state.raceCandidates = undefined;
+    state.sharedContext = new SharedContext();
 
     while (true) {
       if (stepFailed) break;
 
-      const allStages = getDagStages(runtimeConfig);
-      const nextStage = allStages.find((s) =>
-        s.some((step) => !state.stepResults[step] && !completedThisRound.has(step))
+      const allStages = resolvePipelineStages(runtimeConfig, executionPlan, agentGraph);
+      const nextStage = allStages.find((stage) =>
+        stage.some((step) => !isStepCompletedForRound(state.stepResults, step, round) && !completedThisRound.has(step))
       );
 
       if (!nextStage) break;
 
       const pendingInStage = nextStage.filter(
-        (s) => !state.stepResults[s] && !completedThisRound.has(s)
+        (stepName) => !isStepCompletedForRound(state.stepResults, stepName, round) && !completedThisRound.has(stepName)
       );
       if (pendingInStage.length === 0) break;
 
-      const stageOutcomes = await Promise.all(
-        pendingInStage.map(async (stepName) => {
-          if (resumeSessionId && round === startRound && state.stepResults[stepName]) {
-            return { skipped: true as const, stepName };
+      const isParallelStage = pendingInStage.length > 1;
+      const parallelBranches = isParallelStage
+        ? createParallelBranches(state.sharedContext!, pendingInStage)
+        : undefined;
+      const branchIdByStep = new Map<string, string>();
+      if (parallelBranches) {
+        for (const [stepName, { branchId }] of parallelBranches) {
+          branchIdByStep.set(stepName, branchId);
+        }
+      }
+
+      let stageOutcomes: StepOutcome[];
+      try {
+        const runStageSteps = async (): Promise<StepOutcome[]> => {
+          if (workflowMode && agentRegistry && isParallelStage) {
+            const baseTask = schedulerContextToAgentTask(
+              pendingInStage[0]!,
+              {
+                prompt,
+                language,
+                context,
+                workDir: effectiveWorkDir,
+                sessionId: traceId,
+                pipelineSessionId,
+                round,
+                globalKnowledge: state.globalKnowledge,
+                candidate: { ...state.candidate },
+                acceptanceCriteria,
+                verifyResults,
+                signal,
+                reviewStepName,
+                lastReviewFeedback: state.lastReviewFeedback,
+              },
+              reviewStepName,
+            );
+            return executeWorkflowParallelStage({
+              registry: agentRegistry,
+              stepRunner,
+              stepNames: pendingInStage,
+              reviewStepName,
+              baseTask,
+              buildContext: (stepName, task) => ({
+                prompt: task.prompt,
+                language: task.language,
+                context: task.context,
+                workDir: task.workDir,
+                sessionId: traceId,
+                pipelineSessionId,
+                round: task.round,
+                globalKnowledge: state.globalKnowledge,
+                candidate: { ...state.candidate },
+                acceptanceCriteria,
+                verifyResults,
+                signal: task.signal,
+                reviewStepName,
+                lastReviewFeedback: task.reviewFeedback ?? state.lastReviewFeedback,
+              }),
+            });
           }
 
-          ensureWorkDirForStep(stepName, runtimeConfig, workDir);
+          return Promise.all(
+          pendingInStage.map(async (stepName) => {
+            ensureWorkDirForStep(stepName, runtimeConfig, workDir);
 
-          const ctx: SchedulerContext = {
-            prompt,
-            language,
-            context,
-            workDir: effectiveWorkDir,
-            sessionId: traceId,
-            round,
-            globalKnowledge: state.globalKnowledge,
-            candidate: state.candidate,
-            acceptanceCriteria,
-            verifyResults,
-            signal,
-            reviewStepName,
-            lastReviewFeedback: state.lastReviewFeedback,
-          };
+            const prior = state.stepResults[stepName];
+            const fromStatus: StepStatus =
+              prior && prior.round === round ? prior.status : "queued";
+            if (fromStatus === "queued" || fromStatus === "failed") {
+              assertStepTransition(fromStatus, "running", stepName);
+              state.stepResults[stepName] = { ...prior, round, status: "running" };
+            }
 
-          return scheduler.executeStep(stepName, ctx);
-        })
-      );
+            if (effectiveWorkDir) {
+              const leaseKey = effectiveWorkDir;
+              const holder = stepName;
+              const acquired = workspaceLeases.acquire(
+                leaseKey,
+                holder,
+                isParallelStage ? "shared" : "exclusive",
+              );
+              if (!acquired) {
+                return failedStepOutcome(
+                  stepName,
+                  round,
+                  `Workspace lease denied for ${leaseKey}`,
+                );
+              }
+            }
+
+            const ctx: SchedulerContext = {
+              prompt,
+              language,
+              context,
+              workDir: effectiveWorkDir,
+              sessionId: traceId,
+              pipelineSessionId,
+              round,
+              globalKnowledge: state.globalKnowledge,
+              candidate: isParallelStage ? { ...state.candidate } : state.candidate,
+              acceptanceCriteria,
+              verifyResults,
+              signal,
+              reviewStepName,
+              lastReviewFeedback: state.lastReviewFeedback,
+              lastRetryFailure: state.lastRetryFailure,
+              costTracker,
+              raceBudgetUSD: runtimeConfig.orchestration?.raceBudgetUSD,
+              raceEarlyTermination: runtimeConfig.orchestration?.raceEarlyTermination,
+              promptVersionStore: runtimeConfig.runtime?.promptVersionStore,
+            };
+
+            if (governance) {
+              const task = schedulerContextToAgentTask(stepName, ctx, reviewStepName);
+              const id = agentId(stepName);
+              try {
+                await governance.beforeStep({
+                  agentId: id,
+                  role: roleForStep(stepName, reviewStepName),
+                  task,
+                  action: "execute_step",
+                  targetPath: effectiveWorkDir,
+                });
+              } catch (err: unknown) {
+                if (err instanceof PolicyDenialError) {
+                  return failedStepOutcome(stepName, round, err.message);
+                }
+                if (err instanceof TripwireError) {
+                  return failedStepOutcome(stepName, round, err.message);
+                }
+                throw err;
+              }
+            }
+
+            const outcome = await stepRunner.executeStep(stepName, ctx);
+
+            if (governance) {
+              await governance.afterStep(outcomeToAgentResult(outcome));
+            }
+
+            return outcome;
+          }),
+        );
+        };
+
+        stageOutcomes = await runStageSteps();
+      } catch (err: unknown) {
+        if (err instanceof PipelineAwaitingApprovalError) {
+          finalStatus = "awaiting_approval";
+          pausedForApproval = true;
+          break;
+        }
+        throw err;
+      }
 
       for (const outcome of stageOutcomes) {
-        if ("skipped" in outcome) continue;
-        const { stepName, response, trace, verdict, candidateSnapshot, awaitingJudge } = outcome;
+        const {
+          stepName,
+          response,
+          trace,
+          verdict,
+          candidateSnapshot,
+          artifacts,
+          awaitingJudge,
+          raceSession,
+        } = outcome;
 
         const stepResult: StepResult = {
           round,
           status: response.failed ? "failed" : "success",
           provider: outcome.usedProvider,
           routedFrom: outcome.routedFrom,
+          kind: response.kind,
+          model: response.model,
           durationMs: outcome.durationMs,
           error: response.error,
           usage: response.usage,
+          ...(response.kind === "text"
+            ? {
+                code: response.code,
+                explanation: response.explanation,
+              }
+            : {
+                summary: response.summary,
+                changes: response.changes,
+                filesModified: response.filesModified,
+                diffStat: response.diffStat,
+              }),
         };
 
-        if (!response.failed && candidateSnapshot) {
+        if (artifacts?.length) {
+          stepResult.artifacts = artifacts;
+        }
+
+        if (isParallelStage) {
+          const branchId = branchIdByStep.get(stepName);
+          if (branchId && artifacts?.length) {
+            recordOutcomeOnBranch(
+              state.sharedContext!,
+              branchId,
+              artifacts,
+              stepResult.filesModified,
+            );
+          }
+        } else if (!response.failed && candidateSnapshot) {
           state.candidate = { ...candidateSnapshot };
           stepResult.candidateSnapshot = { ...state.candidate };
         }
 
+        if (effectiveWorkDir) {
+          workspaceLeases.release(effectiveWorkDir, stepName);
+        }
+
+        const from = state.stepResults[stepName]?.status ?? "running";
+        assertStepTransition(from, stepResult.status, stepName);
         state.stepResults[stepName] = stepResult;
         state.stepTraces.push(trace);
-        costTracker.addCall(
+        recordPipelineStepCost(
+          costTracker,
           stepName,
           "unknown",
           response.model,
-          response.usage || { promptTokens: 0, completionTokens: 0 }
+          response.usage || { promptTokens: 0, completionTokens: 0 },
         );
+        onStepComplete?.({
+          stepTrace: trace,
+          stepName,
+          provider: "unknown",
+          model: response.model,
+          usage: response.usage || { promptTokens: 0, completionTokens: 0 },
+        });
         completedThisRound.add(stepName);
 
         if (outcome.nextSteps && Array.isArray(outcome.nextSteps)) {
           for (const ns of outcome.nextSteps) {
             if (!runtimeConfig.pipeline[ns.name]) {
+              const dynamicSteps = Object.keys(runtimeConfig.pipeline).length - initialPipelineSize;
+              const maxHandoffs = runtimeConfig.orchestration?.maxHandoffs;
+              if (typeof maxHandoffs === "number" && dynamicSteps >= maxHandoffs) {
+                throw new Error(`Dynamic step limit exceeded (orchestration.maxHandoffs=${maxHandoffs})`);
+              }
               logger.info("orchestrator", `Injecting dynamic step: ${ns.name} (from ${stepName})`);
               const deps = ns.dependsOn || [stepName];
               runtimeConfig.pipeline[ns.name] = [ns.provider, ...deps];
               clearDagStagesCache();
+              if (agentGraph) {
+                appendNodeToAgentGraph(
+                  agentGraph,
+                  ns.name,
+                  { providers: ns.provider, dependsOn: deps },
+                  runtimeConfig.pipeline,
+                );
+                if (executionPlan) {
+                  syncExecutionPlanFromAgentGraph(executionPlan, agentGraph);
+                }
+              } else if (executionPlan) {
+                appendStepToExecutionPlan(executionPlan, ns.name);
+              }
             }
           }
         }
@@ -163,32 +484,157 @@ export async function runPipelineDAGLoop(
           state.globalKnowledge = { ...state.globalKnowledge, ...response.insights };
         }
 
-        if (response.failed) {
-          stepFailed = true;
+        if (awaitingJudge) {
+          state.pendingRaceTraceId = raceSession?.traceId ?? traceId;
+          state.raceCandidates = raceSession?.candidates.map((candidate) => ({ ...candidate }));
+          finalStatus = "awaiting_judge";
           break;
         }
 
-        if (awaitingJudge) {
-          finalStatus = "awaiting_judge";
+        if (orchestrator && orchestrationContext) {
+          const agentResult = outcomeToAgentResult(outcome);
+          orchestrationContext.results.set(stepName, agentResult);
+          orchestrationContext.round = round;
+          orchestrationContext.sharedKnowledge = { ...state.globalKnowledge };
+          try {
+            const next = await orchestrator.onStepComplete(orchestrationContext, agentResult);
+            if (next.type === "done") {
+              if (next.success) {
+                state.approved = true;
+                finalStatus = "approved";
+              } else {
+                stepFailed = true;
+                finalStatus = "failed";
+              }
+              break;
+            }
+          } catch {
+            // non-critical
+          }
+        }
+
+        if (response.failed) {
+          if (orchestrator && orchestrationContext) {
+            try {
+              await orchestrator.onStepFailed(orchestrationContext, {
+                stepName,
+                agentId: agentId(stepName),
+                error: new Error(response.error ?? "step failed"),
+                attempt: round,
+              });
+            } catch {
+              // non-critical
+            }
+          }
+          state.lastRetryFailure = {
+            reason: classifyStepFailure({
+              failed: true,
+              error: response.error,
+              response,
+              stepName,
+              reviewStepName,
+            }),
+            error: response.error,
+            provider: outcome.usedProvider,
+          };
+          stepFailed = true;
           break;
         }
 
         if (stepName === reviewStepName && verdict) {
           state.approved = verdict.approved;
           state.lastReviewFeedback = verdict.feedback;
+          if (!verdict.approved) {
+            state.lastRetryFailure = {
+              reason: classifyStepFailure({
+                failed: false,
+                response,
+                stepName,
+                reviewStepName,
+              }),
+              provider: outcome.usedProvider,
+            };
+          } else {
+            state.lastRetryFailure = undefined;
+          }
           if (state.approved) break;
+        }
+      }
+
+      if (isParallelStage && !stepFailed) {
+        const mergeOutcome = await mergeParallelStageBranchesAsync(
+          state.sharedContext!,
+          branchIdByStep,
+          stageMergeMode,
+          { prompt, config: runtimeConfig },
+        );
+        if (!mergeOutcome.success) {
+          logger.warn(
+            "orchestrator",
+            `Parallel stage merge failed (${mergeOutcome.strategy}): ${mergeOutcome.conflicts.join(", ")}`,
+          );
+          stepFailed = true;
+        } else {
+          state.candidate = mergeOutcome.candidate;
+          for (const stepName of branchIdByStep.keys()) {
+            const sr = state.stepResults[stepName];
+            if (sr) sr.candidateSnapshot = { ...state.candidate };
+          }
         }
       }
     }
 
     completedRounds++;
-    if (finalStatus === "awaiting_judge") {
+    if (pausedForApproval || finalStatus === "awaiting_judge") {
       break;
     }
     if (state.approved) {
       finalStatus = "approved";
       break;
     }
+
+    if (
+      orchestrator &&
+      orchestrationContext &&
+      executionPlan &&
+      agentGraph &&
+      !state.approved &&
+      round < maxRounds
+    ) {
+      const trigger = stepFailed ? "step_failure" : "review_revision";
+      if (shouldReflectOnTrigger(runtimeConfig, trigger)) {
+        orchestrationContext.round = round + 1;
+        orchestrationContext.sharedKnowledge = { ...state.globalKnowledge };
+        const failedStep = stepFailed
+          ? Object.entries(state.stepResults).find(([, sr]) => sr.status === "failed")?.[0]
+          : undefined;
+        try {
+          const replanned = await applyReflectReplan({
+            config: runtimeConfig,
+            orchestrator,
+            context: orchestrationContext,
+            executionPlan,
+            agentGraph,
+            trigger,
+            details: {
+              focusStep: failedStep,
+              errorMessage: state.lastRetryFailure?.error,
+              reviewFeedback: state.lastReviewFeedback,
+            },
+            eventLog,
+            traceId,
+          });
+          if (replanned) {
+            logger.info("orchestrator", `Reflect re-plan applied (${trigger})`);
+            stepFailed = false;
+            finalStatus = "running";
+          }
+        } catch {
+          // non-critical
+        }
+      }
+    }
+
     if (stepFailed && finalStatus === "running") {
       finalStatus = "failed";
       break;
@@ -202,3 +648,6 @@ export async function runPipelineDAGLoop(
 
   return { finalStatus, completedRounds, endRound: round };
 }
+
+/** Alias: orchestrator `executionPlan` drives stage waves (Backlog B3). */
+export const runOrchestratorDrivenLoop = runPipelineDAGLoop;

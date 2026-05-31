@@ -37,7 +37,7 @@ test("Wave 2: Dynamic DAG Expansion Logic", async (t) => {
     const config = { pipeline: { "A": ["p"], "B": ["p", "A"] } };
     
     // Re-calculating:
-    const { getDagStages } = await import("../src/config.js");
+    const { getDagStages } = await import("../src/core/config.js");
     const newStages = getDagStages(config as any);
     
     assert.equal(newStages.length, 2, "Should now have 2 stages");

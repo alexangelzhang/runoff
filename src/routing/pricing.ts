@@ -141,3 +141,72 @@ export class CostTracker {
     };
   }
 }
+
+export class CostBudgetExceededError extends Error {
+  readonly totalCostUSD: number;
+  readonly maxBudgetUSD: number;
+
+  constructor(totalCostUSD: number, maxBudgetUSD: number) {
+    super(
+      `Pipeline cost budget exceeded: $${totalCostUSD.toFixed(6)} > $${maxBudgetUSD.toFixed(6)} USD limit`,
+    );
+    this.name = "CostBudgetExceededError";
+    this.totalCostUSD = totalCostUSD;
+    this.maxBudgetUSD = maxBudgetUSD;
+  }
+}
+
+/**
+ * Pipeline-wide cost accumulator with a hard USD ceiling (ROADMAP 8.2.1).
+ */
+export class CostGovernor {
+  private readonly tracker: CostTracker;
+  private readonly maxBudgetUSD: number;
+
+  constructor(maxBudgetUSD: number, tracker?: CostTracker) {
+    if (!(maxBudgetUSD > 0)) {
+      throw new Error("costBudgetUSD must be a positive number");
+    }
+    this.maxBudgetUSD = maxBudgetUSD;
+    this.tracker = tracker ?? new CostTracker();
+  }
+
+  addCall(step: string, provider: string, model: string, usage: UsageRecord): void {
+    this.tracker.addCall(step, provider, model, usage);
+    this.assertWithinBudget();
+  }
+
+  assertWithinBudget(): void {
+    const total = this.tracker.getTotalCost();
+    if (total > this.maxBudgetUSD) {
+      throw new CostBudgetExceededError(total, this.maxBudgetUSD);
+    }
+  }
+
+  getTotalCost(): number {
+    return this.tracker.getTotalCost();
+  }
+
+  getTotalTokens(): { promptTokens: number; completionTokens: number } {
+    return this.tracker.getTotalTokens();
+  }
+
+  getSummary(): ReturnType<CostTracker["getSummary"]> {
+    return this.tracker.getSummary();
+  }
+}
+
+export type PipelineCostAccumulator = CostTracker | CostGovernor;
+
+export function recordPipelineStepCost(
+  accumulator: PipelineCostAccumulator,
+  step: string,
+  provider: string,
+  model: string,
+  usage: UsageRecord,
+): void {
+  accumulator.addCall(step, provider, model, usage);
+  if (accumulator instanceof CostGovernor) {
+    accumulator.assertWithinBudget();
+  }
+}

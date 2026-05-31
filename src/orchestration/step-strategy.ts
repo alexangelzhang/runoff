@@ -3,13 +3,13 @@
  * Review steps use structured verdict instructions; other steps use generate/refine flow.
  */
 
-import type { Candidate } from "../candidate.js";
-import { getCandidateContent, getCandidateContentLabel } from "../candidate.js";
+import type { Candidate } from "../core/candidate.js";
+import { getCandidateContent, getCandidateContentLabel } from "../core/candidate.js";
 import {
   buildGeneratePrompt,
   buildReviewPrompt,
   type StructuredPrompt,
-} from "../prompt.js";
+} from "../pipeline/prompt.js";
 
 export type StepPromptBuildInput = {
   stepName: string;
@@ -26,12 +26,19 @@ export type StepPromptBuildInput = {
   context?: string;
 };
 
+export type StepKind = "review" | "generate";
+
 export function isReviewStep(stepName: string, reviewStepName: string): boolean {
   return stepName === reviewStepName;
 }
 
+/** Classify step for prompt builder selection (issue 6.8 / 7.16). */
+export function resolveStepKind(stepName: string, reviewStepName: string): StepKind {
+  return isReviewStep(stepName, reviewStepName) ? "review" : "generate";
+}
+
 export function buildStructuredPromptForStep(input: StepPromptBuildInput): StructuredPrompt {
-  if (isReviewStep(input.stepName, input.reviewStepName)) {
+  if (resolveStepKind(input.stepName, input.reviewStepName) === "review") {
     return buildReviewPrompt({
       spec: input.spec,
       acceptanceCriteria: input.acceptanceCriteria,

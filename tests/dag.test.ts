@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { validateConfig, getDagStages, type PipelineConfig } from "../src/config.js";
+import { validateConfig, getDagStages, type PipelineConfig } from "../src/core/config.js";
 
 function createBaseConfig(): PipelineConfig {
   return {
@@ -91,6 +91,18 @@ test("getDagStages: diamond dependency resolves correctly", () => {
 });
 
 // --- getDagStages: cycle detection ---
+
+test("getDagStages: reflects in-place pipeline mutation without cache clear", () => {
+  const config: PipelineConfig = {
+    providers: { m: { type: "mock" } },
+    pipeline: { a: ["m"] },
+  };
+  assert.deepEqual(getDagStages(config), [["a"]]);
+  config.pipeline.b = ["m", "a"];
+  const stages = getDagStages(config);
+  assert.equal(stages.length, 2);
+  assert.ok(stages.some((s) => s.includes("b")));
+});
 
 test("getDagStages: detects cycle in dependencies", () => {
   const config: PipelineConfig = {

@@ -9,8 +9,8 @@ import {
   listTraces,
   queryTraces,
   aggregateTraceStats,
-} from "../src/trace.ts";
-import type { PipelineTrace } from "../src/trace.ts";
+} from "../src/observability/trace.ts";
+import type { PipelineTrace } from "../src/observability/trace.ts";
 
 function makeTmpTracesDir(): string {
   const dir = join(import.meta.dirname!, ".tmp-traces-" + Math.random().toString(36).slice(2, 8));
@@ -280,14 +280,15 @@ test("aggregateTraceStats computes correct statistics", () => {
   process.env.LLM_PIPELINE_HOME = dir;
 
   try {
+    const recent = new Date().toISOString();
     recordTrace(makeTrace({
       id: "st000001", finalStatus: "approved", totalDurationMs: 1000,
-      totalRounds: 1, timestamp: "2026-03-28T10:00:00.000Z",
+      totalRounds: 1, timestamp: recent,
       steps: [{ name: "generate", provider: "codex", durationMs: 800, round: 1 }],
     }));
     recordTrace(makeTrace({
       id: "st000002", finalStatus: "approved", totalDurationMs: 2000,
-      totalRounds: 2, timestamp: "2026-03-28T11:00:00.000Z",
+      totalRounds: 2, timestamp: recent,
       steps: [
         { name: "generate", provider: "codex", durationMs: 700, round: 1 },
         { name: "generate", provider: "gemini", durationMs: 900, round: 2 },
@@ -295,7 +296,7 @@ test("aggregateTraceStats computes correct statistics", () => {
     }));
     recordTrace(makeTrace({
       id: "st000003", finalStatus: "failed", totalDurationMs: 500,
-      totalRounds: 1, timestamp: "2026-03-28T12:00:00.000Z",
+      totalRounds: 1, timestamp: recent,
       steps: [{ name: "generate", provider: "codex", durationMs: 500, round: 1 }],
     }));
 
@@ -310,6 +311,7 @@ test("aggregateTraceStats computes correct statistics", () => {
     // Provider stats
     assert.ok(stats.providerStats["codex"]);
     assert.equal(stats.providerStats["codex"].stepCount, 3);
+    assert.ok((stats.providerStats["codex"].durationP50Ms ?? 0) > 0);
     assert.ok(stats.providerStats["gemini"]);
     assert.equal(stats.providerStats["gemini"].stepCount, 1);
   } finally {

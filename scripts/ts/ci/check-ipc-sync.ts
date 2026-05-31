@@ -1,6 +1,6 @@
 #!/usr/bin/env npx tsx
 /**
- * Verifies TypeScript `src/ipc.ts` stays in sync with `scripts/task_runner.py`
+ * Verifies TypeScript `src/ipc.ts` stays in sync with `scripts/python/task_runner.py`
  * (schema versions + payload/result field manifests). Run from repo root:
  *   npm run check-ipc-sync
  */
@@ -12,14 +12,14 @@ import {
   TASK_PAYLOAD_SCHEMA_VERSION,
   TASK_RESULT_FIELDS,
   TASK_RESULT_SCHEMA_VERSION,
-} from "../src/ipc.js";
+} from "../../../src/core/ipc.js";
 
-const root = join(dirname(fileURLToPath(import.meta.url)), "..");
+const root = join(dirname(fileURLToPath(import.meta.url)), "../../..");
 
 const pyProbe = `
-import json, sys
-sys.path.insert(0, sys.argv[1])
-from scripts.task_runner import (
+import json, sys, os
+sys.path.insert(0, os.path.join(sys.argv[1], "scripts", "python"))
+from task_runner import (
     TASK_PAYLOAD_SCHEMA_VERSION as pv,
     TASK_RESULT_SCHEMA_VERSION as rv,
     TASK_PAYLOAD_FIELD_NAMES as pf,

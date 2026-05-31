@@ -2,9 +2,9 @@
  * Workdir requirements for agent-mode steps (orchestration layer — not MCP tools).
  */
 
-import type { PipelineConfig } from "./config.js";
-import { getConfiguredProviderMode } from "./config.js";
-import { isAgentMode } from "./providers/types.js";
+import type { PipelineConfig } from "../core/config.js";
+import { getConfiguredProviderMode } from "../core/config.js";
+import { isAgentMode } from "../providers/types.js";
 
 function getStepProviderNames(stepName: string, config: PipelineConfig): string[] {
   const stepConfig = config.pipeline[stepName];
@@ -74,5 +74,5 @@ export function pipelineHasAgentRaceStep(config: PipelineConfig): boolean {
 }
 
 export function pipelineUsesGlobalSessionWorkspace(config: PipelineConfig): boolean {
-  return pipelineHasStandaloneAgentWriteStep(config) && !pipelineHasAgentRaceStep(config);
+  return pipelineHasStandaloneAgentWriteStep(config);
 }

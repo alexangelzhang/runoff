@@ -7,9 +7,10 @@
  *   3. Dynamic — review feedback, previous code, verify results (changes every round)
  */
 
-import { 
-  extractRelevantNodes 
-} from "./ast_utils.js";
+import {
+  extractRelevantNodes
+} from "../infra/ast_utils.js";
+import { GENERATE_SYSTEM_PROMPT, REVIEW_SYSTEM_PROMPT } from "../prompts/index.js";
 
 // --- Token Budget Defaults ---
 
@@ -132,7 +133,7 @@ export interface ReviewPromptInput {
 }
 
 export function buildReviewPrompt(input: ReviewPromptInput): StructuredPrompt {
-  const system = `You are a senior code reviewer. Review the candidate output against the specification and provide a structured verdict.`;
+  const system = REVIEW_SYSTEM_PROMPT();
 
   const staticParts: string[] = [];
   staticParts.push(`## Spec\n${input.spec}`);
@@ -189,7 +190,7 @@ export interface GeneratePromptInput {
 }
 
 export function buildGeneratePrompt(input: GeneratePromptInput): StructuredPrompt {
-  const system = `You are an expert software engineer. Follow the spec and provide high-quality code.`;
+  const system = GENERATE_SYSTEM_PROMPT();
 
   const staticParts: string[] = [`## Spec\n${input.spec}`];
   if (input.knowledge && Object.keys(input.knowledge).length > 0) {

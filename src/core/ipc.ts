@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { PROVIDER_MODES } from "./providers/types.js";
+import { PROVIDER_MODES } from "../providers/types.js";
 
 /**
  * IPC Protocol Version.
@@ -7,31 +7,19 @@ import { PROVIDER_MODES } from "./providers/types.js";
  * Phase D: optional multi-agent correlation (agentId, parentHandoffId); v6 documents that extension.
  */
 export const TASK_PAYLOAD_SCHEMA_VERSION = 6;
-export const TASK_RESULT_SCHEMA_VERSION = 5;
-
-export const TASK_PAYLOAD_FIELDS = [
-  "id", "prompt", "mode", "timestamp", "system",
-  "staticContext", "dynamicContext", "workDir",
-  "sessionId", "stepName", "round", "schemaVersion",
-  "knowledgeBase",
-  "agentId", "parentHandoffId",
-  "delegateArgv", "finalizeStrategy", "sharedLockKey",
-];
-
-export const TASK_RESULT_FIELDS = [
-  "id", "status", "content", "usage", "error",
-  "model", "summary", "changes", "filesModified",
-  "diffStat", "workspacePath", "workspaceRepoRoot", "workspaceBaseRef",
-  "workspaceSharedLockKey", "schemaVersion", "insights", "nextSteps"
-];
+export const TASK_RESULT_SCHEMA_VERSION = 6;
 
 // --- Zod schemas for runtime validation ---
+// TASK_PAYLOAD_FIELDS and TASK_RESULT_FIELDS are derived from the Zod schema shapes
+// after they are defined below. Do not maintain them manually.
 
 export const taskPayloadSchema = z.object({
   id: z.string(),
   prompt: z.string(),
   mode: z.enum(PROVIDER_MODES),
   timestamp: z.string(),
+  /** ISO time when the task was queued (segment latency; defaults to timestamp). */
+  startedAt: z.string().optional(),
   system: z.string().optional(),
   staticContext: z.string().optional(),
   dynamicContext: z.string().optional(),
@@ -46,7 +34,7 @@ export const taskPayloadSchema = z.object({
   /** Optional link to a prior handoff or parent task in a multi-agent chain */
   parentHandoffId: z.string().optional(),
   /**
-   * When set, scripts/task_runner.py runs this argv with cwd=workDir, stdin=composed prompt,
+   * When set, scripts/python/task_runner.py runs this argv with cwd=workDir, stdin=composed prompt,
    * stdout → result content (then agent modes collect git diff). Omitted → in-process stub (tests/CI).
    */
   delegateArgv: z.array(z.string()).min(1).optional(),
@@ -79,10 +67,16 @@ export const taskResultSchema = z.object({
     provider: z.string(),
     dependsOn: z.array(z.string()).optional()
   })).optional(),
+  startedAt: z.string().optional(),
+  endedAt: z.string().optional(),
 });
 
 export type TaskPayload = z.infer<typeof taskPayloadSchema>;
 export type TaskResult = z.infer<typeof taskResultSchema>;
+
+// Derived from schema shapes — always in sync with Zod definitions above.
+export const TASK_PAYLOAD_FIELDS: readonly string[] = Object.keys(taskPayloadSchema.shape);
+export const TASK_RESULT_FIELDS: readonly string[] = Object.keys(taskResultSchema.shape);
 
 // --- Helper functions ---
 

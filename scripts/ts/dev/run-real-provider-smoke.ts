@@ -12,150 +12,26 @@ import {
 } from "node:fs";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+  evaluateRealProviderSmokeOutcome,
+  loadRealProviderSmokeCases,
+  parseRealProviderSmokeArgs,
+  renderRealProviderSmokeSummaryMarkdown,
+  type RealProviderSmokeOptions,
+  type RealProviderSmokeSummary,
+  type RealSmokeCaseMetadata,
+} from "../../../src/pipeline/real-provider-smoke-runner.js";
 
 const ROOT_DIR = resolve(fileURLToPath(new URL("..", import.meta.url)));
-const DEFAULT_REPORT_ROOT = join(ROOT_DIR, "tmp", "real-provider-smoke");
 const TEST_ENTRY = join(ROOT_DIR, "tests", "real-provider.integration.test.ts");
 const HOME_SNAPSHOT_DIRS = ["traces", "sessions", "tasks"] as const;
 
-type Mode = "manual" | "nightly" | "pre-release";
-type OverallStatus = "passed" | "failed";
-type RealSmokeResult = "running" | "passed" | "failed" | "skipped";
-
-type Options = {
-  mode: Mode;
-  reportDir: string;
-  runRace: boolean;
-  requireNoSkip: boolean;
-  keepSuccessSandboxes: boolean;
-};
-
-type CaseMetadata = {
-  caseId: string;
-  label: string;
-  result: RealSmokeResult;
-  startedAt: string;
-  finishedAt?: string;
-  skipReason?: string;
-  errorMessage?: string;
-  providerEnvNames: string[];
-  traceId?: string;
-  pipelineStatus?: string;
-  sandboxDir?: string;
-  homeDir?: string;
-  configDir?: string;
-  repoDir?: string;
-  workDir?: string;
-  artifactName?: string;
-  artifactContent?: string;
-  expectedLine?: string;
-};
-
-type Summary = {
-  mode: Mode;
-  reportDir: string;
-  startedAt: string;
-  finishedAt: string;
-  durationMs: number;
-  runRace: boolean;
-  requireNoSkip: boolean;
-  keepSuccessSandboxes: boolean;
-  commandExitCode: number;
-  runnerError?: string;
-  skippedCount: number;
-  passedCount: number;
-  failedCount: number;
-  totalCases: number;
-  overallStatus: OverallStatus;
-  failureReasons: string[];
-  cases: CaseMetadata[];
-};
+type Options = RealProviderSmokeOptions;
+type CaseMetadata = RealSmokeCaseMetadata;
+type Summary = RealProviderSmokeSummary;
 
 function parseArgs(argv: string[]): Options {
-  let mode: Mode = "manual";
-  let reportDir: string | undefined;
-  let runRace: boolean | undefined;
-  let requireNoSkip: boolean | undefined;
-  let keepSuccessSandboxes = false;
-
-  for (let index = 0; index < argv.length; index += 1) {
-    const arg = argv[index];
-
-    if (arg === "--mode") {
-      const value = argv[index + 1] as Mode | undefined;
-      if (!value || !["manual", "nightly", "pre-release"].includes(value)) {
-        throw new Error("--mode must be one of: manual, nightly, pre-release");
-      }
-      mode = value;
-      index += 1;
-      continue;
-    }
-
-    if (arg === "--report-dir") {
-      const value = argv[index + 1];
-      if (!value) {
-        throw new Error("--report-dir requires a value");
-      }
-      reportDir = resolve(value);
-      index += 1;
-      continue;
-    }
-
-    if (arg === "--run-race") {
-      runRace = true;
-      continue;
-    }
-
-    if (arg === "--no-run-race") {
-      runRace = false;
-      continue;
-    }
-
-    if (arg === "--require-no-skip") {
-      requireNoSkip = true;
-      continue;
-    }
-
-    if (arg === "--allow-skip") {
-      requireNoSkip = false;
-      continue;
-    }
-
-    if (arg === "--keep-success-sandboxes") {
-      keepSuccessSandboxes = true;
-      continue;
-    }
-
-    throw new Error(`Unknown argument: ${arg}`);
-  }
-
-  const defaultsByMode: Record<Mode, Pick<Options, "runRace" | "requireNoSkip" | "keepSuccessSandboxes">> = {
-    manual: {
-      runRace: false,
-      requireNoSkip: false,
-      keepSuccessSandboxes: false,
-    },
-    nightly: {
-      runRace: true,
-      requireNoSkip: true,
-      keepSuccessSandboxes: false,
-    },
-    "pre-release": {
-      runRace: true,
-      requireNoSkip: true,
-      keepSuccessSandboxes: false,
-    },
-  };
-
-  const defaults = defaultsByMode[mode];
-  const tag = new Date().toISOString().replace(/[:.]/g, "-");
-  return {
-    mode,
-    reportDir: reportDir ?? join(DEFAULT_REPORT_ROOT, `${tag}-${mode}`),
-    runRace: runRace ?? defaults.runRace,
-    requireNoSkip: requireNoSkip ?? defaults.requireNoSkip,
-    keepSuccessSandboxes: keepSuccessSandboxes || defaults.keepSuccessSandboxes,
-  };
+  return parseRealProviderSmokeArgs(argv, ROOT_DIR);
 }
 
 function ensureDir(dir: string): void {
@@ -172,17 +48,6 @@ function writeText(filePath: string, content: string): void {
 
 function fileExists(path: string | undefined): path is string {
   return typeof path === "string" && path.length > 0 && existsSync(path);
-}
-
-function loadCaseMetadata(caseDir: string): CaseMetadata[] {
-  if (!existsSync(caseDir)) {
-    return [];
-  }
-
-  return readdirSync(caseDir)
-    .filter((name) => name.endsWith(".json"))
-    .sort()
-    .map((name) => JSON.parse(readFileSync(join(caseDir, name), "utf-8")) as CaseMetadata);
 }
 
 function listTree(dir: string, depth = 4, prefix = ""): string[] {
@@ -308,42 +173,6 @@ function writeRunnerDiagnostics(reportDir: string, options: Options, runnerError
   writeRepoDiagnostics(diagDir, ROOT_DIR);
 }
 
-function renderSummaryMarkdown(summary: Summary): string {
-  const header = [
-    "# Real Provider Smoke Report",
-    "",
-    `- Mode: \`${summary.mode}\``,
-    `- Overall status: \`${summary.overallStatus}\``,
-    `- Command exit code: \`${summary.commandExitCode}\``,
-    `- Started: ${summary.startedAt}`,
-    `- Finished: ${summary.finishedAt}`,
-    `- Duration: ${summary.durationMs} ms`,
-    `- Report dir: \`${summary.reportDir}\``,
-    `- Race enabled: \`${summary.runRace}\``,
-    `- Require no skip: \`${summary.requireNoSkip}\``,
-    `- Keep success sandboxes: \`${summary.keepSuccessSandboxes}\``,
-    `- Cases: ${summary.totalCases} total / ${summary.passedCount} passed / ${summary.failedCount} failed / ${summary.skippedCount} skipped`,
-    "",
-    "## Cases",
-    "",
-    "| Case | Result | Pipeline | Trace | Note | Sandbox |",
-    "|------|--------|----------|-------|------|---------|",
-  ];
-
-  const rows = summary.cases.map((item) => {
-    const note = (item.skipReason ?? item.errorMessage ?? "")
-      .replace(/\|/g, "\\|")
-      .replace(/\r?\n/g, "<br>");
-    return `| ${item.caseId} | ${item.result} | ${item.pipelineStatus ?? ""} | ${item.traceId ?? ""} | ${note} | ${item.sandboxDir ?? ""} |`;
-  });
-
-  const footer = summary.failureReasons.length > 0
-    ? ["", "## Failure Reasons", "", ...summary.failureReasons.map((item) => `- ${item}`)]
-    : [];
-
-  return [...header, ...rows, ...footer, ""].join("\n");
-}
-
 async function runIntegrationTest(options: Options, reportDir: string): Promise<number> {
   const logsDir = join(reportDir, "logs");
   const caseDir = join(reportDir, "cases");
@@ -426,33 +255,17 @@ async function main(): Promise<void> {
   writeRunnerDiagnostics(options.reportDir, options, runnerError);
 
   const caseDir = join(options.reportDir, "cases");
-  const cases = loadCaseMetadata(caseDir);
+  const cases = loadRealProviderSmokeCases(caseDir);
   for (const metadata of cases) {
     writeCaseDiagnostics(options.reportDir, metadata);
   }
 
-  const skippedCount = cases.filter((item) => item.result === "skipped").length;
-  const passedCount = cases.filter((item) => item.result === "passed").length;
-  const failedCount = cases.filter((item) => item.result === "failed").length;
-  const failureReasons: string[] = [];
-
-  if (runnerError) {
-    failureReasons.push(`real-provider smoke runner crashed: ${runnerError.split("\n", 1)[0]}`);
-  }
-  if (commandExitCode !== 0) {
-    failureReasons.push(`real-provider integration test process exited with code ${commandExitCode}`);
-  }
-  if (cases.length === 0) {
-    failureReasons.push("no case metadata was produced by tests/real-provider.integration.test.ts");
-  }
-  if (failedCount > 0) {
-    failureReasons.push(`${failedCount} smoke case(s) reported failed`);
-  }
-  if (options.requireNoSkip && skippedCount > 0) {
-    failureReasons.push(`${skippedCount} smoke case(s) were skipped under strict mode`);
-  }
-
-  const overallStatus: OverallStatus = failureReasons.length === 0 ? "passed" : "failed";
+  const outcome = evaluateRealProviderSmokeOutcome({
+    options,
+    cases,
+    commandExitCode,
+    runnerError,
+  });
   const finishedAt = new Date();
   const summary: Summary = {
     mode: options.mode,
@@ -465,17 +278,12 @@ async function main(): Promise<void> {
     keepSuccessSandboxes: options.keepSuccessSandboxes,
     commandExitCode,
     runnerError,
-    skippedCount,
-    passedCount,
-    failedCount,
-    totalCases: cases.length,
-    overallStatus,
-    failureReasons,
     cases,
+    ...outcome,
   };
 
   writeJson(join(options.reportDir, "summary.json"), summary);
-  writeText(join(options.reportDir, "summary.md"), renderSummaryMarkdown(summary));
+  writeText(join(options.reportDir, "summary.md"), renderRealProviderSmokeSummaryMarkdown(summary));
 
   if (overallStatus === "passed" && !options.keepSuccessSandboxes) {
     rmSync(join(options.reportDir, "sandboxes"), { recursive: true, force: true });

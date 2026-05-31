@@ -233,8 +233,19 @@ def do_create(args):
         sys.exit(1)
     
     try:
+        # --allow-dirty is only valid when the source repo is itself a linked worktree.
+        # Reject the flag for ordinary (main) repos to prevent accidental dirty-state escapes.
+        if args.allow_dirty:
+            git_dir = subprocess.check_output(
+                ["git", "rev-parse", "--git-dir"], cwd=repo_root, text=True
+            ).strip().replace("\\", "/")
+            if "/worktrees/" not in git_dir and ".git/worktrees" not in git_dir:
+                lock.release(args.owner_pid)
+                sys.stdout.write(json.dumps({"error": "--allow-dirty is only permitted when --repo is a linked worktree"}))
+                sys.exit(1)
+
         status = git(["status", "--porcelain"], repo_root)
-        if status:
+        if status and not args.allow_dirty:
             lock.release(args.owner_pid)
             sys.stdout.write(json.dumps({"error": f"workDir has uncommitted changes.\n{status[:500]}"}))
             sys.exit(1)
@@ -389,6 +400,7 @@ def main():
     p_create.add_argument("--owner-pid", type=int, required=True)
     p_create.add_argument("--shared-lock-key", default="")
     p_create.add_argument("--base-ref", default="")
+    p_create.add_argument("--allow-dirty", action="store_true")
     p_create.set_defaults(func=do_create)
     
     p_collect = subparsers.add_parser("collect")

@@ -3,34 +3,48 @@ import { existsSync } from "node:fs";
 import { mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { getSessionsDir } from "./paths.js";
-import { StepTrace } from "./trace.js";
+import { StepTrace } from "../observability/trace.js";
 import type { Candidate } from "./candidate.js";
 import type { PipelineConfig } from "./config.js";
 import { calculateConfigHash } from "./config.js";
 import { logger } from "./logger.js";
+import type { RaceCandidateSnapshot } from "../runtime/race-registry.js";
 
-export const CHECKPOINT_SCHEMA_VERSION = 3;
+export const CHECKPOINT_SCHEMA_VERSION = 4;
+/** Oldest schema version that can be safely loaded without migration. v3→v4 only added optional fields. */
+const OLDEST_COMPATIBLE_SCHEMA_VERSION = 3;
 
 export type StepStatus = "queued" | "running" | "success" | "failed" | "skipped" | "cancelled";
-export type PipelineStatus = "queued" | "running" | "approved" | "failed" | "aborted" | "max_rounds" | "awaiting_judge";
+export type PipelineStatus =
+  | "queued"
+  | "running"
+  | "approved"
+  | "failed"
+  | "aborted"
+  | "max_rounds"
+  | "awaiting_judge"
+  | "awaiting_approval"
+  | "awaiting_plan_approval";
 
 const STEP_TRANSITIONS: Record<StepStatus, StepStatus[]> = {
   queued: ["running", "skipped", "cancelled"],
-  running: ["success", "failed", "cancelled"],
+  running: ["success", "failed", "skipped", "cancelled"],
   success: [],
-  failed: [],
+  failed: ["running"],
   skipped: [],
   cancelled: [],
 };
 
 const PIPELINE_TRANSITIONS: Record<PipelineStatus, PipelineStatus[]> = {
   queued: ["running"],
-  running: ["approved", "failed", "aborted", "max_rounds", "awaiting_judge"],
+  running: ["approved", "failed", "aborted", "max_rounds", "awaiting_judge", "awaiting_approval", "awaiting_plan_approval"],
   approved: [],
   failed: ["running"],
   aborted: [],
   max_rounds: ["running"],
-  awaiting_judge: ["approved", "failed"],
+  awaiting_judge: ["approved", "failed", "aborted"],
+  awaiting_approval: ["running", "failed", "aborted"],
+  awaiting_plan_approval: ["running", "failed", "aborted"],
 };
 
 export function assertStepTransition(from: StepStatus, to: StepStatus, stepName?: string): void {
@@ -67,6 +81,8 @@ export interface StepResult {
   usage?: { promptTokens: number; completionTokens: number };
   candidateSnapshot?: Partial<Candidate>;
   durationMs?: number;
+  /** Typed artifacts for this step (Wave 7.5 / Gate 2.7). */
+  artifacts?: import("./orchestration/artifacts.js").Artifact[];
 }
 
 export interface ResumeMetadata {
@@ -111,6 +127,13 @@ export interface PipelineState {
   workspacePath?: string;
   workspaceRepoRoot?: string;
   workspaceBaseRef?: string;
+  pendingRaceTraceId?: string;
+  raceCandidates?: RaceCandidateSnapshot[];
+  /** Experiment metadata carried through checkpoint/resume. */
+  experimentId?: string;
+  experimentVariant?: string;
+  /** Plan awaiting operator approval (Phase 7.8 A). */
+  pendingExecutionPlan?: { steps: Array<string | string[]>; maxRounds?: number };
 }
 
 function getCheckpointFile(sessionId: string): string {
@@ -141,7 +164,7 @@ function assertCheckpointSchemaVersion(state: Partial<PipelineState>): number {
   if (!Number.isInteger(schemaVersion) || Number(schemaVersion) < 1) {
     throw new Error("Checkpoint schemaVersion must be a positive integer");
   }
-  if (schemaVersion < CHECKPOINT_SCHEMA_VERSION) {
+  if (schemaVersion < OLDEST_COMPATIBLE_SCHEMA_VERSION) {
     throw new Error("Checkpoint was created by an older pipeline version and cannot be safely resumed");
   }
   if (schemaVersion > CHECKPOINT_SCHEMA_VERSION) {
@@ -207,6 +230,14 @@ export function assertResumeCompatible(state: PipelineState, request: ResumeRequ
 
   if (state.status === "approved") {
     throw new Error(`Checkpoint ${state.sessionId} is already approved and cannot be resumed`);
+  }
+
+  if (state.status === "awaiting_judge") {
+    throw new Error(`Checkpoint ${state.sessionId} is awaiting judge; use llm_race_apply or llm_race_abort instead of resume`);
+  }
+
+  if (state.status === "awaiting_approval" || state.status === "awaiting_plan_approval") {
+    throw new Error(`Checkpoint ${state.sessionId} is awaiting operator approval; approve or abort before resuming`);
   }
 
   const expected = buildResumeMetadata(request);

@@ -1,5 +1,5 @@
 /**
- * Single entry point for review approval detection — consumed by `ExecutionScheduler.executeStep`.
+ * Single entry point for review approval detection — consumed by `executePipelineStep`.
  * Do not add parallel substring heuristics elsewhere; extend this parser if the contract evolves.
  *
  * Looks for sentinel line: VERDICT: APPROVED or VERDICT: NEEDS_REVISION: <reason>

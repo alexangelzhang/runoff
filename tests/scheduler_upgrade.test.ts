@@ -1,11 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { ExecutionScheduler } from "../src/scheduler.js";
-import { PipelineConfig } from "../src/config.js";
-import { Candidate } from "../src/candidate.js";
+import { PipelineConfig } from "../src/core/config.js";
+import { Candidate } from "../src/core/candidate.js";
 import { LLMProvider, LLMRequest, LLMResponse } from "../src/providers/types.js";
 
-test("Step 2: ExecutionScheduler Model Upgrading", async (t) => {
+test("Step 2: retry provider upgrade routing", async (t) => {
   
   const mockConfig: PipelineConfig = {
     providers: {
@@ -20,7 +19,7 @@ test("Step 2: ExecutionScheduler Model Upgrading", async (t) => {
 
   // We test the logic of upgrading
   await t.test("Logic: findUpgradedProvider should pick full over lite", async () => {
-    const { findUpgradedProvider } = await import("../src/router.js");
+    const { findUpgradedProvider } = await import("../src/routing/router.js");
     const all = ["lite-model-mini", "full-model-gpt4"];
     
     const upgraded = findUpgradedProvider("lite-model-mini", all);

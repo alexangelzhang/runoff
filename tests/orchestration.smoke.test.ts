@@ -5,15 +5,15 @@ import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { join, resolve } from "node:path";
 import test from "node:test";
-import { SessionWorkspace, activeWorkspaces } from "../src/workspace.ts";
-import { raceSessions } from "../src/race-registry.ts";
+import { SessionWorkspace, activeWorkspaces } from "../src/runtime/workspace.ts";
+import { raceSessions } from "../src/runtime/race-registry.ts";
 import { applyRaceSession, abortRaceSession } from "../src/tools/race.ts";
-import { clearConfigCache } from "../src/config.js";
+import { clearConfigCache } from "../src/core/config.js";
 import { runPipelineMode } from "../src/tools/run-pipeline.js";
-import { loadCheckpoint } from "../src/state.js";
+import { loadCheckpoint } from "../src/core/state.js";
 
 const ROOT_DIR = resolve(fileURLToPath(new URL("..", import.meta.url)));
-const WATCHER_PATH = join(ROOT_DIR, "scripts", "watcher.sh");
+const WATCHER_PATH = join(ROOT_DIR, "scripts", "shell", "watcher.sh");
 
 function delay(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));

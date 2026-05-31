@@ -3,7 +3,7 @@ import test from "node:test";
 import { mkdirSync, writeFileSync, rmSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { routeProvider, estimateComplexity } from "../src/router.js";
+import { routeProvider, estimateComplexity } from "../src/routing/router.js";
 
 test("Wave 6: Dynamic Routing & Self-Optimization (Step 5)", async (t) => {
   const previousHome = process.env.LLM_PIPELINE_HOME;

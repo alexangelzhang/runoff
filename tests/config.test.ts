@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { validateConfig, type PipelineConfig } from "../src/config.ts";
+import { validateConfig, type PipelineConfig } from "../src/core/config.ts";
 
 function createBaseConfig(): PipelineConfig {
   return {
@@ -78,4 +78,11 @@ test("validateConfig accepts race mode (multi-provider array)", () => {
   config.pipeline.generate = [["codex", "gemini"]];
 
   assert.equal(validateConfig(config), true);
+});
+
+test("validateConfig rejects invalid provider tier hints", () => {
+  const config = createBaseConfig();
+  config.providers.codex = { type: "mock", tier: "turbo" as "lite" };
+
+  assert.throws(() => validateConfig(config), /tier must be "lite" or "full"/);
 });

@@ -14,7 +14,7 @@ import {
   loadCheckpoint,
   saveCheckpoint,
   type PipelineState,
-} from "../src/state.ts";
+} from "../src/core/state.ts";
 
 function withPipelineHome(fn: (homeDir: string) => void | Promise<void>): Promise<void> | void {
   const previousHome = process.env.LLM_PIPELINE_HOME;
@@ -60,6 +60,7 @@ function createState(overrides: Partial<PipelineState> = {}): PipelineState {
     approved: false,
     stepResults: {},
     stepTraces: [],
+    globalKnowledge: {},
     traceId: "trace-a",
     timestamp: new Date().toISOString(),
     status: "running",
@@ -179,6 +180,10 @@ test("assertPipelineTransition allows failed to running", () => {
   assert.doesNotThrow(() => assertPipelineTransition("failed", "running"));
 });
 
+test("assertPipelineTransition allows awaiting_judge to aborted", () => {
+  assert.doesNotThrow(() => assertPipelineTransition("awaiting_judge", "aborted"));
+});
+
 test("assertPipelineTransition rejects approved to running", () => {
   assert.throws(() => assertPipelineTransition("approved", "running"), /Invalid pipeline status transition: "approved"/);
 });
@@ -194,4 +199,9 @@ test("assertPipelineTransition includes session id in error", () => {
 test("assertResumeCompatible rejects approved checkpoint", () => {
   const state = createState({ sessionId: "session-done", traceId: "trace-done", approved: true, status: "approved" });
   assert.throws(() => assertResumeCompatible(state, createResumeRequest()), /already approved/);
+});
+
+test("assertResumeCompatible rejects awaiting_judge checkpoint", () => {
+  const state = createState({ sessionId: "session-awaiting", traceId: "trace-awaiting", status: "awaiting_judge" });
+  assert.throws(() => assertResumeCompatible(state, createResumeRequest()), /awaiting judge/);
 });

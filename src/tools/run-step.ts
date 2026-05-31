@@ -4,11 +4,12 @@
 
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { loadConfig, getProviderForStep } from "../config.js";
-import { ResponseCache, getCache } from "../cache.js";
+import { loadConfig, getProviderForStep } from "../core/config.js";
+import { ResponseCache, getCache } from "../routing/cache.js";
+import { getSemanticCache } from "../routing/semantic-cache.js";
 import { isAgentMode, isTextResponse } from "../providers/types.js";
 import { serializeResponse, type PipelineConfig } from "./helpers.js";
-import { ensureWorkDirForStep } from "../pipeline-workdir.js";
+import { ensureWorkDirForStep } from "../runtime/pipeline-workdir.js";
 
 export function register(server: McpServer, initialConfig: PipelineConfig) {
   server.tool(
@@ -57,13 +58,26 @@ export function register(server: McpServer, initialConfig: PipelineConfig) {
         }
 
         const provider = result.provider;
-        const cache = getCache();
+        const useSemantic = config.runtime?.semanticCache === true;
+        const cache = useSemantic
+          ? getSemanticCache({
+              minSimilarity: config.runtime?.semanticCacheMinSimilarity,
+            })
+          : getCache();
         const providerRunsAsAgent = isAgentMode(provider.mode);
         const cacheKey = ResponseCache.key(result.providerName, prompt, language, context);
+        const cacheLookup = {
+          provider: result.providerName,
+          prompt,
+          language,
+          context,
+        };
 
         // Agent mode: skip cache entirely (same prompt can produce different results per workDir)
         if (!providerRunsAsAgent) {
-          const cached = cache.get(cacheKey);
+          const cached = useSemantic
+            ? cache.get(cacheKey, cacheLookup)
+            : cache.get(cacheKey);
           if (cached) {
             return {
               content: [{
@@ -100,7 +114,11 @@ export function register(server: McpServer, initialConfig: PipelineConfig) {
 
         // Only cache text mode responses
         if (isTextResponse(response)) {
-          cache.put(cacheKey, response);
+          if (useSemantic) {
+            cache.put(cacheKey, response, cacheLookup);
+          } else {
+            cache.put(cacheKey, response);
+          }
         }
 
         return {

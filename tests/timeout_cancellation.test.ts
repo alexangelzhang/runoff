@@ -16,7 +16,7 @@ test("Active Cancellation - P1: Zombie Process Protection", async (t) => {
   const hangingResult = join(tmpDir, "hanging.result.json");
   writeFileSync(hangingTask, JSON.stringify({ id: "1", prompt: "sleep", mode: "text", timestamp: "now" }));
 
-  const runnerPath = join(__dirname, "../scripts/task_runner.py");
+  const runnerPath = join(__dirname, "../scripts/python/task_runner.py");
 
   await t.test("AbortSignal should kill the task-runner process group", async () => {
     const controller = new AbortController();

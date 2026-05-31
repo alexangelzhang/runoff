@@ -1,12 +1,12 @@
 import { test } from "node:test";
 import assert from "node:assert";
-import { calculateConfigHash, type PipelineConfig } from "../src/config.js";
+import { calculateConfigHash, type PipelineConfig } from "../src/core/config.js";
 import {
   assertResumeCompatible,
   CHECKPOINT_SCHEMA_VERSION,
   type PipelineState,
   type ResumeRequest,
-} from "../src/state.js";
+} from "../src/core/state.js";
 
 test("Checkpoint Resume - P1: Config Checksum Validation", async (t) => {
   const config1: PipelineConfig = {

@@ -5,10 +5,10 @@ import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { join, resolve } from "node:path";
 import test from "node:test";
-import { SessionWorkspace } from "../src/workspace.ts";
+import { SessionWorkspace } from "../src/runtime/workspace.ts";
 
 const ROOT_DIR = resolve(fileURLToPath(new URL("..", import.meta.url)));
-const WATCHER_PATH = join(ROOT_DIR, "scripts", "watcher.sh");
+const WATCHER_PATH = join(ROOT_DIR, "scripts", "shell", "watcher.sh");
 
 function delay(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));

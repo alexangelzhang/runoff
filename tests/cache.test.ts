@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { ResponseCache } from "../src/cache.ts";
+import { ResponseCache } from "../src/routing/cache.ts";
 import type { LLMResponse } from "../src/providers/types.ts";
 
 function makeResponse(code: string): LLMResponse {

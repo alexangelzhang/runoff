@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildReviewPrompt, buildGeneratePrompt } from "../src/prompt.js";
+import { buildReviewPrompt, buildGeneratePrompt } from "../src/pipeline/prompt.js";
 import { runPipelineMode } from "../src/tools/run-pipeline.js";
 
 test("Wave 6: Semantic Blackboard (Step 1 Foundations)", async (t) => {

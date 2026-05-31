@@ -1,6 +1,14 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { computeComplexityScore, estimateComplexity, routeProvider, type RouteRule } from "../src/router.ts";
+import {
+  computeComplexityScore,
+  estimateComplexity,
+  findUpgradedProvider,
+  getProviderTier,
+  inferTaskType,
+  routeProvider,
+  type RouteRule,
+} from "../src/routing/router.ts";
 
 // --- computeComplexityScore ---
 
@@ -109,4 +117,33 @@ test("routeProvider: respects canUseProvider filter", () => {
 test("routeProvider: empty rules returns default", () => {
   const result = routeProvider("anything", [], "my-default");
   assert.equal(result, "my-default");
+});
+
+// --- inferTaskType / taskType bias (Phase 5.1) ---
+
+test("inferTaskType: step name review wins", () => {
+  assert.equal(inferTaskType("implement feature X", "review"), "review");
+});
+
+test("estimateComplexity: review step caps score → low tier", () => {
+  const prompt = "设计一个分布式微服务架构，需要高可用".repeat(5);
+  const hints = estimateComplexity(prompt, { stepName: "review" });
+  assert.equal(hints.taskType, "review");
+  assert.equal(hints.complexity, "low");
+  assert.equal(hints.modelTier, "lite");
+});
+
+// --- declarative tier (Phase 5.3) ---
+
+test("getProviderTier: config tier overrides name heuristics", () => {
+  assert.equal(getProviderTier("fast-mini", { "fast-mini": { type: "mock", tier: "full" } }), "full");
+  assert.equal(getProviderTier("big-pro", { "big-pro": { type: "mock", tier: "lite" } }), "lite");
+});
+
+test("findUpgradedProvider: uses declared tier not name", () => {
+  const providers = {
+    cheap: { type: "mock" as const, tier: "lite" as const },
+    strong: { type: "mock" as const, tier: "full" as const },
+  };
+  assert.equal(findUpgradedProvider("cheap", ["cheap", "strong"], providers), "strong");
 });

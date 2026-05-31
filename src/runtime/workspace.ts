@@ -5,21 +5,19 @@
  *
  * Locking: omit `sharedLockKey` for **exclusive** repo access (default). Set `sharedLockKey` to the
  * same string only when multiple workspaces must share a lock (e.g. race participants). See
- * `scripts/workspace_manager.py` module docstring.
+ * `scripts/python/workspace_manager.py` module docstring.
  */
 
 import { execFile, execFileSync } from "node:child_process";
 import { promisify } from "node:util";
 import { existsSync } from "node:fs";
-import { join, dirname } from "node:path";
+import { join } from "node:path";
 import { randomUUID } from "node:crypto";
-import { fileURLToPath } from "node:url";
-import { logger } from "./logger.js";
+import { logger } from "../core/logger.js";
+import { getWorkspaceManagerScriptPath } from "../core/paths.js";
 
 const execFileAsync = promisify(execFile);
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
-const SCRIPT_PATH = join(__dirname, "../scripts/workspace_manager.py");
+const SCRIPT_PATH = getWorkspaceManagerScriptPath();
 
 // --- Git helpers ---
 
@@ -216,7 +214,7 @@ export class SessionWorkspace {
     if (!patchData || patchData.length === 0) return;
 
     const { writeFile, unlink } = await import("node:fs/promises");
-    const { getPipelineHomeDir } = await import("./paths.js");
+    const { getPipelineHomeDir } = await import("../core/paths.js");
     const tmpPatchPath = join(getPipelineHomeDir(), `patch-${randomUUID()}.patch`);
     await writeFile(tmpPatchPath, patchData);
 

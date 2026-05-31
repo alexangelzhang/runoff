@@ -10,13 +10,13 @@ import {
   createTaskResult,
   parseTaskPayload,
   parseTaskResult,
-} from "../src/ipc.js";
+} from "../src/core/ipc.js";
 
 function verifyPythonParsing(className: string, jsonData: any): any {
   const script = `
-import sys, json
-sys.path.insert(0, ".")
-from scripts.task_runner import ${className}
+import sys, json, os
+sys.path.insert(0, os.path.join(".", "scripts", "python"))
+from task_runner import ${className}
 try:
     data = json.loads(sys.argv[1])
     obj = ${className}.from_dict(data)
@@ -68,6 +68,9 @@ test("IPC Protocol - Wave 5 / Phase D: TaskPayload alignment", async (t) => {
     assert.ok(TASK_RESULT_FIELDS.includes("workspaceRepoRoot"), "Should have workspaceRepoRoot field");
     assert.ok(TASK_RESULT_FIELDS.includes("workspaceBaseRef"), "Should have workspaceBaseRef field");
     assert.ok(TASK_RESULT_FIELDS.includes("workspaceSharedLockKey"), "Should have workspaceSharedLockKey field");
+    assert.ok(TASK_PAYLOAD_FIELDS.includes("startedAt"), "Should have startedAt field");
+    assert.ok(TASK_RESULT_FIELDS.includes("startedAt"), "Result should have startedAt field");
+    assert.ok(TASK_RESULT_FIELDS.includes("endedAt"), "Result should have endedAt field");
   });
 
   await t.test("parseTaskPayload accepts defer finalize and shared lock key", () => {

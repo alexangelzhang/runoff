@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { emptyCandidate, getCandidateContent, getCandidateContentLabel } from "../src/candidate.ts";
+import { emptyCandidate, getCandidateContent, getCandidateContentLabel } from "../src/core/candidate.ts";
 
 test("emptyCandidate returns empty object", () => {
   const c = emptyCandidate();
