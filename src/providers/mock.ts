@@ -1,6 +1,11 @@
 import { LLMProvider, LLMRequest, LLMResponse, ProviderMode } from "./types.js";
 import { logger } from "../core/logger.js";
 
+/** Whether this provider name represents a "lite" / lower-tier mock. */
+function isLiteTier(name: string): boolean {
+  return name === "openai-lite" || /[-_]lite$/i.test(name) || /^mock-b$/i.test(name);
+}
+
 export class MockProvider implements LLMProvider {
   name: string;
   mode: ProviderMode = "text";
@@ -12,6 +17,7 @@ export class MockProvider implements LLMProvider {
   async execute(req: LLMRequest): Promise<LLMResponse> {
     const stepName = req.stepName || "unknown";
     logger.info("mock-provider", `Executing step: ${stepName}`, { provider: this.name });
+    const lite = isLiteTier(this.name);
 
     if (stepName === "orchestrator-plan") {
       const steps = (req.prompt.match(/Available steps: ([^\n]+)/)?.[1] ?? "implement,review")
@@ -66,25 +72,47 @@ export class MockProvider implements LLMProvider {
       };
     }
 
-    if (stepName === "refactor") {
-      if (this.name === "openai-lite") {
-        // Simulate a failure or bad syntax for Race selection
+    if (stepName === "implement" || stepName === "fix") {
+      if (lite) {
+        // Lite tier: smaller output, fewer tokens
         return {
           kind: "text",
           model: "mock-lite",
-          content: "Refactored with an intentional syntax error.\nexport class MathProcessor { async process(a, b) { return a+b; } ", // Missing final bracket
-          code: "export class MathProcessor { async process(a, b) { return a+b; } ",
-          explanation: "Incomplete refactor.",
-          failed: false
+          content: "Implementation (lite):\n```typescript\nexport function process(data: number[]): number[] {\n  return data.map(x => x * 2);\n}\n```",
+          code: "export function process(data: number[]): number[] {\n  return data.map(x => x * 2);\n}",
+          explanation: "Compact implementation.",
+          usage: { promptTokens: 320, completionTokens: 68 },
         };
       }
-      // Pro model: Perfect refactor
+      // Full tier: richer output with validation, more tokens
       return {
         kind: "text",
-        model: "mock-pro",
-        content: "Refactored correctly.\n```typescript\nexport class MathProcessor {\n  async process(a: number, b: number): Promise<number> {\n    await new Promise(r => setTimeout(r, 100));\n    return (a * b) + (a / b);\n  }\n}\n```",
+        model: "mock-full",
+        content: "Implementation (full):\n```typescript\nexport function process(data: number[]): number[] {\n  if (!Array.isArray(data)) throw new TypeError('Expected array');\n  return data.map((x) => x * 2);\n}\n```",
+        code: "export function process(data: number[]): number[] {\n  if (!Array.isArray(data)) throw new TypeError('Expected array');\n  return data.map((x) => x * 2);\n}",
+        explanation: "Typed implementation with input validation.",
+        usage: { promptTokens: 320, completionTokens: 142 },
+      };
+    }
+
+    if (stepName === "refactor") {
+      if (lite) {
+        // Lite tier: valid syntax but untyped — syntax check passes, review catches it
+        return {
+          kind: "text",
+          model: "mock-lite",
+          content: "Refactored (lite):\n```typescript\nexport class MathProcessor {\n  async process(a, b) {\n    await new Promise(r => setTimeout(r, 100));\n    return (a * b) + (a / b);\n  }\n}\n```",
+          code: "export class MathProcessor {\n  async process(a, b) {\n    await new Promise(r => setTimeout(r, 100));\n    return (a * b) + (a / b);\n  }\n}",
+          explanation: "Async refactor without type annotations.",
+        };
+      }
+      // Full tier: properly typed
+      return {
+        kind: "text",
+        model: "mock-full",
+        content: "Refactored (full):\n```typescript\nexport class MathProcessor {\n  async process(a: number, b: number): Promise<number> {\n    await new Promise(r => setTimeout(r, 100));\n    return (a * b) + (a / b);\n  }\n}\n```",
         code: "export class MathProcessor {\n  async process(a: number, b: number): Promise<number> {\n    await new Promise(r => setTimeout(r, 100));\n    return (a * b) + (a / b);\n  }\n}",
-        explanation: "Implemented async/await with 100ms delay."
+        explanation: "Typed async/await with 100ms delay.",
       };
     }
 
@@ -132,12 +160,24 @@ export class MockProvider implements LLMProvider {
       };
     }
 
+    if (/review|audit|verdict/i.test(stepName)) {
+      return {
+        kind: "text",
+        model: lite ? "mock-reviewer-lite" : "mock-reviewer-full",
+        content: "VERDICT: APPROVED",
+        code: "",
+        explanation: "Implementation approved.",
+        usage: { promptTokens: 480, completionTokens: lite ? 28 : 32 },
+      };
+    }
+
     return {
       kind: "text",
       model: "mock",
       content: "VERDICT: APPROVED",
       code: "",
-      explanation: "Step completed."
+      explanation: "Step completed.",
+      usage: { promptTokens: 200, completionTokens: 25 },
     };
   }
 }

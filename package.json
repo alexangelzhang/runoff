@@ -14,6 +14,7 @@
     "dev": "tsx src/index.ts",
     "demo": "tsx scripts/ts/dev/demo-quickstart.ts",
     "demo:race": "tsx scripts/ts/dev/demo-race.ts",
+    "benchmark": "tsx scripts/ts/dev/run-benchmark.ts",
     "pipeline:run": "tsx scripts/ts/dev/pipeline-cli.ts run",
     "pipeline:config:edit": "tsx scripts/ts/dev/pipeline-cli.ts config edit",
     "check-prereqs": "bash scripts/shell/check-prereqs.sh",
