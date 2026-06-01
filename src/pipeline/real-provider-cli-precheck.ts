@@ -99,13 +99,14 @@ export function precheckRealProviderCliEnv(): CliPrecheckIssue[] {
     }
 
     if (isGeminiArgv(argv)) {
-      const normalized = normalizeDelegateArgv(argv);
-      if (normalized.join(" ") !== argv.join(" ")) {
+      // Gemini CLI v0.44+ reads stdin without -p. normalizeDelegateArgv is now a no-op.
+      const hasYolo = argv.includes("-y") || argv.includes("--yolo") || argv.some(a => a.includes("yolo"));
+      if (!hasYolo) {
         issues.push({
           envVar,
           severity: "warn",
           message:
-            'Gemini argv should include "-y" and "-p" for headless stdin prompts (Gemini CLI 0.35+). Defaults applied when using applyRealProviderArgvDefaults().',
+            'Gemini argv should include "--yolo" or "--approval-mode yolo" for headless use (Gemini CLI 0.44+).',
         });
       }
     }

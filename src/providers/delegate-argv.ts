@@ -1,28 +1,11 @@
 /**
  * Normalize CLI delegate argv for headless smoke / subprocess runners.
+ *
+ * History: Gemini CLI v0.35-0.43 required `-p` to read stdin in headless mode.
+ * Gemini CLI v0.44+ reads stdin directly without a TTY; `-p` without a value
+ * causes "Not enough arguments following: p". No normalization is needed for
+ * modern Gemini — configure `--yolo` in the provider args instead.
  */
-
-const GEMINI_HEADLESS_FLAGS = ["-p", "--prompt"] as const;
-
-function isGeminiCommand(cmd: string): boolean {
-  const base = cmd.split(/[/\\]/).pop() ?? cmd;
-  return base === "gemini" || base.startsWith("gemini.");
-}
-
-/** Gemini 0.35+ needs `-p` (and usually `-y`) when prompt is sent via stdin. */
 export function normalizeDelegateArgv(argv: string[]): string[] {
-  if (argv.length === 0) return argv;
-  const cmd = argv[0]!;
-  if (!isGeminiCommand(cmd)) return argv;
-  const hasPromptFlag = argv.some(
-    (a, i) =>
-      i > 0 &&
-      (GEMINI_HEADLESS_FLAGS.includes(a as (typeof GEMINI_HEADLESS_FLAGS)[number]) ||
-        a.startsWith("--prompt=")),
-  );
-  if (hasPromptFlag) return argv;
-  const out = [...argv];
-  if (!out.includes("-y")) out.push("-y");
-  out.push("-p");
-  return out;
+  return argv;
 }
