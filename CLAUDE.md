@@ -119,4 +119,4 @@ DAG 模式下 retry 不是 review-driven 的——它只通过 `stepFailed=true`
 
 **Gemini CLI agent-write**：v0.44.x TUI 无法程序化驱动（pty 写入不响应）。v0.45.0+ 支持 ACP（`--acp` flag，JSON-RPC over stdio），已实现 `_run_delegate_acp()`。provider config 加 `"acp": true` 即可启用，内置版本检测会在运行时报错并给出升级命令。
 
-**ACP delegate 不 commit 改动（待修复）**：`_run_delegate_acp()` 执行后 Gemini 改了文件但没有 `git add/commit`，导致 `TaskResult.workspacePath = None`（defer 模式判断 workspacePath 是否非空来决定是否保留 worktree），race apply 走不了 worktree 路径，只能手动复制文件。修复方向：`_run_delegate_acp()` 执行完后在 worktree 里自动运行 `git add -A && git commit -m "acp delegate changes"`，与其他 agent-write delegate 保持一致。
+**ACP delegate commit 行为（已修复）**：`_run_delegate_acp()` 在 session/prompt 完成后自动运行 `git add -A && git commit -m "acp: delegate changes"`，与 Claude Code / opencode 保持一致。修复前 Gemini ACP 改了文件但不 commit，导致 `workspacePath=n/a`，race apply 走不了 worktree 路径。
