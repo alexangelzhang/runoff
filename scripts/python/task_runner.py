@@ -67,7 +67,7 @@ IPC_MODES = frozenset({"text", "agent-read", "agent-write"})
 TASK_PAYLOAD_SCHEMA_VERSION = 6
 TASK_RESULT_SCHEMA_VERSION = 6
 GIT_DIFF_TIMEOUT_SEC = 120
-DELEGATE_EXEC_TIMEOUT_SEC = int(os.environ.get("LLM_PIPELINE_DELEGATE_TIMEOUT_SEC", "900"))
+DELEGATE_EXEC_TIMEOUT_SEC = int(os.environ.get("RUNOFF_DELEGATE_TIMEOUT_SEC", "900"))
 SCRIPT_DIR = os.path.dirname(os.path.realpath(os.path.abspath(__file__)))
 WORKSPACE_MANAGER_PATH = os.path.join(SCRIPT_DIR, "workspace_manager.py")
 
@@ -373,7 +373,7 @@ def _run_delegate_acp(argv: List[str], cwd: str, prompt_text: str, timeout: int 
         iid = send("initialize", {
             "protocolVersion": 1,
             "capabilities": {},
-            "clientInfo": {"name": "llm-pipeline", "version": "1.0"},
+            "clientInfo": {"name": "runoff", "version": "1.0"},
         })
         recv(iid, timeout_secs=10)
 

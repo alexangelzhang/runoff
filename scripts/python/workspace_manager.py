@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Centralized workspace manager for llm-pipeline.
+Centralized workspace manager for runoff.
 Orchestrates isolated git worktrees, collects patches, applies changes natively,
 and manages OS-level directory locks for concurrent safety across TS pipelines and Python Watcher agents.
 
@@ -36,7 +36,7 @@ def normalize_path(path):
 def pipeline_home_dir():
     return normalize_path(
         os.environ.get(
-            "LLM_PIPELINE_HOME", os.path.join(os.path.expanduser("~"), ".llm-pipeline")
+            "RUNOFF_HOME", os.path.join(os.path.expanduser("~"), ".runoff")
         )
     )
 

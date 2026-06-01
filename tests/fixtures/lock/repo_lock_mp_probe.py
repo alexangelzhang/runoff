@@ -5,7 +5,7 @@ import time
 
 repo_root = os.environ["REPO_ROOT"]
 repo = os.environ["TEST_REPO"]
-os.environ["LLM_PIPELINE_HOME"] = os.environ["LOCK_HOME"]
+os.environ["RUNOFF_HOME"] = os.environ["LOCK_HOME"]
 sys.path.insert(0, os.path.join(repo_root, "scripts", "python"))
 
 from workspace_manager import RepoLock  # noqa: E402
@@ -13,7 +13,7 @@ from workspace_manager import RepoLock  # noqa: E402
 
 def exclusive_holder(path: str, q: mp.Queue) -> None:
     sys.path.insert(0, os.path.join(repo_root, "scripts", "python"))
-    os.environ["LLM_PIPELINE_HOME"] = os.environ["LOCK_HOME"]
+    os.environ["RUNOFF_HOME"] = os.environ["LOCK_HOME"]
     r = RepoLock(path, None)
     r.acquire(os.getpid(), timeout=30)
     q.put("ready")
@@ -23,7 +23,7 @@ def exclusive_holder(path: str, q: mp.Queue) -> None:
 
 def shared_holder(path: str, key: str, q: mp.Queue) -> None:
     sys.path.insert(0, os.path.join(repo_root, "scripts", "python"))
-    os.environ["LLM_PIPELINE_HOME"] = os.environ["LOCK_HOME"]
+    os.environ["RUNOFF_HOME"] = os.environ["LOCK_HOME"]
     r = RepoLock(path, key)
     r.acquire(os.getpid(), timeout=30)
     q.put("ready")
