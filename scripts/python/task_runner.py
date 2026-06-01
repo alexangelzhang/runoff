@@ -7,9 +7,11 @@ import os
 import pty
 import re
 import select
+import struct
 import subprocess
 import sys
 import tempfile
+import termios
 import time
 from datetime import datetime, timezone
 from dataclasses import dataclass, field
@@ -288,11 +290,23 @@ def _run_delegate(argv: List[str], cwd: str, stdin_text: str) -> subprocess.Comp
 def _run_delegate_pty(argv: List[str], cwd: str, stdin_text: str, timeout: int = DELEGATE_EXEC_TIMEOUT_SEC) -> subprocess.CompletedProcess[str]:
     """Run delegate with a pseudo-TTY so the child process sees isatty()==True.
 
-    Uses pty.openpty() to create a master/slave pair. The child's stdin/stdout/stderr
-    are all connected to the slave fd. We write the prompt to the master, then read
-    all output until the process exits or the timeout fires.
+    Strategy:
+    1. Open a pty pair and set a sensible terminal size.
+    2. Spawn the CLI attached to the slave end.
+    3. Read output until we see the input-prompt sentinel ("Type your message").
+    4. Write the task prompt followed by a newline.
+    5. Use a silence-based completion detector: once output stops for
+       PTY_SILENCE_SEC seconds after the last byte, assume the task is done.
+    6. Send /quit to exit the CLI cleanly.
     """
+    PTY_SILENCE_SEC = 4.0   # seconds of silence → task considered complete
+    PTY_ROWS, PTY_COLS = 50, 220
+
     master_fd, slave_fd = pty.openpty()
+
+    # Set terminal dimensions — TUI apps need this to render correctly.
+    winsize = struct.pack('HHHH', PTY_ROWS, PTY_COLS, 0, 0)
+    fcntl.ioctl(slave_fd, termios.TIOCSWINSZ, winsize)
 
     proc = subprocess.Popen(
         argv,
@@ -305,27 +319,27 @@ def _run_delegate_pty(argv: List[str], cwd: str, stdin_text: str, timeout: int =
     os.close(slave_fd)
 
     # Set master non-blocking so select() works cleanly.
-    flags = fcntl.fcntl(master_fd, fcntl.F_GETFL)
-    fcntl.fcntl(master_fd, fcntl.F_SETFL, flags | os.O_NONBLOCK)
+    fl = fcntl.fcntl(master_fd, fcntl.F_GETFL)
+    fcntl.fcntl(master_fd, fcntl.F_SETFL, fl | os.O_NONBLOCK)
 
-    output_chunks: List[bytes] = []
-    deadline = time.time() + timeout
-    prompt_sent = False
-    quit_sent = False
-    # Accumulated output for ready-signal detection.
-    accumulated = b""
-    # Sentinel that indicates the CLI is ready to accept input.
-    # Gemini CLI prints "YOLO mode is enabled." before its prompt.
-    READY_SENTINEL = b"mode is enabled"
-
-    def _write_bytes(fd: int, data: bytes) -> None:
+    def _write_bytes(data: bytes) -> None:
         written = 0
         while written < len(data):
             try:
-                n = os.write(fd, data[written:])
+                n = os.write(master_fd, data[written:])
                 written += n
             except BlockingIOError:
                 time.sleep(0.02)
+
+    # Sentinel text that appears once Gemini has rendered its input prompt.
+    READY_SENTINEL = b"Type your message"
+
+    output_chunks: List[bytes] = []
+    accumulated = b""
+    deadline = time.time() + timeout
+    prompt_sent = False
+    quit_sent = False
+    last_output_time = time.time()
 
     while True:
         remaining = deadline - time.time()
@@ -335,25 +349,27 @@ def _run_delegate_pty(argv: List[str], cwd: str, stdin_text: str, timeout: int =
             os.close(master_fd)
             raise subprocess.TimeoutExpired(argv, timeout)
 
-        ready, _, _ = select.select([master_fd], [], [], min(remaining, 0.5))
+        ready, _, _ = select.select([master_fd], [], [], min(remaining, 0.3))
         if ready:
             try:
                 chunk = os.read(master_fd, 4096)
                 if chunk:
                     output_chunks.append(chunk)
                     accumulated += chunk
-                    # Send prompt once CLI signals readiness.
+                    last_output_time = time.time()
                     if not prompt_sent and READY_SENTINEL in accumulated:
-                        time.sleep(0.3)  # Let any further startup output flush.
-                        _write_bytes(master_fd, (stdin_text.rstrip("\n") + "\n").encode())
+                        # CLI is ready — brief pause then send the task prompt.
+                        time.sleep(0.5)
+                        _write_bytes((stdin_text.rstrip("\n") + "\n").encode())
                         prompt_sent = True
+                        last_output_time = time.time()
                 else:
-                    break  # EOF
+                    break  # EOF on master
             except OSError:
-                break  # slave closed
+                break  # slave fd closed
 
         if proc.poll() is not None:
-            # Process exited — drain remaining output.
+            # Process already exited — drain remaining output.
             time.sleep(0.1)
             try:
                 while True:
@@ -365,22 +381,27 @@ def _run_delegate_pty(argv: List[str], cwd: str, stdin_text: str, timeout: int =
                 pass
             break
 
-        # After prompt is sent, watch for a completion indicator, then send /quit.
+        # After prompt is sent, use silence detection to know when Gemini is done.
         if prompt_sent and not quit_sent:
-            recent = b"".join(output_chunks[-10:])
-            # Gemini prints something like "has been updated" or file content when done.
-            # We use a 3-second silence window: if no new output for 3s after prompt, assume done.
-            # Simpler: just send /quit after a fixed wait post-prompt.
-            if b"\n" in recent and len(recent) > 100:
-                time.sleep(2.0)  # Wait for Gemini to finish writing the file.
-                _write_bytes(master_fd, b"/quit\n")
+            silence = time.time() - last_output_time
+            if silence >= PTY_SILENCE_SEC:
+                _write_bytes(b"/quit\n")
                 quit_sent = True
+                # Give the CLI a moment to process /quit and exit.
+                time.sleep(1.0)
 
     os.close(master_fd)
-    returncode = proc.wait(timeout=5) if proc.poll() is None else proc.returncode
+    if proc.poll() is None:
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait()
+    returncode = proc.returncode or 0
+
     raw_output = b"".join(output_chunks).decode(errors="replace")
-    # Strip terminal control sequences (basic ANSI escape codes).
-    clean_output = re.sub(r"\x1b\[[0-9;]*[A-Za-z]|\x1b\][^\x07]*\x07|\r", "", raw_output)
+    # Strip ANSI escape sequences and carriage returns.
+    clean_output = re.sub(r"\x1b\[[0-9;?]*[A-Za-z]|\x1b\][^\x07]*\x07|\r", "", raw_output)
     return subprocess.CompletedProcess(argv, returncode, stdout=clean_output, stderr="")
 
 
