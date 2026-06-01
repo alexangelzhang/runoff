@@ -121,3 +121,41 @@ Both opus and sonnet produced **identical diffs** — same `async/await + try/ca
 This is the other half of the story: when the task is unambiguous, race candidates converge. Agreement across two independent model runs is stronger evidence than a single output. You can apply either with confidence.
 
 **Winner selected:** claude-opus (candidate 0, arrived first).
+
+---
+
+## Real-provider race round 3: claude-code vs opencode (DeepSeek) + Gemini review (2026-06-01)
+
+**Task:** Wrap the `runSearch` function in `src/components/MemorySearch.tsx` with `useCallback`.  
+**Config:** claude-code (implement) × opencode/DeepSeek (implement) race, gemini (review, text mode)
+
+### Results
+
+**claude-code** produced a clean, minimal diff:
+```diff
+-import { useEffect, useRef, useState } from "react";
++import { useCallback, useEffect, useRef, useState } from "react";
+
+-  async function runSearch(q: string, topK: number) {
++  const runSearch = useCallback(async (q: string, topK: number) => {
+     ...
+-  }
++  }, []);
+```
+
+**opencode (DeepSeek)** produced no changes. DeepSeek v4 did not modify the file.
+
+**Gemini review** verdict: `NEEDS_REVISION` — the `useCallback` with an empty dependency array `[]` may suppress the linter's exhaustive-deps rule if `runSearch` references state values that should be deps.
+
+### What this shows
+
+Three different outcomes in a single race:
+1. claude-code identified and applied the correct transformation
+2. opencode/DeepSeek produced no output (model declined or misunderstood the task)
+3. Gemini flagged a real correctness concern the implement step missed — empty `[]` in `useCallback` when the function closes over `setIsLoading`, `setError`, etc.
+
+**Winner selected:** claude-code (candidate 0). The Gemini feedback is valid but the change itself is still correct — `setIsLoading` and `setError` are stable React state setters and safe to omit from deps.
+
+### Key takeaway for this race combination
+
+Gemini in `mode: "text"` works as a reviewer via stdin pipe (`--yolo` flag, no `-p` needed for v0.44+). opencode runs via `subprocess.run(capture_output=True)` without PTY and writes files correctly. Claude Code + OpenCode + Gemini is a functional three-provider pipeline.
