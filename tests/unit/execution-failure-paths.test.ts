@@ -189,3 +189,51 @@ test("workspace_manager apply surfaces git apply failure", () => {
   assert.ok(parsed.error, `expected error JSON, got ${last}`);
   rmSync(dir, { recursive: true, force: true });
 });
+
+test("workspace_manager apply succeeds for brand-new files (--3way fallback)", () => {
+  // Regression: --3way fails for new files that have no base in the index.
+  // workspace_manager should fall back to plain `git apply` in that case.
+  const dir = mkdtempSync(join(tmpdir(), "llm-patch-newfile-"));
+  const repo = join(dir, "repo");
+  mkdirSync(repo, { recursive: true });
+  execFileSync("git", ["init"], { cwd: repo });
+  execFileSync("git", ["config", "user.email", "p@test"], { cwd: repo });
+  execFileSync("git", ["config", "user.name", "P"], { cwd: repo });
+  writeFileSync(join(repo, "existing.txt"), "hello\n");
+  execFileSync("git", ["add", "."], { cwd: repo });
+  execFileSync("git", ["commit", "-m", "init"], { cwd: repo });
+
+  // Build a valid patch that creates a brand-new file.
+  const newFilePatch = [
+    "diff --git a/new.txt b/new.txt",
+    "new file mode 100644",
+    "index 0000000..ce01362",
+    "--- /dev/null",
+    "+++ b/new.txt",
+    "@@ -0,0 +1 @@",
+    "+hello",
+    "",
+  ].join("\n");
+
+  const patchFile = join(dir, "newfile.patch");
+  writeFileSync(patchFile, newFilePatch);
+
+  const out = execFileSync(
+    "python3",
+    [
+      "scripts/python/workspace_manager.py",
+      "apply",
+      "--repo", repo,
+      "--patch-file", patchFile,
+      "--owner-pid", String(process.pid),
+    ],
+    { encoding: "utf-8", cwd: process.cwd() },
+  );
+
+  const last = out.trim().split("\n").pop() ?? "";
+  const result = JSON.parse(last) as { status?: string; error?: string };
+  assert.strictEqual(result.status, "ok", `expected ok, got: ${last}`);
+  assert.ok(existsSync(join(repo, "new.txt")), "new.txt should exist after apply");
+
+  rmSync(dir, { recursive: true, force: true });
+});

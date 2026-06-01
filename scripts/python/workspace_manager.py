@@ -339,12 +339,23 @@ def do_apply(args):
             patch_bytes = f.read()
 
         if patch_bytes:
-            subprocess.run(
-                ["git", "apply", "--binary", "--3way", args.patch_file],
-                cwd=repo_root,
-                check=True,
-                capture_output=True
-            )
+            # --3way handles conflicts gracefully for modified files but fails for
+            # brand-new files that have no base in the index.  Fall back to plain
+            # apply so that patches adding new files also succeed.
+            try:
+                subprocess.run(
+                    ["git", "apply", "--binary", "--3way", args.patch_file],
+                    cwd=repo_root,
+                    check=True,
+                    capture_output=True
+                )
+            except subprocess.CalledProcessError:
+                subprocess.run(
+                    ["git", "apply", "--binary", args.patch_file],
+                    cwd=repo_root,
+                    check=True,
+                    capture_output=True
+                )
         sys.stdout.write(json.dumps({"status": "ok"}))
     except subprocess.CalledProcessError as e:
         sys.stdout.write(json.dumps({"error": e.stderr.decode('utf-8', 'ignore')}))

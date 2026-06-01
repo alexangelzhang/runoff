@@ -29,12 +29,23 @@ function applyPatchText(applyTargetPath: string, patchText: string): void {
   writeFileSync(patchPath, patchText, "utf-8");
 
   try {
-    execFileSync("git", ["apply", "--3way", "--binary", patchPath], {
-      cwd: applyTargetPath,
-      stdio: "pipe",
-      timeout: GIT_APPLY_TIMEOUT_MS,
-      maxBuffer: 10 * 1024 * 1024,
-    });
+    try {
+      // --3way handles conflicts gracefully for modified files; it fails for new files
+      // that have no base in the index.  Fall back to plain apply in that case.
+      execFileSync("git", ["apply", "--3way", "--binary", patchPath], {
+        cwd: applyTargetPath,
+        stdio: "pipe",
+        timeout: GIT_APPLY_TIMEOUT_MS,
+        maxBuffer: 10 * 1024 * 1024,
+      });
+    } catch {
+      execFileSync("git", ["apply", "--binary", patchPath], {
+        cwd: applyTargetPath,
+        stdio: "pipe",
+        timeout: GIT_APPLY_TIMEOUT_MS,
+        maxBuffer: 10 * 1024 * 1024,
+      });
+    }
   } finally {
     rmSync(tempDir, { recursive: true, force: true });
   }
