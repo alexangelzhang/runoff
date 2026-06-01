@@ -55,7 +55,8 @@ npx runoff race apply --session abc123 --winner 1
 Same spec. Two models, different API decisions. With `raceFinalize: defer` you see both diffs before any code lands.
 
 → Full mechanics: [**docs/features/race-mode.md**](docs/features/race-mode.md)
-→ Real benchmark data: [**docs/reference/benchmarks-data.md**](docs/reference/benchmarks-data.md)
+→ Real races with diffs: [**docs/reference/race-showcase.md**](docs/reference/race-showcase.md) — 6 real runs, real providers, real design decisions
+→ Token cost data: [**docs/reference/benchmarks-data.md**](docs/reference/benchmarks-data.md)
 
 ## Run on your repo
 
