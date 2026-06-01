@@ -24,6 +24,20 @@
   "bin": {
     "runoff": "bin/runoff.js"
   },
+  "files": [
+    "bin/",
+    "src/",
+    "scripts/python/",
+    "scripts/shell/",
+    "scripts/ts/",
+    "examples/",
+    "dist/",
+    "pipeline.config.json",
+    "setup.sh",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md"
+  ],
   "scripts": {
     "build": "tsc",
     "build:docs": "vitepress build docs",
