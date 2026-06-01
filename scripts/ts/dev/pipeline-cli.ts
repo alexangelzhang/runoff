@@ -2,7 +2,7 @@
 /**
  * runoff CLI (no MCP host required).
  *
- *   pipeline run | init | doctor | config edit | config validate
+ *   pipeline run | init | doctor | config edit | config validate | mcp
  *   pipeline traces list|show|tail | observability ui
  */
 
@@ -51,9 +51,10 @@ Usage:
   pipeline observability ui [--port <n>] [--no-open]
 
 Examples:
-  npm run pipeline:init -- --work-dir ../my-repo --profile feature
-  npm run pipeline:doctor -- --config ../my-repo/pipeline.config.json
-  npm run pipeline:config:edit -- --config examples/configs/feature.config.json
+  npx runoff init --work-dir ../my-repo --profile feature
+  npx runoff doctor --config ../my-repo/pipeline.config.json
+  npx runoff run --prompt "Add tests" --work-dir ../my-repo
+  npx runoff mcp                # start MCP server (stdio)
 
 Docs: docs/guides/getting-started-30min.md, docs/guides/mcp-host-setup.md
 `);
@@ -324,6 +325,11 @@ async function main(): Promise<void> {
   }
   if (args.command === "observability" && args.sub === "ui") {
     await cmdObservabilityUi(args);
+    return;
+  }
+  if (args.command === "mcp") {
+    // Start the MCP server (stdio transport — used by npx runoff mcp)
+    await import(join(REPO_ROOT, "src", "index.ts"));
     return;
   }
   printHelp();
