@@ -5,6 +5,7 @@ import { LLMProvider, ProviderMode } from "../providers/types.js";
 import { OpenAIProvider } from "../providers/openai.js";
 import { CLIProvider } from "../providers/cli.js";
 import { MockProvider } from "../providers/mock.js";
+import { loadPluginProvider } from "../providers/plugin.js";
 import { computePipelineStages } from "../orchestration/dag.js";
 import type { A2AConfig } from "./a2a-config-types.js";
 
@@ -20,7 +21,7 @@ import { validateConfig } from "./config-validate.js";
 export { validateConfig };
 
 export type ProviderConfig = {
-  type: "openai" | "anthropic" | "builtin" | "cli" | "mock";
+  type: "openai" | "anthropic" | "builtin" | "cli" | "mock" | "plugin";
   model?: string;
   apiKey?: string;
   command?: string;
@@ -41,6 +42,11 @@ export type ProviderConfig = {
   costPerToken?: number;
   /** Optional latency hint (ms) for tie-breaking. */
   avgLatencyMs?: number;
+  /**
+   * Plugin provider: npm package name that exports a `createProvider(name, config)` function.
+   * Example: "runoff-provider-ollama"
+   */
+  package?: string;
 };
 
 /** Agent config entry in the new `agents` section (Wave 7.5). */
@@ -247,6 +253,8 @@ export function createProvider(name: string, config: ProviderConfig): LLMProvide
         getConfiguredProviderMode(config),
         { timeoutMs: config.timeoutMs, pty: config.pty, acp: config.acp },
       );
+    case "plugin":
+      return loadPluginProvider(name, config);
     case "anthropic":
       throw new Error("Anthropic provider is not implemented");
     default: {

@@ -32,6 +32,7 @@ export default defineConfig({
           { text: "MCP host setup", link: "/guides/mcp-host-setup" },
           { text: "Coding agent backends", link: "/guides/coding-agent-backends" },
           { text: "Mock → real CLI", link: "/guides/mock-to-real-cli" },
+          { text: "Provider plugins", link: "/guides/provider-plugin" },
         ],
       },
       {
