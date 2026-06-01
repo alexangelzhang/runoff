@@ -36,6 +36,7 @@ TASK_PAYLOAD_FIELD_NAMES = (
     "parentHandoffId",
     "delegateArgv",
     "delegatePty",
+    "delegateAcp",
     "finalizeStrategy",
     "sharedLockKey",
 )
@@ -94,6 +95,7 @@ class TaskPayload:
     parentHandoffId: Optional[str] = None
     delegateArgv: Optional[List[str]] = None
     delegatePty: bool = False
+    delegateAcp: bool = False
     finalizeStrategy: str = "auto"
     sharedLockKey: Optional[str] = None
 
@@ -180,6 +182,7 @@ class TaskPayload:
             parentHandoffId=data.get("parentHandoffId"),
             delegateArgv=cls._parse_delegate_argv(data.get("delegateArgv")),
             delegatePty=bool(data.get("delegatePty", False)),
+            delegateAcp=bool(data.get("delegateAcp", False)),
             finalizeStrategy=cls._parse_finalize_strategy(data.get("finalizeStrategy")),
             sharedLockKey=cls._parse_optional_string("sharedLockKey", data.get("sharedLockKey")),
         )
@@ -274,6 +277,164 @@ def _compose_prompt_text(task: TaskPayload) -> str:
             parts.append(task.prompt)
         return "\n\n".join(parts)
     return task.prompt
+
+
+# Minimum Gemini CLI version required for ACP (Agent Client Protocol) support.
+_ACP_MIN_VERSION = (0, 45, 0)
+
+
+def _parse_version(version_str: str) -> tuple:
+    """Parse a semver string like '0.45.0-preview.1' into a comparable tuple."""
+    import re as _re
+    m = _re.match(r"(\d+)\.(\d+)\.(\d+)", version_str.strip())
+    if not m:
+        return (0, 0, 0)
+    return (int(m.group(1)), int(m.group(2)), int(m.group(3)))
+
+
+def _check_gemini_acp_version(argv: List[str]) -> None:
+    """Raise RuntimeError when the installed Gemini CLI is too old to support ACP."""
+    cmd = argv[0] if argv else "gemini"
+    try:
+        result = subprocess.run([cmd, "--version"], capture_output=True, text=True, timeout=10)
+        version_str = (result.stdout or result.stderr or "").strip()
+        version = _parse_version(version_str)
+        if version < _ACP_MIN_VERSION:
+            min_str = ".".join(str(v) for v in _ACP_MIN_VERSION)
+            raise RuntimeError(
+                f"Gemini CLI {version_str or 'unknown'} does not support ACP. "
+                f"Upgrade to v{min_str}+ (currently in preview: "
+                f"`npm install -g @google/gemini-cli@0.45.0-preview.1`). "
+                f"Alternatively, remove `\"acp\": true` from the provider config to use "
+                f"gemini in text mode instead."
+            )
+    except FileNotFoundError:
+        raise RuntimeError(f"Gemini CLI not found at '{cmd}'. Install with: npm install -g @google/gemini-cli")
+    except subprocess.TimeoutExpired:
+        raise RuntimeError(f"Timed out checking Gemini CLI version ({cmd} --version).")
+
+
+def _run_delegate_acp(argv: List[str], cwd: str, prompt_text: str, timeout: int = DELEGATE_EXEC_TIMEOUT_SEC) -> subprocess.CompletedProcess[str]:
+    """Run Gemini CLI via ACP (Agent Client Protocol) JSON-RPC over stdio.
+
+    Flow: initialize → authenticate → session/new → session/prompt → wait for response.
+
+    Requires Gemini CLI v0.45.0+. Call _check_gemini_acp_version() before this function.
+    """
+    _check_gemini_acp_version(argv)
+
+    acp_argv = list(argv)
+    if "--acp" not in acp_argv:
+        acp_argv.append("--acp")
+    # --yolo auto-approves all tool calls (file edits, etc.)
+    if "--yolo" not in acp_argv and "--approval-mode" not in " ".join(acp_argv):
+        acp_argv.extend(["--approval-mode", "yolo"])
+
+    proc = subprocess.Popen(
+        acp_argv,
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        cwd=cwd,
+        bufsize=1,
+    )
+
+    req_id = 0
+
+    def send(method: str, params: Dict[str, Any]) -> int:
+        nonlocal req_id
+        req_id += 1
+        msg = json.dumps({"jsonrpc": "2.0", "id": req_id, "method": method, "params": params}) + "\n"
+        proc.stdin.write(msg)  # type: ignore[union-attr]
+        proc.stdin.flush()  # type: ignore[union-attr]
+        return req_id
+
+    def recv(wait_id: int, timeout_secs: float = 10.0) -> Dict[str, Any]:
+        deadline = time.time() + timeout_secs
+        while time.time() < deadline:
+            ready, _, _ = select.select([proc.stdout, proc.stderr], [], [], 0.3)  # type: ignore[arg-type]
+            for fd in ready:
+                line = fd.readline()  # type: ignore[attr-defined]
+                if not line.strip():
+                    continue
+                try:
+                    obj = json.loads(line)
+                    if obj.get("id") == wait_id:
+                        return obj
+                except (json.JSONDecodeError, ValueError):
+                    pass
+        raise RuntimeError(f"ACP: timed out waiting for response to request {wait_id}")
+
+    output_lines: List[str] = []
+
+    try:
+        # 1. initialize
+        iid = send("initialize", {
+            "protocolVersion": 1,
+            "capabilities": {},
+            "clientInfo": {"name": "llm-pipeline", "version": "1.0"},
+        })
+        recv(iid, timeout_secs=10)
+
+        # 2. authenticate (skip credential prompts — use cached OAuth)
+        aid = send("authenticate", {"methodId": "oauth-personal"})
+        recv(aid, timeout_secs=10)
+
+        # 3. session/new
+        sid_req = send("session/new", {"cwd": cwd, "mcpServers": []})
+        s_resp = recv(sid_req, timeout_secs=15)
+        if "error" in s_resp:
+            raise RuntimeError(f"ACP session/new failed: {s_resp['error']}")
+        session_id = s_resp["result"]["sessionId"]
+
+        # 4. session/prompt — send the task and collect streaming updates
+        pid_req = send("session/prompt", {
+            "sessionId": session_id,
+            "prompt": [{"type": "text", "text": prompt_text}],
+        })
+
+        # Drain until we get the final response for the prompt request.
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            ready, _, _ = select.select([proc.stdout, proc.stderr], [], [], 0.5)  # type: ignore[arg-type]
+            for fd in ready:
+                line = fd.readline()  # type: ignore[attr-defined]
+                if not line.strip():
+                    continue
+                output_lines.append(line)
+                try:
+                    obj = json.loads(line)
+                    # Collect agent text chunks for the summary.
+                    if obj.get("method") == "session/update":
+                        upd = obj.get("params", {}).get("update", {})
+                        if upd.get("sessionUpdate") == "agent_message_chunk":
+                            text = upd.get("content", {}).get("text", "")
+                            if text:
+                                output_lines.append(text)
+                    # Final response: id matches the prompt request.
+                    if obj.get("id") == pid_req:
+                        if "error" in obj:
+                            raise RuntimeError(f"ACP session/prompt failed: {obj['error']}")
+                        # Done — return collected output as stdout.
+                        summary = "".join(
+                            l for l in output_lines if not l.startswith("{")
+                        ).strip()
+                        return subprocess.CompletedProcess(
+                            acp_argv, 0, stdout=summary or "ACP task completed.", stderr=""
+                        )
+                except (json.JSONDecodeError, ValueError):
+                    pass
+
+        raise RuntimeError(f"ACP: timed out waiting for session/prompt response (>{timeout}s)")
+
+    finally:
+        proc.terminate()
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait()
 
 
 def _run_delegate(argv: List[str], cwd: str, stdin_text: str) -> subprocess.CompletedProcess[str]:
@@ -530,7 +691,9 @@ def _execute_delegate_or_stub(task: TaskPayload, work_dir: str, final_prompt: st
     if task.delegateArgv:
         effective_argv = _inject_dir_flag(task.delegateArgv, work_dir)
         try:
-            if task.delegatePty:
+            if task.delegateAcp:
+                proc = _run_delegate_acp(effective_argv, work_dir, final_prompt)
+            elif task.delegatePty:
                 proc = _run_delegate_pty(effective_argv, work_dir, final_prompt)
             else:
                 proc = _run_delegate(effective_argv, work_dir, final_prompt)

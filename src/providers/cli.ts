@@ -18,6 +18,8 @@ export type CLIProviderRuntimeOptions = {
   timeoutMs?: number;
   /** Allocate a pseudo-TTY for the delegate process (for TTY-requiring CLIs like Gemini). */
   pty?: boolean;
+  /** Use ACP JSON-RPC protocol instead of plain stdin/stdout (Gemini CLI v0.45.0+). */
+  acp?: boolean;
 };
 
 function atomicWriteJsonFile(filePath: string, data: unknown): void {
@@ -164,6 +166,7 @@ export class CLIProvider implements LLMProvider {
       startedAt,
       ...(delegateArgv ? { delegateArgv } : {}),
       ...(this.runtimeOptions.pty ? { delegatePty: true } : {}),
+      ...(this.runtimeOptions.acp ? { delegateAcp: true } : {}),
       ...(req.finalizeStrategy ? { finalizeStrategy: req.finalizeStrategy } : {}),
       ...(sharedLockKey ? { sharedLockKey } : {}),
     });

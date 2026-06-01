@@ -43,6 +43,12 @@ export const taskPayloadSchema = z.object({
    * Required for CLI tools that detect the absence of a TTY and refuse to run (e.g. Gemini CLI).
    */
   delegatePty: z.boolean().optional(),
+  /**
+   * When true, task_runner.py communicates with the delegate via ACP (Agent Client Protocol)
+   * JSON-RPC over stdio instead of plain stdin/stdout. Requires Gemini CLI v0.45.0+.
+   * task_runner.py validates the version at runtime and raises an error if too old.
+   */
+  delegateAcp: z.boolean().optional(),
   finalizeStrategy: z.enum(["auto", "defer"]).optional(),
   sharedLockKey: z.string().optional(),
 });

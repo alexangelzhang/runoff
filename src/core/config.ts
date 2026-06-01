@@ -29,6 +29,12 @@ export type ProviderConfig = {
   mode?: ProviderMode;
   /** Allocate a pseudo-TTY for the CLI process. Required for tools like Gemini CLI that exit when no TTY is detected. */
   pty?: boolean;
+  /**
+   * Use the ACP (Agent Client Protocol) JSON-RPC interface instead of plain stdin/stdout.
+   * Requires Gemini CLI v0.45.0+ (preview). task_runner.py performs a version check at runtime
+   * and falls back to an error if the installed version is too old.
+   */
+  acp?: boolean;
   /** Phase 5.3: declarative tier (overrides name heuristics in router). */
   tier?: "lite" | "full";
   /** Optional cost hint (USD per 1M tokens) for economics routing. */
@@ -239,7 +245,7 @@ export function createProvider(name: string, config: ProviderConfig): LLMProvide
         config.command ?? "",
         config.args ?? [],
         getConfiguredProviderMode(config),
-        { timeoutMs: config.timeoutMs, pty: config.pty },
+        { timeoutMs: config.timeoutMs, pty: config.pty, acp: config.acp },
       );
     case "anthropic":
       throw new Error("Anthropic provider is not implemented");
