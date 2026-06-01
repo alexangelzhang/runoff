@@ -111,6 +111,8 @@ DAG 模式下 retry 不是 review-driven 的——它只通过 `stepFailed=true`
 
 **影响**：mock provider 的 review 差异化测试在 DAG 模式下无效，测不出 retry 轮次差异。benchmark 数据只能反映 token 成本，不反映质量差异。
 
-**opencode 在 linked worktree 里忽略 worktree 代码**：opencode 通过 `.git` 文件追溯到源仓库（llm-pipeline），把 worktree 内的 openhuman 代码视为不存在。**修复**：对 opencode 只用「写新文件」任务（不依赖找到已有文件），不用「修改已有文件」任务；或者直接在 openhuman 目录运行 opencode 而不经 worktree。
+**opencode 在 linked worktree 里追溯源仓库（已修复）**：opencode 通过 `.git` 文件追溯到源仓库，忽略 worktree 内的目标代码。已通过在 `task_runner._execute_delegate_or_stub` 里注入 `--dir <exec_dir>` 修复——`exec_dir` 是 worktree 创建后才确定的实际工作目录。
+
+**注意**：不能在 `cli.ts` 里注入 `--dir req.workDir`——`req.workDir` 是原始 repo 路径，会让 opencode 直接写原始仓库，绕过 worktree 隔离。必须在 task_runner.py 的 `_inject_dir_flag()` 里注入，时机是 worktree 创建之后。
 
 **`git apply --3way` 对新建文件失败**：新文件不在 base commit 里，`--3way` 无法计算三方合并基准，报 "does not exist in index"。patch 内容本身正确，直接用 `git apply`（不带 `--3way`）或手动复制文件可以绕过。已在 `issues/OPEN-BACKLOG.md` 跟踪。
