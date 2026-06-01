@@ -89,8 +89,8 @@ Put two providers in an array for any pipeline step — they run in parallel, ea
 ```json
 {
   "pipeline": {
-    "implement": [["codex", "gemini"]],
-    "review":    ["codex", "implement"]
+    "implement": [["claude-code", "opencode"]],
+    "review":    ["claude-code", "implement"]
   }
 }
 ```
@@ -98,15 +98,20 @@ Put two providers in an array for any pipeline step — they run in parallel, ea
 The pipeline pauses at `awaiting_judge`. You see both diffs:
 
 ```
-candidate 0  (codex)  — added retry loop inline, 23 lines
-candidate 1  (gemini) — delegated to existing api.retry(), 6 lines
+candidate 0  (claude-code)   src/utils/format.ts +27 lines
+  formatRelativeTime(isoString: string)   — string input only
+
+candidate 1  (opencode/DeepSeek)   src/utils/format.ts +60 lines
+  formatRelativeTime(dateInput: string | Date)  — accepts Date too
+  + future dates ("2 hours from now"), week unit, edge-case guards
 
   npm run pipeline:race:apply -- --session abc123 --winner 1
 ```
 
-Gemini found `api.retry()` already in the codebase. You wouldn't have known to look. That's the point.
+Same spec. Two models made different API decisions independently. With `raceFinalize: defer` you see both before any code lands.
 
-→ Full mechanics: [**docs/features/race-mode.md**](docs/features/race-mode.md)
+→ Full mechanics: [**docs/features/race-mode.md**](docs/features/race-mode.md)  
+→ Real benchmark data: [**docs/reference/benchmarks-data.md**](docs/reference/benchmarks-data.md)
 
 ## MCP tools (main path)
 
