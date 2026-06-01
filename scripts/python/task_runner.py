@@ -513,13 +513,27 @@ def _apply_patch_to_repo(repo_root: str, patch_bytes: bytes) -> None:
             pass
 
 
+def _inject_dir_flag(argv: List[str], work_dir: str) -> List[str]:
+    """Inject --dir <work_dir> for opencode so it resolves the project root from the
+    worktree directory rather than tracing back through .git to the source repo."""
+    if not argv or not work_dir:
+        return argv
+    cmd_base = os.path.basename(argv[0]).lower()
+    if not (cmd_base == "opencode" or cmd_base.startswith("opencode.")):
+        return argv
+    if "--dir" in argv:
+        return argv
+    return list(argv) + ["--dir", work_dir]
+
+
 def _execute_delegate_or_stub(task: TaskPayload, work_dir: str, final_prompt: str) -> str:
     if task.delegateArgv:
+        effective_argv = _inject_dir_flag(task.delegateArgv, work_dir)
         try:
             if task.delegatePty:
-                proc = _run_delegate_pty(task.delegateArgv, work_dir, final_prompt)
+                proc = _run_delegate_pty(effective_argv, work_dir, final_prompt)
             else:
-                proc = _run_delegate(task.delegateArgv, work_dir, final_prompt)
+                proc = _run_delegate(effective_argv, work_dir, final_prompt)
         except subprocess.TimeoutExpired:
             raise RuntimeError(f"delegateArgv subprocess timed out after {DELEGATE_EXEC_TIMEOUT_SEC}s")
         if proc.returncode != 0:
