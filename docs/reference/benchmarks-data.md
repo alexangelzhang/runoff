@@ -68,4 +68,56 @@ The token cost ceiling is configurable: `orchestration.raceBudgetUSD` caps per-s
 - Mock outputs are deterministic; results are reproducible across runs.
 - Token counts reflect mock responses, not real LLM usage.
 - For real-provider data, run: `npm run smoke:real` (requires API keys).
-- Experiment data persisted to: `/var/folders/pb/q1dmxgb513xccz8nhv7s55nm0000gn/T/llm-pipeline-bench-GWWUVN/experiments.jsonl`
+- Experiment data persisted to: `~/.llm-pipeline/experiments.jsonl`
+
+---
+
+## Real-provider race: claude-opus vs claude-sonnet (2026-06-01)
+
+**Task:** Add error handling to 3 functions in `src/lib/tauri.ts` of a real Tauri/React project.  
+**Config:** `raceEarlyTermination: false`, `raceFinalize: defer` (manual pick)
+
+### What each model produced
+
+**claude-sonnet** — converted arrow functions to `async/await + try/catch`:
+```diff
+-export const searchMemory = (
++export const searchMemory = async (
+   query: string,
+   topK = 10
+-): Promise<SearchResult[]> =>
+-  invoke<SearchResult[]>("search_memory", { query, topK });
++): Promise<SearchResult[]> => {
++  try {
++    return await invoke<SearchResult[]>("search_memory", { query, topK });
++  } catch (e) {
++    throw new Error(`searchMemory failed: ${e}`);
++  }
++};
+```
+
+A prior run of the same task (different Claude Code session) used `.catch()` chaining instead, keeping the original arrow-function style.
+
+Two approaches, both correct, different tradeoffs:
+
+| | `.catch()` chain | `async/await + try/catch` |
+|---|---|---|
+| Lines added | +2 per function | +6 per function |
+| Style | Keeps original arrow function | Rewrites to named async function |
+| `async` on signature | No | Yes |
+
+This is the kind of choice race mode surfaces. With `raceFinalize: defer`, you see both diffs before any code lands in your repo.
+
+**Winner selected:** claude-sonnet — `async/await` style preferred for this codebase.
+
+---
+
+## Real-provider race round 2: same task, models agree (2026-06-01)
+
+**Task:** Add error handling to `drillDownSource`, `getTopic`, `getGlobal` in the same file.
+
+Both opus and sonnet produced **identical diffs** — same `async/await + try/catch` structure, same error message format.
+
+This is the other half of the story: when the task is unambiguous, race candidates converge. Agreement across two independent model runs is stronger evidence than a single output. You can apply either with confidence.
+
+**Winner selected:** claude-opus (candidate 0, arrived first).
