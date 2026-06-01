@@ -416,6 +416,20 @@ def _run_delegate_acp(argv: List[str], cwd: str, prompt_text: str, timeout: int 
                     if obj.get("id") == pid_req:
                         if "error" in obj:
                             raise RuntimeError(f"ACP session/prompt failed: {obj['error']}")
+                        # Commit any file changes so run_git_diff / workspace collect
+                        # can find them via `git diff HEAD` (same as Claude Code / opencode).
+                        try:
+                            subprocess.run(
+                                ["git", "add", "-A"],
+                                cwd=cwd, check=False, capture_output=True,
+                            )
+                            subprocess.run(
+                                ["git", "commit", "--allow-empty-message", "-m",
+                                 "acp: delegate changes"],
+                                cwd=cwd, check=False, capture_output=True,
+                            )
+                        except Exception:
+                            pass  # non-critical — diff collection handles empty commits
                         # Done — return collected output as stdout.
                         summary = "".join(
                             l for l in output_lines if not l.startswith("{")
