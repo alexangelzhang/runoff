@@ -159,3 +159,74 @@ Three different outcomes in a single race:
 ### Key takeaway for this race combination
 
 Gemini in `mode: "text"` works as a reviewer via stdin pipe (`--yolo` flag, no `-p` needed for v0.44+). opencode runs via `subprocess.run(capture_output=True)` without PTY and writes files correctly. Claude Code + OpenCode + Gemini is a functional three-provider pipeline.
+
+---
+
+## Real-provider race round 4: claude-code vs opencode/DeepSeek — genuine divergence (2026-06-01)
+
+**Task:** Create `src/utils/format.ts` with three utility functions: `formatFileSize`, `formatRelativeTime`, `truncateText`.  
+**Note:** Task was "write from scratch" — no existing file to find, so opencode's project-context issue didn't apply.
+
+### What each model produced
+
+**claude-code** — compact, no JSDoc, `string`-only input:
+```typescript
+export function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  // ...
+}
+
+export function formatRelativeTime(isoString: string): string {
+  const diff = Date.now() - new Date(isoString).getTime();
+  const seconds = Math.floor(diff / 1000);
+  if (seconds < 60) return `${seconds} seconds ago`;
+  // if-chain...
+}
+
+export function truncateText(text: string, maxLength: number): string {
+  if (text.length <= maxLength) return text;
+  return `${text.slice(0, maxLength)}...`;
+}
+```
+
+**opencode/DeepSeek** — JSDoc, `string | Date` input, `intervals` array, edge cases:
+```typescript
+export function formatFileSize(bytes: number): string {
+  if (bytes === 0) return '0 B';
+  const sizes = ['B', 'KB', 'MB', 'GB', 'TB', 'PB', 'EB', 'ZB', 'YB'];
+  const i = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), sizes.length - 1);
+  return `${parseFloat((bytes / Math.pow(1024, i)).toFixed(2))} ${sizes[i]}`;
+}
+
+export function formatRelativeTime(dateInput: string | Date): string {
+  // intervals array: year, month, week, day, hour, minute
+  // also handles future dates ("2 hours from now")
+}
+
+export function truncateText(text: string, maxLength: number): string {
+  if (maxLength <= 3) return text.slice(0, maxLength);  // edge case
+  return text.slice(0, maxLength - 3) + '...';
+}
+```
+
+### Key differences
+
+| Dimension | claude-code | DeepSeek |
+|-----------|-------------|---------|
+| `formatRelativeTime` input type | `string` only | `string \| Date` |
+| `formatFileSize` precision | `.toFixed(1)` | `.toFixed(2)` + bounds check |
+| `truncateText` edge case | not handled | `maxLength <= 3` guard |
+| Future dates | not supported | "2 hours from now" |
+| Week unit | not included | included |
+| Code style | compact, no JSDoc | verbose, full JSDoc |
+
+### Why this matters
+
+Both implementations are correct. DeepSeek's is more defensive and API-rich; claude-code's is simpler and covers the specified requirements exactly. Neither is wrong — this is a genuine design choice. With `raceFinalize: defer`, you would see both diffs and pick based on your codebase's convention (verbose+documented vs compact+minimal).
+
+**Winner selected:** DeepSeek/opencode (landed in working tree via `git apply`; claude-code's version also available in worktree for comparison).
+
+### Infrastructure note
+
+`git apply --3way` fails for brand-new files (no 3-way base). The patch still applies cleanly without `--3way`. This is a known limitation tracked in `issues/OPEN-BACKLOG.md`.
