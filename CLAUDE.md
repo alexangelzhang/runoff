@@ -110,3 +110,7 @@ scripts/ts/ci/check-ipc-sync.ts — CI helper: TS/Python IPC constants must matc
 DAG 模式下 retry 不是 review-driven 的——它只通过 `stepFailed=true`（implement 步骤 response.failed）触发，而 stepFailed 会立即让 finalStatus=failed（不是 retry）。真正的 review-driven retry 只在 `llm-driven` orchestration 模式下有效。
 
 **影响**：mock provider 的 review 差异化测试在 DAG 模式下无效，测不出 retry 轮次差异。benchmark 数据只能反映 token 成本，不反映质量差异。
+
+**opencode 在 linked worktree 里忽略 worktree 代码**：opencode 通过 `.git` 文件追溯到源仓库（llm-pipeline），把 worktree 内的 openhuman 代码视为不存在。**修复**：对 opencode 只用「写新文件」任务（不依赖找到已有文件），不用「修改已有文件」任务；或者直接在 openhuman 目录运行 opencode 而不经 worktree。
+
+**`git apply --3way` 对新建文件失败**：新文件不在 base commit 里，`--3way` 无法计算三方合并基准，报 "does not exist in index"。patch 内容本身正确，直接用 `git apply`（不带 `--3way`）或手动复制文件可以绕过。已在 `issues/OPEN-BACKLOG.md` 跟踪。
