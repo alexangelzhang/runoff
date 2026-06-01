@@ -9,7 +9,7 @@ import { mcpJson, mcpErrorFrom } from "./mcp-response.js";
 
 export function register(server: McpServer) {
   server.tool(
-    "llm_show_config",
+    "runoff_show_config",
     "Display current pipeline configuration and provider details.",
     {},
     async () => {

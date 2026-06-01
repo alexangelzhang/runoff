@@ -1,6 +1,6 @@
 #!/usr/bin/env npx tsx
 /**
- * Print or install MCP host configuration for llm-pipeline.
+ * Print or install MCP host configuration for runoff.
  *
  *   npm run setup:mcp
  *   npm run setup:mcp -- --host cursor
@@ -46,7 +46,7 @@ function mcpEntry(repoRoot: string): { command: string; args: string[]; cwd: str
 function printJson(host: McpHost, entry: ReturnType<typeof mcpEntry>): void {
   const block = {
     mcpServers: {
-      "llm-pipeline": {
+      "runoff": {
         command: entry.command,
         args: entry.args,
         cwd: entry.cwd,
@@ -54,7 +54,7 @@ function printJson(host: McpHost, entry: ReturnType<typeof mcpEntry>): void {
     },
   };
 
-  console.log(`=== llm-pipeline MCP (${host}) ===\n`);
+  console.log(`=== runoff MCP (${host}) ===\n`);
   console.log(JSON.stringify(block, null, 2));
   console.log("");
 
@@ -68,7 +68,7 @@ function printJson(host: McpHost, entry: ReturnType<typeof mcpEntry>): void {
       console.log("macOS: ~/Library/Application Support/Claude/claude_desktop_config.json");
       break;
     case "claude-code":
-      console.log("Claude Code: run with --install or: claude mcp add llm-pipeline -- <command> <args...>");
+      console.log("Claude Code: run with --install or: claude mcp add runoff -- <command> <args...>");
       break;
     default:
       console.log("Register in your MCP host using the JSON above. See docs/guides/mcp-host-setup.md");
@@ -92,8 +92,8 @@ function tryClaudeCodeInstall(repoRoot: string, entry: ReturnType<typeof mcpEntr
 
   const cmd = useDist ? "node" : entry.command;
   const args = useDist ? [distEntry] : entry.args;
-  console.log(`Running: claude mcp add llm-pipeline -- ${cmd} ${args.join(" ")}`);
-  execFileSync("claude", ["mcp", "add", "llm-pipeline", "--", cmd, ...args], {
+  console.log(`Running: claude mcp add runoff -- ${cmd} ${args.join(" ")}`);
+  execFileSync("claude", ["mcp", "add", "runoff", "--", cmd, ...args], {
     cwd: repoRoot,
     stdio: "inherit",
   });

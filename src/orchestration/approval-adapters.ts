@@ -37,7 +37,7 @@ export function createApprovalGate(
   runtime?: PipelineRuntimeConfig,
   callback?: (request: ApprovalRequest) => Promise<ApprovalResponse>,
 ): ApprovalGate {
-  const mode = runtime?.governance?.approvalMode ?? process.env.LLM_PIPELINE_APPROVAL_MODE ?? "auto";
+  const mode = runtime?.governance?.approvalMode ?? process.env.RUNOFF_APPROVAL_MODE ?? "auto";
 
   if (mode === "callback" && callback) {
     return new CallbackApprovalGate(
@@ -56,6 +56,6 @@ export function createApprovalGate(
   }
 
   const threshold = runtime?.governance?.approvalRiskThreshold ?? "medium";
-  const autoBelow = process.env.LLM_PIPELINE_AUTO_APPROVE === "1" ? "low" : threshold;
+  const autoBelow = process.env.RUNOFF_AUTO_APPROVE === "1" ? "low" : threshold;
   return new AutoApprovalGate(autoBelow as RiskLevel);
 }

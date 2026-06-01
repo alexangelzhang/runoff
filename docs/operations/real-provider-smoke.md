@@ -38,22 +38,22 @@ node --import tsx scripts/ts/dev/run-real-provider-smoke.ts --mode nightly --rep
 
 必填：
 
-- `LLM_PIPELINE_RUN_REAL_PROVIDER_SMOKE=1`
-- `LLM_PIPELINE_REAL_CODEX_ARGV_JSON`
-- `LLM_PIPELINE_REAL_GEMINI_ARGV_JSON`：仅当需要 Gemini standalone 或 race 时必须提供
+- `RUNOFF_RUN_REAL_PROVIDER_SMOKE=1`
+- `RUNOFF_REAL_CODEX_ARGV_JSON`
+- `RUNOFF_REAL_GEMINI_ARGV_JSON`：仅当需要 Gemini standalone 或 race 时必须提供
 
 常用可选项：
 
-- `LLM_PIPELINE_RUN_REAL_RACE_SMOKE=1`：直接跑 `test:real-providers` 时控制 race 用例；通过 runner 时会由 `--mode` 自动注入
-- `LLM_PIPELINE_REAL_TIMEOUT_MS`：覆盖 provider timeout
-- `LLM_PIPELINE_REAL_SMOKE_KEEP_SANDBOX=1`：直接跑 `test:real-providers` 时保留 sandbox；通过 runner 时默认保留到汇总完成，再按结果决定是否清理
+- `RUNOFF_RUN_REAL_RACE_SMOKE=1`：直接跑 `test:real-providers` 时控制 race 用例；通过 runner 时会由 `--mode` 自动注入
+- `RUNOFF_REAL_TIMEOUT_MS`：覆盖 provider timeout
+- `RUNOFF_REAL_SMOKE_KEEP_SANDBOX=1`：直接跑 `test:real-providers` 时保留 sandbox；通过 runner 时默认保留到汇总完成，再按结果决定是否清理
 
 示例：
 
 ```bash
-export LLM_PIPELINE_RUN_REAL_PROVIDER_SMOKE=1
-export LLM_PIPELINE_REAL_CODEX_ARGV_JSON='["codex","exec","--full-auto","--skip-git-repo-check"]'
-export LLM_PIPELINE_REAL_GEMINI_ARGV_JSON='["gemini","-y","-p"]'
+export RUNOFF_RUN_REAL_PROVIDER_SMOKE=1
+export RUNOFF_REAL_CODEX_ARGV_JSON='["codex","exec","--full-auto","--skip-git-repo-check"]'
+export RUNOFF_REAL_GEMINI_ARGV_JSON='["gemini","-y","-p"]'
 export GEMINI_API_KEY='...'
 
 npm run smoke:real
@@ -82,12 +82,12 @@ npm run smoke:real
 
 ## GitHub Actions 建议
 
-仓库里提供了 `.github/workflows/real-provider-smoke-nightly.yml` 和 `.github/workflows/real-provider-smoke-pre-release.yml`。前者用于持续健康检查，后者用于发布前 gate。两个 workflow 都默认面向带有真实 CLI 和认证环境的 self-hosted runner，建议准备一个专用 label，例如 `llm-pipeline-real-smoke`。
+仓库里提供了 `.github/workflows/real-provider-smoke-nightly.yml` 和 `.github/workflows/real-provider-smoke-pre-release.yml`。前者用于持续健康检查，后者用于发布前 gate。两个 workflow 都默认面向带有真实 CLI 和认证环境的 self-hosted runner，建议准备一个专用 label，例如 `runoff-real-smoke`。
 
 建议至少配置这些 secrets：
 
-- `LLM_PIPELINE_REAL_CODEX_ARGV_JSON`
-- `LLM_PIPELINE_REAL_GEMINI_ARGV_JSON`
+- `RUNOFF_REAL_CODEX_ARGV_JSON`
+- `RUNOFF_REAL_GEMINI_ARGV_JSON`
 - `GEMINI_API_KEY`：如果 Gemini CLI 依赖 API key
 - `OPENAI_API_KEY`：如果你的 Codex 运行方式需要
 

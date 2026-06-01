@@ -128,13 +128,13 @@ function renderTable(results: RunResult[]): string {
 // ── Main ──────────────────────────────────────────────────────────────────────
 
 async function main(): Promise<void> {
-  const home = mkdtempSync(join(tmpdir(), "llm-pipeline-bench-"));
-  process.env.LLM_PIPELINE_HOME = home;
+  const home = mkdtempSync(join(tmpdir(), "runoff-bench-"));
+  process.env.RUNOFF_HOME = home;
 
   const singleDir = mkdtempSync(join(tmpdir(), "bench-single-"));
   const raceDir = mkdtempSync(join(tmpdir(), "bench-race-"));
 
-  console.log("llm-pipeline benchmark: single-model vs race mode");
+  console.log("runoff benchmark: single-model vs race mode");
   console.log(`tasks:     ${TASKS.length}`);
   console.log(`data home: ${home}`);
   console.log(`running…\n`);

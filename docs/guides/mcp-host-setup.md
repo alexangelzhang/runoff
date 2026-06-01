@@ -1,6 +1,6 @@
 # MCP host setup
 
-Generate a copy-paste MCP block for **llm-pipeline** (no API keys required for mock pipelines).
+Generate a copy-paste MCP block for **runoff** (no API keys required for mock pipelines).
 
 ## Quick
 

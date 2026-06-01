@@ -44,8 +44,8 @@ test("applyMemoryForgetPass removes low-relevance entries", () => {
 
 test("formation queue writes entity relations after flush", async () => {
   const home = mkdtempSync(join(tmpdir(), "formation-q-"));
-  const prev = process.env.LLM_PIPELINE_HOME;
-  process.env.LLM_PIPELINE_HOME = home;
+  const prev = process.env.RUNOFF_HOME;
+  process.env.RUNOFF_HOME = home;
   resetSharedMemory();
 
   const config: PipelineConfig = {
@@ -80,8 +80,8 @@ test("formation queue writes entity relations after flush", async () => {
     });
     assert.ok(edges.length >= 1);
   } finally {
-    if (prev === undefined) delete process.env.LLM_PIPELINE_HOME;
-    else process.env.LLM_PIPELINE_HOME = prev;
+    if (prev === undefined) delete process.env.RUNOFF_HOME;
+    else process.env.RUNOFF_HOME = prev;
     rmSync(home, { recursive: true, force: true });
     resetSharedMemory();
     resetPipelineMemoryFormationQueue();
@@ -90,8 +90,8 @@ test("formation queue writes entity relations after flush", async () => {
 
 test("memoryFormationAsync false runs formation inline", async () => {
   const home = mkdtempSync(join(tmpdir(), "formation-sync-"));
-  const prev = process.env.LLM_PIPELINE_HOME;
-  process.env.LLM_PIPELINE_HOME = home;
+  const prev = process.env.RUNOFF_HOME;
+  process.env.RUNOFF_HOME = home;
   resetSharedMemory();
 
   const config: PipelineConfig = {
@@ -125,8 +125,8 @@ test("memoryFormationAsync false runs formation inline", async () => {
     });
     assert.ok(edges.length >= 1);
   } finally {
-    if (prev === undefined) delete process.env.LLM_PIPELINE_HOME;
-    else process.env.LLM_PIPELINE_HOME = prev;
+    if (prev === undefined) delete process.env.RUNOFF_HOME;
+    else process.env.RUNOFF_HOME = prev;
     rmSync(home, { recursive: true, force: true });
     resetSharedMemory();
   }

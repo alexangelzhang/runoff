@@ -6,9 +6,9 @@ import { tmpdir } from "node:os";
 import { routeProvider, estimateComplexity } from "../../src/routing/router.js";
 
 test("Wave 6: Dynamic Routing & Self-Optimization (Step 5)", async (t) => {
-  const previousHome = process.env.LLM_PIPELINE_HOME;
-  const sandboxHome = join(tmpdir(), ".llm-pipeline-test-" + Math.random().toString(36).slice(2, 8));
-  process.env.LLM_PIPELINE_HOME = sandboxHome;
+  const previousHome = process.env.RUNOFF_HOME;
+  const sandboxHome = join(tmpdir(), ".runoff-test-" + Math.random().toString(36).slice(2, 8));
+  process.env.RUNOFF_HOME = sandboxHome;
 
   const tracesDir = join(sandboxHome, "traces");
   const testTraceFile = join(tracesDir, "test_failure_bias.json");
@@ -58,6 +58,6 @@ test("Wave 6: Dynamic Routing & Self-Optimization (Step 5)", async (t) => {
 
   // Cleanup
   if (existsSync(testTraceFile)) rmSync(testTraceFile);
-  if (previousHome === undefined) delete process.env.LLM_PIPELINE_HOME;
-  else process.env.LLM_PIPELINE_HOME = previousHome;
+  if (previousHome === undefined) delete process.env.RUNOFF_HOME;
+  else process.env.RUNOFF_HOME = previousHome;
 });

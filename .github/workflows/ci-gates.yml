@@ -18,8 +18,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     env:
-      LLM_PIPELINE_HOME: ${{ runner.temp }}/llm-pipeline-ci-home
-      TMPDIR: ${{ runner.temp }}/llm-pipeline-tmp
+      RUNOFF_HOME: ${{ runner.temp }}/runoff-ci-home
+      TMPDIR: ${{ runner.temp }}/runoff-tmp
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -34,7 +34,7 @@ jobs:
         run: npm ci
 
       - name: Prepare isolated pipeline home
-        run: mkdir -p "$LLM_PIPELINE_HOME" "$TMPDIR"
+        run: mkdir -p "$RUNOFF_HOME" "$TMPDIR"
 
       - name: Run CI gates (ipc + gate2 + gate3 + unit tests)
         run: npm run ci:gates
@@ -58,7 +58,7 @@ jobs:
 
       - name: PR smoke gate
         env:
-          HAS_REAL_SMOKE_SECRETS: ${{ secrets.LLM_PIPELINE_REAL_CODEX_ARGV_JSON != '' }}
+          HAS_REAL_SMOKE_SECRETS: ${{ secrets.RUNOFF_REAL_CODEX_ARGV_JSON != '' }}
         run: |
           if [ "$HAS_REAL_SMOKE_SECRETS" = "true" ]; then
             echo "Secrets present — run strict smoke (no allow-skip). Requires codex/gemini on runner PATH."

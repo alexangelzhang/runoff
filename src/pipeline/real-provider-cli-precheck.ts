@@ -69,15 +69,15 @@ function isGeminiArgv(argv: string[]): boolean {
 
 /** Apply Gemini headless flags to env JSON before smoke (mutates process.env). */
 export function applyRealProviderArgvDefaults(): void {
-  const gemini = parseArgvJson("LLM_PIPELINE_REAL_GEMINI_ARGV_JSON");
+  const gemini = parseArgvJson("RUNOFF_REAL_GEMINI_ARGV_JSON");
   if (gemini) {
-    process.env.LLM_PIPELINE_REAL_GEMINI_ARGV_JSON = JSON.stringify(normalizeDelegateArgv(gemini));
+    process.env.RUNOFF_REAL_GEMINI_ARGV_JSON = JSON.stringify(normalizeDelegateArgv(gemini));
   }
 }
 
 export function precheckRealProviderCliEnv(): CliPrecheckIssue[] {
   const issues: CliPrecheckIssue[] = [];
-  for (const envVar of ["LLM_PIPELINE_REAL_CODEX_ARGV_JSON", "LLM_PIPELINE_REAL_GEMINI_ARGV_JSON"] as const) {
+  for (const envVar of ["RUNOFF_REAL_CODEX_ARGV_JSON", "RUNOFF_REAL_GEMINI_ARGV_JSON"] as const) {
     const argv = parseArgvJson(envVar);
     if (!argv) continue;
 

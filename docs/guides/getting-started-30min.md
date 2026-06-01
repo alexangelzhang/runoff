@@ -6,12 +6,12 @@ Goal: run a **mock pipeline** (no API keys), then understand how to point at a *
 
 ```bash
 bash scripts/shell/check-prereqs.sh   # or: npm run check-prereqs
-cd llm-pipeline && npm install
+cd runoff && npm install
 npm run setup:mcp -- --host cursor    # optional: MCP JSON for your IDE
 npm run demo
 ```
 
-You should see an **approved** mock run. Data lands under a temp `LLM_PIPELINE_HOME` (trace + experiment).
+You should see an **approved** mock run. Data lands under a temp `RUNOFF_HOME` (trace + experiment).
 
 ## 5–10 min — What just happened
 
@@ -20,7 +20,7 @@ You should see an **approved** mock run. Data lands under a temp `LLM_PIPELINE_H
 | `pipeline.config.json` | Declares steps, providers, deps |
 | MCP / `pipeline run` | Starts the DAG |
 | `scripts/python/task_runner.py` | Runs CLI providers in worktrees |
-| `~/.llm-pipeline/traces/` | Local execution history |
+| `~/.runoff/traces/` | Local execution history |
 
 Read: [`differentiation.md`](reference/differentiation.md) (why not LangGraph/CrewAI chat loops).
 
@@ -29,22 +29,22 @@ Read: [`differentiation.md`](reference/differentiation.md) (why not LangGraph/Cr
 1. Scaffold config (or copy an example):
 
 ```bash
-npm run pipeline:init -- --work-dir /path/to/your-repo --profile feature
-npm run pipeline:doctor -- --config /path/to/your-repo/pipeline.config.json
+npm run runoff:init -- --work-dir /path/to/your-repo --profile feature
+npm run runoff:doctor -- --config /path/to/your-repo/pipeline.config.json
 ```
 
 **Graphical editor (recommended):** providers + DAG + retry tabs:
 
 ```bash
-npm run pipeline:config:edit -- --config /path/to/your-repo/pipeline.config.json
+npm run runoff:config:edit -- --config /path/to/your-repo/pipeline.config.json
 ```
 
 Opens a browser → edit steps/providers/deps → **Save to config** (local HTTP, no MCP).
 
-2. From llm-pipeline checkout:
+2. From runoff checkout:
 
 ```bash
-npm run pipeline:run -- \
+npm run runoff:run -- \
   --prompt "Add a hello() function with a unit test" \
   --work-dir /path/to/your-repo \
   --config /path/to/your-repo/pipeline.config.json
@@ -60,7 +60,7 @@ npm run pipeline:run -- \
 
 ```bash
 npm run dev   # MCP — register in IDE per README
-# or inspect files under ~/.llm-pipeline/traces/
+# or inspect files under ~/.runoff/traces/
 ```
 
 ## Implement → review → retry loop

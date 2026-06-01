@@ -25,15 +25,15 @@ let origHome: string | undefined;
 
 test.beforeEach(() => {
   home = mkdtempSync(join(tmpdir(), "dreamify-test-"));
-  origHome = process.env.LLM_PIPELINE_HOME;
-  process.env.LLM_PIPELINE_HOME = home;
+  origHome = process.env.RUNOFF_HOME;
+  process.env.RUNOFF_HOME = home;
   resetPipelineMemoryRegistry();
   setDreamifyRetrievalOverride(null);
 });
 
 test.afterEach(() => {
-  if (origHome !== undefined) process.env.LLM_PIPELINE_HOME = origHome;
-  else delete process.env.LLM_PIPELINE_HOME;
+  if (origHome !== undefined) process.env.RUNOFF_HOME = origHome;
+  else delete process.env.RUNOFF_HOME;
   setDreamifyRetrievalOverride(null);
   rmSync(home, { recursive: true, force: true });
 });

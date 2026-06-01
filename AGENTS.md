@@ -1,10 +1,10 @@
-# AGENTS.md — llm-pipeline
+# AGENTS.md — runoff
 
 Instructions for AI coding agents (Cursor, Claude Code, Codex, etc.) working in this repository.
 
 ## What this project is
 
-**llm-pipeline** is an MCP server that orchestrates multi-step LLM/agent workflows over a user repository. The host agent calls MCP tools; this repo implements pipeline execution, not the host UI.
+**runoff** is an MCP server that orchestrates multi-step LLM/agent workflows over a user repository. The host agent calls MCP tools; this repo implements pipeline execution, not the host UI.
 
 - **Config-driven DAG:** `pipeline.config.json` defines steps, providers, dependencies, retries, routing, orchestration, runtime governance.
 - **Split runtime:** TypeScript owns orchestration, state, traces, governance; Python owns subprocess execution and git worktree isolation.

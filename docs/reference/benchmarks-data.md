@@ -68,7 +68,7 @@ The token cost ceiling is configurable: `orchestration.raceBudgetUSD` caps per-s
 - Mock outputs are deterministic; results are reproducible across runs.
 - Token counts reflect mock responses, not real LLM usage.
 - For real-provider data, run: `npm run smoke:real` (requires API keys).
-- Experiment data persisted to: `~/.llm-pipeline/experiments.jsonl`
+- Experiment data persisted to: `~/.runoff/experiments.jsonl`
 
 ---
 

@@ -25,13 +25,13 @@ export function resolveMemoryBackendConfig(
   const raw = config.orchestration?.memoryBackend;
   if (!raw || raw.type === "local") return { type: "local" };
 
-  const apiKey = raw.apiKey ?? process.env.LLM_PIPELINE_MEMORY_API_KEY;
-  const userId = raw.userId ?? process.env.LLM_PIPELINE_MEMORY_USER_ID;
+  const apiKey = raw.apiKey ?? process.env.RUNOFF_MEMORY_API_KEY;
+  const userId = raw.userId ?? process.env.RUNOFF_MEMORY_USER_ID;
 
   if (raw.type === "mem0") {
     const baseUrl =
       raw.baseUrl ??
-      (raw.variant === "oss" ? process.env.LLM_PIPELINE_MEM0_OSS_URL : process.env.LLM_PIPELINE_MEM0_URL);
+      (raw.variant === "oss" ? process.env.RUNOFF_MEM0_OSS_URL : process.env.RUNOFF_MEM0_URL);
     if (!baseUrl && !apiKey && raw.variant !== "oss") return { type: "local" };
     return {
       type: "mem0",
@@ -45,7 +45,7 @@ export function resolveMemoryBackendConfig(
   }
 
   if (raw.type === "zep") {
-    const baseUrl = raw.baseUrl ?? process.env.LLM_PIPELINE_ZEP_URL ?? "https://api.getzep.com/api/v2";
+    const baseUrl = raw.baseUrl ?? process.env.RUNOFF_ZEP_URL ?? "https://api.getzep.com/api/v2";
     if (!apiKey) return { type: "local" };
     return {
       type: "zep",
@@ -59,7 +59,7 @@ export function resolveMemoryBackendConfig(
   }
 
   if (raw.type === "http") {
-    const baseUrl = raw.baseUrl ?? process.env.LLM_PIPELINE_MEMORY_URL;
+    const baseUrl = raw.baseUrl ?? process.env.RUNOFF_MEMORY_URL;
     if (!baseUrl) return { type: "local" };
     return {
       type: "http",

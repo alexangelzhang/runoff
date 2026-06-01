@@ -62,8 +62,8 @@ function startWatcher(provider: string, homeDir: string): { child: ChildProcess;
     detached: true,
     env: {
       ...process.env,
-      LLM_PIPELINE_HOME: homeDir,
-      LLM_PIPELINE_MAX_CONCURRENT: "1",
+      RUNOFF_HOME: homeDir,
+      RUNOFF_MAX_CONCURRENT: "1",
     },
     stdio: ["ignore", "pipe", "pipe"],
   });
@@ -244,12 +244,12 @@ test("watcher smoke: agent-write runs in isolated worktree and reapplies patch t
 });
 
 test("watcher smoke: agent-write defer keeps source repo clean and returns workspace metadata", async () => {
-  const previousHome = process.env.LLM_PIPELINE_HOME;
+  const previousHome = process.env.RUNOFF_HOME;
   const sandboxDir = mkdtempSync(join(tmpdir(), "llm-watcher-defer-"));
   const homeDir = join(sandboxDir, "home");
   mkdirSync(homeDir, { recursive: true });
   const realHomeDir = realpathSync(homeDir);
-  process.env.LLM_PIPELINE_HOME = realHomeDir;
+  process.env.RUNOFF_HOME = realHomeDir;
 
   const repoDir = realpathSync(createGitRepo(sandboxDir));
   const notePath = join(repoDir, "note.txt");
@@ -304,8 +304,8 @@ test("watcher smoke: agent-write defer keeps source repo clean and returns works
     assert.equal(readFileSync(notePath, "utf-8"), "base\n");
   } finally {
     await stopWatcher(watcher.child);
-    if (previousHome === undefined) delete process.env.LLM_PIPELINE_HOME;
-    else process.env.LLM_PIPELINE_HOME = previousHome;
+    if (previousHome === undefined) delete process.env.RUNOFF_HOME;
+    else process.env.RUNOFF_HOME = previousHome;
     rmSync(sandboxDir, { recursive: true, force: true });
   }
 });

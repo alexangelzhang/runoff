@@ -1,5 +1,5 @@
 /**
- * P6 — Parse llm-pipeline AgentGraph Mermaid (flowchart TD) back to snapshot.
+ * P6 — Parse runoff AgentGraph Mermaid (flowchart TD) back to snapshot.
  */
 
 import { recomputeSnapshotWaves } from "./agent-graph-validate.js";

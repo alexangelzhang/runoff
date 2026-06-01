@@ -1,6 +1,6 @@
 /**
  * Pipeline execution trace recorder.
- * Writes structured JSON traces to ~/.llm-pipeline/traces/ for data flywheel analysis.
+ * Writes structured JSON traces to ~/.runoff/traces/ for data flywheel analysis.
  */
 
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
@@ -170,7 +170,7 @@ export function recordTrace(trace: PipelineTrace): void {
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
     logger.warn("trace", `Failed to write trace ${trace.id}: ${message}`);
-    if (process.env.LLM_PIPELINE_TRACE_STRICT === "1") {
+    if (process.env.RUNOFF_TRACE_STRICT === "1") {
       throw err;
     }
   }

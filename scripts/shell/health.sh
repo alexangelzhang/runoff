@@ -1,10 +1,10 @@
 #!/bin/bash
-# llm-pipeline Watcher Health Probe (Wave 3)
+# runoff Watcher Health Probe (Wave 3)
 
 TASKS_DIR="$(cd "$(dirname "$0")/../tasks" && pwd)"
 HEARTBEAT_FILE="$TASKS_DIR/heartbeat.txt"
 
-echo "Checking llm-pipeline watcher health..."
+echo "Checking runoff watcher health..."
 
 # 1. Check if process is running
 PID=$(pgrep -f "python3.*task_runner.py")

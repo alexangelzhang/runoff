@@ -77,10 +77,10 @@ test("getProviderCircuit: reuses breaker per provider name", () => {
   assert.equal(a, b);
 });
 
-test("open provider circuit persists under LLM_PIPELINE_HOME", async () => {
+test("open provider circuit persists under RUNOFF_HOME", async () => {
   const home = mkdtempSync(join(tmpdir(), "lp-circuit-persist-"));
-  const prevHome = process.env.LLM_PIPELINE_HOME;
-  process.env.LLM_PIPELINE_HOME = home;
+  const prevHome = process.env.RUNOFF_HOME;
+  process.env.RUNOFF_HOME = home;
   try {
     resetProviderCircuits();
     restoreProviderCircuitPersistenceState();
@@ -98,8 +98,8 @@ test("open provider circuit persists under LLM_PIPELINE_HOME", async () => {
     restoreProviderCircuitPersistenceState();
     assert.equal(isProviderAvailable("persist-provider"), false);
   } finally {
-    if (prevHome === undefined) delete process.env.LLM_PIPELINE_HOME;
-    else process.env.LLM_PIPELINE_HOME = prevHome;
+    if (prevHome === undefined) delete process.env.RUNOFF_HOME;
+    else process.env.RUNOFF_HOME = prevHome;
     rmSync(home, { recursive: true, force: true });
     resetProviderCircuits();
   }
@@ -107,8 +107,8 @@ test("open provider circuit persists under LLM_PIPELINE_HOME", async () => {
 
 test("restoreProviderCircuitPersistenceState clears in-memory circuits", () => {
   const home = mkdtempSync(join(tmpdir(), "circuit-restore-"));
-  const prevHome = process.env.LLM_PIPELINE_HOME;
-  process.env.LLM_PIPELINE_HOME = home;
+  const prevHome = process.env.RUNOFF_HOME;
+  process.env.RUNOFF_HOME = home;
   try {
     resetProviderCircuits();
     restoreProviderCircuitPersistenceState();
@@ -121,8 +121,8 @@ test("restoreProviderCircuitPersistenceState clears in-memory circuits", () => {
     if (existsSync(circuitFile)) rmSync(circuitFile);
     assert.equal(isProviderAvailable("p-leak"), true);
   } finally {
-    if (prevHome === undefined) delete process.env.LLM_PIPELINE_HOME;
-    else process.env.LLM_PIPELINE_HOME = prevHome;
+    if (prevHome === undefined) delete process.env.RUNOFF_HOME;
+    else process.env.RUNOFF_HOME = prevHome;
     rmSync(home, { recursive: true, force: true });
     resetProviderCircuits();
   }

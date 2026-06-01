@@ -102,7 +102,7 @@ async function tryZepSdkClient(config: ZepMemoryConfig): Promise<RemoteMemoryCli
     const Client = mod.ZepClient;
     if (!Client || !config.apiKey) return null;
     const client = new Client({ apiKey: config.apiKey });
-    const sessionId = config.sessionId ?? config.userId ?? "llm-pipeline-default";
+    const sessionId = config.sessionId ?? config.userId ?? "runoff-default";
     return {
       async push(entry: MemoryEntry): Promise<void> {
         const sid = config.sessionId ?? config.userId ?? sessionId;

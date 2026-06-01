@@ -9,7 +9,7 @@ import { mcpJson, mcpErrorFrom } from "./mcp-response.js";
 
 export function register(server: McpServer) {
   server.tool(
-    "llm_race_apply",
+    "runoff_race_apply",
     "Finalize a race: apply the winning candidate's changes to the source repo, clean up all candidate workspaces, and update the trace status.",
     {
       traceId: z.string().describe("The traceId returned by llm_run_pipeline in race mode"),
@@ -26,7 +26,7 @@ export function register(server: McpServer) {
   );
 
   server.tool(
-    "llm_race_abort",
+    "runoff_race_abort",
     "Abort a race session, reject all candidates, and clean up all candidate workspaces without applying anything.",
     {
       traceId: z.string().describe("The traceId returned by llm_run_pipeline in race mode"),

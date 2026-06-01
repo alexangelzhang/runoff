@@ -29,7 +29,7 @@ ROADMAP 旧版 Industry Benchmarks 多为 **E1 + 归纳**；本节战术表升�
 
 | 项目 | Repo | Ref (main) | Date (UTC) |
 |------|------|------------|------------|
-| **llm-pipeline** | local | `8ef46e624dfb2aaa382722474bac79d67586d20d` | workspace HEAD |
+| **runoff** | local | `8ef46e624dfb2aaa382722474bac79d67586d20d` | workspace HEAD |
 | OpenAI Agents SDK | [openai/openai-agents-python](https://github.com/openai/openai-agents-python) | `6d5b888f6f57b8356398bea883b45172fec54b95` | 2026-05-26 |
 | LangGraph | [langchain-ai/langgraph](https://github.com/langchain-ai/langgraph) | `d1e2ff0561a8b0b09212d0795c9d7b390a5de23a` | 2026-05-22 |
 | Google ADK | [google/adk-python](https://github.com/google/adk-python) | `7ad7994744de18f2394e4bcb961cd5c7a24afb4b` | 2026-05-22 |
@@ -37,7 +37,7 @@ ROADMAP 旧版 Industry Benchmarks 多为 **E1 + 归纳**；本节战术表升�
 | DeerFlow | [bytedance/deer-flow](https://github.com/bytedance/deer-flow) | `f68bcb771c01caa53ba4b3dd59b41ebb00d00cfa` | 2026-05-26 |
 | AutoGen | [microsoft/autogen](https://github.com/microsoft/autogen) | *(add via refresh-benchmark-pins)* | — |
 
-**AutoGen（战略备注）：** 对话式 multi-agent 见长；与 llm-pipeline **repo-native DAG + worktree/race** 场景正交。用户向对比见 [`differentiation.md`](reference/differentiation.md)。
+**AutoGen（战略备注）：** 对话式 multi-agent 见长；与 runoff **repo-native DAG + worktree/race** 场景正交。用户向对比见 [`differentiation.md`](reference/differentiation.md)。
 
 刷新：`npm run refresh-benchmark-pins`（或 `./scripts/refresh-benchmark-pins.sh`）→ 更新 `benchmark-pins.json` → 复核下文战术表链接中的 SHA。
 
@@ -55,7 +55,7 @@ ROADMAP 旧版 Industry Benchmarks 多为 **E1 + 归纳**；本节战术表升�
 
 ### 1.1 Vision 五层 — 概念映射
 
-| Vision 层 | 战略职责 | OpenAI Agents SDK | LangGraph | Google ADK | CrewAI | llm-pipeline |
+| Vision 层 | 战略职责 | OpenAI Agents SDK | LangGraph | Google ADK | CrewAI | runoff |
 |-----------|----------|-------------------|-----------|------------|--------|--------------|
 | **Config** | 声明拓扑与策略 | Examples + agent defs | Graph builder code / YAML | `agent_config` / YAML | Crew `@Crew` 装饰器 | `pipeline.config.json` |
 | **AgentGraph** | 运行时图 SoT | 隐式（handoff 链） | **StateGraph** 显式 | Agent 树 + workflow agents | Flow `@router` | `agent-graph.ts`（Config 编译） |
@@ -67,7 +67,7 @@ ROADMAP 旧版 Industry Benchmarks 多为 **E1 + 归纳**；本节战术表升�
 
 ### 1.2 能力矩阵（战略）
 
-| 维度 | llm-pipeline | 业界典型 | 战略态势 |
+| 维度 | runoff | 业界典型 | 战略态势 |
 |------|--------------|----------|----------|
 | DAG / 拓扑执行 | ✅ Config DAG | LangGraph StateGraph, ADK Sequential | 对齐 |
 | 并行 wave | ✅ stage 并行 | ADK ParallelAgent, LangGraph 并行 superstep | 对齐 |
@@ -95,7 +95,7 @@ ROADMAP 旧版 Industry Benchmarks 多为 **E1 + 归纳**；本节战术表升�
 
 链接格式：`https://github.com/{owner}/{repo}/blob/{ref}/{path}`
 
-### 2.1 llm-pipeline 锚点（`8ef46e6`）
+### 2.1 runoff 锚点（`8ef46e6`）
 
 | Concern | 路径 |
 |---------|------|
@@ -176,7 +176,7 @@ ROADMAP 旧版 Industry Benchmarks 多为 **E1 + 归纳**；本节战术表升�
 
 ## 3. 战略 × 战术 合表（核心 Concern）
 
-| Concern | 战略参考 | 战术参考 (E2 示例) | llm-pipeline (E2) | 态势 |
+| Concern | 战略参考 | 战术参考 (E2 示例) | runoff (E2) | 态势 |
 |---------|----------|-------------------|-------------------|------|
 | 图 / DAG 定义 | LangGraph StateGraph | `graph/state.py` | `agent-graph.ts`, `dag.ts`, `config.ts` | 对齐 |
 | 执行编排 | ADK Sequential | `sequential_agent.py` | `orchestrator.ts`, `pipeline-runner.ts` | 对齐 |

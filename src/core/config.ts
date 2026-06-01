@@ -152,7 +152,7 @@ export type GovernanceConfig = {
 export type PipelineRuntimeConfig = {
   /** Pipeline-wide USD budget; exceeding aborts the run (CostGovernor). */
   costBudgetUSD?: number;
-  /** `file` persists RunStore/EventLog/MessageBus under ~/.llm-pipeline/control-plane. */
+  /** `file` persists RunStore/EventLog/MessageBus under ~/.runoff/control-plane. */
   controlPlane?: "memory" | "file";
   governance?: GovernanceConfig;
   /** Phase 8.2.2: enable semantic prompt similarity cache in llm_run_step. */

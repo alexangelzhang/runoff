@@ -1,4 +1,4 @@
-# llm-pipeline Roadmap
+# runoff Roadmap
 
 > Last updated: 2026-05-26 · **Executive summary only** — Phase 0–8 detail: [docs/history/roadmap-delivered-phases.md](docs/history/roadmap-delivered-phases.md)
 

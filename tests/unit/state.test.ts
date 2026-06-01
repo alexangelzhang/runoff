@@ -19,13 +19,13 @@ import {
 } from "../../src/core/state.ts";
 
 function withPipelineHome(fn: (homeDir: string) => void | Promise<void>): Promise<void> | void {
-  const previousHome = process.env.LLM_PIPELINE_HOME;
-  const homeDir = mkdtempSync(join(tmpdir(), "llm-pipeline-test-"));
-  process.env.LLM_PIPELINE_HOME = homeDir;
+  const previousHome = process.env.RUNOFF_HOME;
+  const homeDir = mkdtempSync(join(tmpdir(), "runoff-test-"));
+  process.env.RUNOFF_HOME = homeDir;
 
   const cleanup = () => {
-    if (previousHome === undefined) delete process.env.LLM_PIPELINE_HOME;
-    else process.env.LLM_PIPELINE_HOME = previousHome;
+    if (previousHome === undefined) delete process.env.RUNOFF_HOME;
+    else process.env.RUNOFF_HOME = previousHome;
     rmSync(homeDir, { recursive: true, force: true });
   };
 

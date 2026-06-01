@@ -1,7 +1,7 @@
 /**
  * Structured Experiment Log (autoresearch-inspired).
  *
- * Append-only JSONL log at ~/.llm-pipeline/experiments.jsonl.
+ * Append-only JSONL log at ~/.runoff/experiments.jsonl.
  * Each entry records one pipeline run's outcome for A/B comparison.
  */
 

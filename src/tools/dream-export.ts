@@ -11,8 +11,8 @@ import { mcpJson, mcpErrorFrom } from "./mcp-response.js";
 
 export function register(server: McpServer) {
   server.tool(
-    "llm_dream_export",
-    "Export pattern/lesson/entity memory to ~/.llm-pipeline/dream-export.jsonl for manual external ingest.",
+    "runoff_dream_export",
+    "Export pattern/lesson/entity memory to ~/.runoff/dream-export.jsonl for manual external ingest.",
     {
       project: z.string().optional().describe("Memory scope.project (default: default)"),
       limit: z.number().optional().describe("Max memory entries to scan"),

@@ -52,9 +52,9 @@ function writePipelineReadme(workDir: string, profile: InitProfile): void {
 
 Profile: **${profile}** (created by \`pipeline init\`).
 
-- Edit graph: \`npm run pipeline:config:edit -- --config pipeline.config.json\` (from llm-pipeline checkout)
+- Edit graph: \`npm run pipeline:config:edit -- --config pipeline.config.json\` (from runoff checkout)
 - Health check: \`npm run pipeline:doctor -- --config pipeline.config.json\`
-- Run: see [llm-pipeline getting started](https://github.com/OWNER/REPO/blob/main/docs/guides/getting-started-30min.md)
+- Run: see [runoff getting started](https://github.com/OWNER/REPO/blob/main/docs/guides/getting-started-30min.md)
 `;
   writeFileSync(path, body, "utf-8");
 }

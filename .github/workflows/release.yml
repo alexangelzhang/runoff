@@ -1,8 +1,8 @@
 name: Release
 
 # Tag releases require green CI gates + pre-release real-provider smoke (self-hosted runner).
-# Configure repo secrets: LLM_PIPELINE_REAL_CODEX_ARGV_JSON, LLM_PIPELINE_REAL_GEMINI_ARGV_JSON
-# Runner labels: self-hosted, llm-pipeline-real-smoke
+# Configure repo secrets: RUNOFF_REAL_CODEX_ARGV_JSON, RUNOFF_REAL_GEMINI_ARGV_JSON
+# Runner labels: self-hosted, runoff-real-smoke
 
 on:
   push:

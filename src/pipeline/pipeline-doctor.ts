@@ -130,7 +130,7 @@ export function runDoctor(options?: {
     checks.push({
       name: "workspace-orphans",
       status: "ok",
-      message: "No unmanaged session-* dirs under ~/.llm-pipeline/workspaces",
+      message: "No unmanaged session-* dirs under ~/.runoff/workspaces",
     });
   } else {
     const preview = orphans
@@ -159,7 +159,7 @@ export function runDoctor(options?: {
 }
 
 export function formatDoctorReport(report: DoctorReport): string {
-  const lines = ["=== llm-pipeline doctor ===", ""];
+  const lines = ["=== runoff doctor ===", ""];
   for (const c of report.checks) {
     const tag = c.status === "ok" ? "OK" : c.status === "warn" ? "WARN" : "FAIL";
     lines.push(`[${tag}] ${c.name}: ${c.message}`);

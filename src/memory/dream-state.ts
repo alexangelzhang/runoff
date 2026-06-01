@@ -1,5 +1,5 @@
 /**
- * Dream worker state (M1 placeholder) — ~/.llm-pipeline/dream-state.json
+ * Dream worker state (M1 placeholder) — ~/.runoff/dream-state.json
  */
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";

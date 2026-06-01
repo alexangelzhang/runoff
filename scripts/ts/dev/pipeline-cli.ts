@@ -1,6 +1,6 @@
 #!/usr/bin/env npx tsx
 /**
- * llm-pipeline CLI (no MCP host required).
+ * runoff CLI (no MCP host required).
  *
  *   pipeline run | init | doctor | config edit | config validate
  *   pipeline traces list|show|tail | observability ui
@@ -34,7 +34,7 @@ const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), "../../..");
 const INIT_PROFILES = ["mock", "feature", "bugfix", "refactor", "cli-detected"] as const;
 
 function printHelp(): void {
-  console.log(`llm-pipeline CLI
+  console.log(`runoff CLI
 
 Usage:
   pipeline run --prompt <text> --work-dir <git-repo> [--config <path>]
@@ -138,19 +138,19 @@ async function cmdRun(args: CliArgs): Promise<void> {
   const workDir = resolve(args.workDir);
   if (!existsSync(workDir)) throw new Error(`work-dir not found: ${workDir}`);
 
-  if (args.home) process.env.LLM_PIPELINE_HOME = resolve(args.home);
+  if (args.home) process.env.RUNOFF_HOME = resolve(args.home);
 
   const configPath = resolve(args.config ?? join(workDir, "pipeline.config.json"));
   if (!existsSync(configPath)) {
     throw new Error(`Config not found: ${configPath}\nRun: npm run pipeline:init -- --work-dir ${workDir}`);
   }
 
-  const runDir = mkdtempSync(join(tmpdir(), "llm-pipeline-cli-cwd-"));
+  const runDir = mkdtempSync(join(tmpdir(), "runoff-cli-cwd-"));
   cpSync(configPath, join(runDir, "pipeline.config.json"));
   process.chdir(runDir);
   clearConfigCache();
 
-  console.log("llm-pipeline run");
+  console.log("runoff run");
   console.log(`  work-dir:  ${workDir}`);
   console.log(`  config:    ${configPath}`);
   console.log(`  data home: ${getPipelineHomeDir()}\n`);
@@ -247,7 +247,7 @@ function cmdTraces(args: CliArgs): void {
 }
 
 async function cmdObservabilityUi(args: CliArgs): Promise<void> {
-  if (args.home) process.env.LLM_PIPELINE_HOME = resolve(args.home);
+  if (args.home) process.env.RUNOFF_HOME = resolve(args.home);
   const handle = await startObservabilityUiServer({ port: args.port });
   console.log("Observability UI");
   console.log(`  url:  ${handle.url}`);

@@ -1,11 +1,11 @@
 ---
 name: dev-pipeline
-description: "llm-pipeline MCP v3 — multi-step code pipelines, traces, memory, dream, race mode, and agent graph"
+description: "runoff MCP v3 — multi-step code pipelines, traces, memory, dream, race mode, and agent graph"
 ---
 
 # Dev Pipeline Skill
 
-You orchestrate **llm-pipeline** (MCP server v3.0). The host calls MCP tools; this skill tells you **which tool when**.
+You orchestrate **runoff** (MCP server v3.0). The host calls MCP tools; this skill tells you **which tool when**.
 
 **First action on every session:** `llm_show_config` — providers, pipeline steps, routing, memory backend, dreamify state.
 
@@ -61,11 +61,11 @@ Example configs: [examples/configs/](../examples/configs/) · scaffold: `npm run
 | Tool | When to use |
 |------|-------------|
 | `llm_query_traces` | Find runs by status/time; `traceId` for one run; `format=postmortem` on failures |
-| `llm_score_trace` | Record numeric quality score → `~/.llm-pipeline/traces/scores.jsonl`; read back via `llm_query_traces traceId=<id> format=postmortem` → `humanScores` |
+| `llm_score_trace` | Record numeric quality score → `~/.runoff/traces/scores.jsonl`; read back via `llm_query_traces traceId=<id> format=postmortem` → `humanScores` |
 | `llm_query_experiments` | A/B variants; `format=eval-report` for winner recommendation |
 | `llm_memory_status` | Before enabling Mem0/Zep; `probe=true` checks remote reachability |
 | `llm_query_memory` | Hybrid search (local + remote); ops/debug — **not** the hot pipeline read path |
-| `llm_dream_run` | After several runs — offline ADD/UPDATE/FORGET on `~/.llm-pipeline/memory/` |
+| `llm_dream_run` | After several runs — offline ADD/UPDATE/FORGET on `~/.runoff/memory/` |
 | `llm_dreamify_tune` | After experiments exist — tune semantic threshold / decay / limits |
 | `llm_dream_export` | Export jsonl for manual external knowledge-base ingest |
 

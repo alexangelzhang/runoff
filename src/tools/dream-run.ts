@@ -10,7 +10,7 @@ import { mcpJson, mcpErrorFrom } from "./mcp-response.js";
 
 export function register(server: McpServer) {
   server.tool(
-    "llm_dream_run",
+    "runoff_dream_run",
     "Run offline Dream worker: structure traces (A), apply rule evolution (B), optional LLM enrich (C). " +
       "Writes dream-audit.jsonl and updates dream-state.json lastDreamAt.",
     {

@@ -12,9 +12,9 @@ import { mcpError, mcpJson, mcpErrorFrom } from "./mcp-response.js";
 
 export function register(server: McpServer) {
   server.tool(
-    "llm_dreamify_tune",
+    "runoff_dreamify_tune",
     "Tune pattern retrieval hyperparameters (semantic threshold, limit, decay, file-link overlap) " +
-      "from experiments.jsonl + traces. Writes ~/.llm-pipeline/dreamify/best-params.json when improved.",
+      "from experiments.jsonl + traces. Writes ~/.runoff/dreamify/best-params.json when improved.",
     {
       experimentId: z.string().describe("A/B experiment id (prompt hash bucket from pipeline hooks)"),
       dryRun: z.boolean().optional().describe("Score only; do not write best-params.json"),

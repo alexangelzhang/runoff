@@ -1,13 +1,13 @@
 # Security model (self-hosted)
 
-llm-pipeline is a **local orchestrator**. It does not host multi-tenant SaaS. Threat model below is for teams running MCP + CLI on developer machines or CI.
+runoff is a **local orchestrator**. It does not host multi-tenant SaaS. Threat model below is for teams running MCP + CLI on developer machines or CI.
 
 ## Trust boundaries
 
 | Boundary | What runs | Trust assumption |
 |----------|-----------|------------------|
 | MCP host (IDE) | Invokes `llm_run_pipeline` | User trusts the IDE |
-| llm-pipeline (Node) | DAG, governance, trace | Same user/CI as host |
+| runoff (Node) | DAG, governance, trace | Same user/CI as host |
 | `task_runner.py` | Spawns **your** coding-agent CLI | **Executes arbitrary provider command** from config |
 | Target git repo | Worktree + patch apply | Repo is the asset to protect |
 
@@ -19,7 +19,7 @@ llm-pipeline is a **local orchestrator**. It does not host multi-tenant SaaS. Th
 
 ## Filesystem and locks
 
-- `LLM_PIPELINE_HOME` (default `~/.llm-pipeline/`): traces, sessions, experiments, checkpoints — may contain prompts and diffs.
+- `RUNOFF_HOME` (default `~/.runoff/`): traces, sessions, experiments, checkpoints — may contain prompts and diffs.
 - `workspace_manager.py`: cross-process **repo lock** (exclusive by default; shared key only when configured).
 - Patches applied via temp files under pipeline home; see [execution-layers.md](architecture/execution-layers.md).
 

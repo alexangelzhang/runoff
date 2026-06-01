@@ -1,6 +1,6 @@
 # Stability boundaries (S3.5)
 
-What **llm-pipeline** guarantees vs what is **out of scope** for self-hosted MCP usage.
+What **runoff** guarantees vs what is **out of scope** for self-hosted MCP usage.
 
 ## Guaranteed (main path)
 
@@ -16,7 +16,7 @@ What **llm-pipeline** guarantees vs what is **out of scope** for self-hosted MCP
 
 | Area | Why |
 |------|-----|
-| Multi-tenant / multi-writer HA | Single-machine `RepoLock` under `~/.llm-pipeline/locks` |
+| Multi-tenant / multi-writer HA | Single-machine `RepoLock` under `~/.runoff/locks` |
 | PR green ⇒ real Codex/Gemini | PR smoke may `allow-skip` until secrets + self-hosted runner |
 | Experimental features | A2A federation, Dream, Dreamify — off in `examples/` (see `npm run check:examples-experimental`) |
 | Hosted SaaS SLA | MCP + local data only |

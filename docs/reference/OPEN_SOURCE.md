@@ -10,7 +10,7 @@
 ## 5 分钟体验（零 API Key）
 
 ```bash
-git clone <repo-url> llm-pipeline && cd llm-pipeline
+git clone <repo-url> runoff && cd runoff
 npm install
 npm run demo
 ```
@@ -21,7 +21,7 @@ npm run demo
 |------|------|
 | 复制 `examples/configs/cli.config.json` | [`coding-agent-backends.md`](guides/coding-agent-backends.md) |
 | Codex / Gemini / Claude Code / OpenCode | 同上 |
-| 无 IDE：`pipeline run` | `npm run pipeline:run -- --prompt "…" --work-dir .` |
+| 无 IDE：`pipeline run` | `npm run runoff:run -- --prompt "…" --work-dir .` |
 
 ## 稳定
 
@@ -36,7 +36,7 @@ npm run demo
 
 详见 [`ci-branch-protection.md`](operations/ci-branch-protection.md)、[`supported-backends.md`](reference/supported-backends.md)、[`timeouts.md`](operations/timeouts.md)、[`stability-boundaries.md`](operations/stability-boundaries.md)。
 
-| 本地 soak（可选） | `npm run pipeline:soak` |
+| 本地 soak（可选） | `npm run runoff:soak` |
 | OTel 导出自检 | `npm run verify:otel-export` |
 | OTel Collector（无 Docker） | `npm run otel-collector:start` · [`observability-collector-local.md`](operations/observability-collector-local.md) |
 | 示例禁实验特性 | `npm run check:examples-experimental` |
@@ -45,8 +45,8 @@ npm run demo
 
 | 数据 | 路径 | MCP |
 |------|------|-----|
-| Trace | `~/.llm-pipeline/traces/` | `llm_query_traces` |
-| Experiment | `~/.llm-pipeline/experiments.jsonl` | `llm_query_experiments` |
+| Trace | `~/.runoff/traces/` | `llm_query_traces` |
+| Experiment | `~/.runoff/experiments.jsonl` | `llm_query_experiments` |
 
 详见 [`observability.md`](features/observability.md)。
 
@@ -59,7 +59,7 @@ npm run demo
 - [x] `docs/guides/coding-agent-backends.md`
 - [x] `examples/configs/quickstart.config.json` + `examples/configs/cli.config.json`
 - [x] `npm run demo`
-- [x] `scripts/ts/dev/pipeline-cli.ts` / `npm run pipeline:run`
+- [x] `scripts/ts/dev/pipeline-cli.ts` / `npm run runoff:run`
 - [x] `.github/workflows/release.yml`（tag `v*`）
 - [ ] CI badge URL（发布到 GitHub 后替换 README 中的 `<repo-url>`）
 - [x] `npm run typecheck` 全绿（CI `ci:gates` 已包含）

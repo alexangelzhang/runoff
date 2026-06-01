@@ -85,12 +85,12 @@ test("assertResumeCompatible rejects awaiting_approval without operator decision
 });
 
 test("mock race defer: apply then checkpoint is approved", async () => {
-  const previousHome = process.env.LLM_PIPELINE_HOME;
+  const previousHome = process.env.RUNOFF_HOME;
   const sandbox = mkdtempSync(join(tmpdir(), "lp-resume-race-"));
-  process.env.LLM_PIPELINE_HOME = join(sandbox, "home");
+  process.env.RUNOFF_HOME = join(sandbox, "home");
   const configDir = join(sandbox, "cfg");
   const repoDir = join(sandbox, "repo");
-  mkdirSync(join(process.env.LLM_PIPELINE_HOME!), { recursive: true });
+  mkdirSync(join(process.env.RUNOFF_HOME!), { recursive: true });
   mkdirSync(configDir, { recursive: true });
   mkdirSync(join(repoDir, "src"), { recursive: true });
   execFileSync("git", ["init"], { cwd: repoDir });
@@ -140,8 +140,8 @@ test("mock race defer: apply then checkpoint is approved", async () => {
   } finally {
     clearConfigCache();
     process.chdir(previousCwd);
-    if (previousHome === undefined) delete process.env.LLM_PIPELINE_HOME;
-    else process.env.LLM_PIPELINE_HOME = previousHome;
+    if (previousHome === undefined) delete process.env.RUNOFF_HOME;
+    else process.env.RUNOFF_HOME = previousHome;
     rmSync(sandbox, { recursive: true, force: true });
   }
 });

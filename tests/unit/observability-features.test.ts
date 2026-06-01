@@ -20,14 +20,14 @@ describe("observability P0–P2", () => {
   let tmpDir: string;
 
   beforeEach(() => {
-    prevHome = process.env.LLM_PIPELINE_HOME;
+    prevHome = process.env.RUNOFF_HOME;
     tmpDir = mkdtempSync(join(tmpdir(), "llm-obs-feat-"));
-    process.env.LLM_PIPELINE_HOME = tmpDir;
+    process.env.RUNOFF_HOME = tmpDir;
   });
 
   afterEach(() => {
-    if (prevHome === undefined) delete process.env.LLM_PIPELINE_HOME;
-    else process.env.LLM_PIPELINE_HOME = prevHome;
+    if (prevHome === undefined) delete process.env.RUNOFF_HOME;
+    else process.env.RUNOFF_HOME = prevHome;
     rmSync(tmpDir, { recursive: true, force: true });
   });
 

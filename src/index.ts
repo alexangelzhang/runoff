@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * llm-pipeline MCP server entry point.
+ * runoff MCP server entry point.
  * Tool implementations live in src/tools/*.ts.
  */
 
@@ -28,7 +28,7 @@ import { logger } from "./core/logger.js";
 const initialConfig = loadConfig();
 
 const server = new McpServer({
-  name: "llm-pipeline",
+  name: "runoff",
   version: "3.0.0",
 });
 
@@ -50,11 +50,11 @@ registerShowAgentGraph(server);
 async function main() {
   const transport = new StdioServerTransport();
   await server.connect(transport);
-  logger.info("server", "llm-pipeline MCP server v3.0 running on stdio");
+  logger.info("server", "runoff MCP server v3.0 running on stdio");
 
   // Graceful shutdown
   const shutdown = () => {
-    logger.info("server", "llm-pipeline MCP server shutting down...");
+    logger.info("server", "runoff MCP server shutting down...");
     // Race sessions currently store patch metadata only; no live workspace handles to destroy here.
     raceSessions.clear();
     for (const ws of activeWorkspaces) {

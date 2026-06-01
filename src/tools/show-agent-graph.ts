@@ -20,7 +20,7 @@ import { mcpJson, mcpErrorFrom } from "./mcp-response.js";
 
 export function register(server: McpServer) {
   server.tool(
-    "llm_show_agent_graph",
+    "runoff_show_agent_graph",
     "Export or patch the runtime AgentGraph (JSON / Mermaid / HTML / editor / canvas). Config pipeline remains declaration SoT.",
     {
       action: z
@@ -30,7 +30,7 @@ export function register(server: McpServer) {
       format: z
         .enum(["json", "mermaid", "html", "editor", "canvas"])
         .optional()
-        .describe("Output format for show; editor/canvas write HTML under ~/.llm-pipeline/"),
+        .describe("Output format for show; editor/canvas write HTML under ~/.runoff/"),
       writeEditor: z
         .boolean()
         .optional()
@@ -83,11 +83,11 @@ export function register(server: McpServer) {
         }
         if (format === "html") {
           return {
-            content: [{ type: "text", text: agentGraphToHtml(snap, "llm-pipeline AgentGraph") }],
+            content: [{ type: "text", text: agentGraphToHtml(snap, "runoff AgentGraph") }],
           };
         }
         if (format === "editor") {
-          const html = agentGraphToEditorHtml(snap, "llm-pipeline AgentGraph");
+          const html = agentGraphToEditorHtml(snap, "runoff AgentGraph");
           const editorPath = getAgentGraphEditorPath();
           if (writeEditor) {
             mkdirSync(dirname(editorPath), { recursive: true });
@@ -105,7 +105,7 @@ export function register(server: McpServer) {
           };
         }
         if (format === "canvas") {
-          const html = agentGraphToCanvasHtml(snap, "llm-pipeline AgentGraph Canvas");
+          const html = agentGraphToCanvasHtml(snap, "runoff AgentGraph Canvas");
           const canvasPath = getAgentGraphCanvasPath();
           if (writeEditor) {
             mkdirSync(dirname(canvasPath), { recursive: true });

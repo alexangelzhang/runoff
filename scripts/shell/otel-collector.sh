@@ -1,16 +1,16 @@
 #!/usr/bin/env bash
-# Start/stop a local OpenTelemetry Collector for llm-pipeline OTLP/HTTP smoke tests.
+# Start/stop a local OpenTelemetry Collector for runoff OTLP/HTTP smoke tests.
 #
 # Does NOT require Docker. Resolution order (mode=auto):
-#   1. Already listening on LLM_PIPELINE_OTEL_PORT (default 4318)
+#   1. Already listening on RUNOFF_OTEL_PORT (default 4318)
 #   2. otelcol-contrib / otelcol on PATH (e.g. brew install opentelemetry-collector)
-#   3. ~/.llm-pipeline/bin/otelcol-contrib (from a prior download)
-#   4. Download official binary when LLM_PIPELINE_OTEL_DOWNLOAD=1
+#   3. ~/.runoff/bin/otelcol-contrib (from a prior download)
+#   4. Download official binary when RUNOFF_OTEL_DOWNLOAD=1
 #   5. Docker Compose (only if docker is available and earlier steps failed)
 #
 # Corporate / shared collector (no local install):
 #   export OTEL_EXPORTER_OTLP_ENDPOINT=https://your-collector:4318
-#   export LLM_PIPELINE_OTEL_SKIP_START=1
+#   export RUNOFF_OTEL_SKIP_START=1
 #   npm run verify:otel-collector
 #
 # Usage:
@@ -19,17 +19,17 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-CONFIG="${LLM_PIPELINE_OTEL_CONFIG:-$ROOT/config/otel-collector-config.yaml}"
-COLLECTOR_VERSION="${LLM_PIPELINE_OTEL_COLLECTOR_VERSION:-0.120.0}"
-HOST="${LLM_PIPELINE_OTEL_HOST:-127.0.0.1}"
-PORT="${LLM_PIPELINE_OTEL_PORT:-4318}"
+CONFIG="${RUNOFF_OTEL_CONFIG:-$ROOT/config/otel-collector-config.yaml}"
+COLLECTOR_VERSION="${RUNOFF_OTEL_COLLECTOR_VERSION:-0.120.0}"
+HOST="${RUNOFF_OTEL_HOST:-127.0.0.1}"
+PORT="${RUNOFF_OTEL_PORT:-4318}"
 ENDPOINT="${OTEL_EXPORTER_OTLP_ENDPOINT:-http://${HOST}:${PORT}}"
-MODE_FILE="${LLM_PIPELINE_HOME:-$HOME/.llm-pipeline}/otel-collector.mode"
-PID_FILE="${LLM_PIPELINE_HOME:-$HOME/.llm-pipeline}/otel-collector.pid"
-LOG_FILE="${LLM_PIPELINE_HOME:-$HOME/.llm-pipeline}/otel-collector.log"
-BIN_DIR="${LLM_PIPELINE_HOME:-$HOME/.llm-pipeline}/bin"
-REQUIRED="${LLM_PIPELINE_OTEL_COLLECTOR_REQUIRED:-0}"
-START_MODE="${LLM_PIPELINE_OTEL_START_MODE:-auto}"
+MODE_FILE="${RUNOFF_HOME:-$HOME/.runoff}/otel-collector.mode"
+PID_FILE="${RUNOFF_HOME:-$HOME/.runoff}/otel-collector.pid"
+LOG_FILE="${RUNOFF_HOME:-$HOME/.runoff}/otel-collector.log"
+BIN_DIR="${RUNOFF_HOME:-$HOME/.runoff}/bin"
+REQUIRED="${RUNOFF_OTEL_COLLECTOR_REQUIRED:-0}"
+START_MODE="${RUNOFF_OTEL_START_MODE:-auto}"
 
 mkdir -p "$(dirname "$MODE_FILE")" "$BIN_DIR"
 
@@ -88,8 +88,8 @@ wait_for_ready() {
 
 resolve_collector_bin() {
   local name
-  if [[ -n "${LLM_PIPELINE_OTEL_BIN:-}" && -x "${LLM_PIPELINE_OTEL_BIN}" ]]; then
-    echo "${LLM_PIPELINE_OTEL_BIN}"
+  if [[ -n "${RUNOFF_OTEL_BIN:-}" && -x "${RUNOFF_OTEL_BIN}" ]]; then
+    echo "${RUNOFF_OTEL_BIN}"
     return 0
   fi
   for name in otelcol-contrib otelcol; do
@@ -106,7 +106,7 @@ resolve_collector_bin() {
 }
 
 reclaim_port_if_needed() {
-  [[ "${LLM_PIPELINE_OTEL_RECLAIM_PORT:-0}" == "1" ]] || return 0
+  [[ "${RUNOFF_OTEL_RECLAIM_PORT:-0}" == "1" ]] || return 0
   if ! probe_port; then
     return 0
   fi
@@ -140,7 +140,7 @@ download_collector_bin() {
   esac
 
   asset="otelcol-contrib_${COLLECTOR_VERSION}_${os}_${arch}"
-  url="${LLM_PIPELINE_OTEL_DOWNLOAD_URL:-https://github.com/open-telemetry/opentelemetry-collector-releases/releases/download/v${COLLECTOR_VERSION}/${asset}.tar.gz}"
+  url="${RUNOFF_OTEL_DOWNLOAD_URL:-https://github.com/open-telemetry/opentelemetry-collector-releases/releases/download/v${COLLECTOR_VERSION}/${asset}.tar.gz}"
 
   if ! command -v curl &>/dev/null; then
     die "curl required to download collector (or install otelcol-contrib manually)"
@@ -165,7 +165,7 @@ download_collector_bin() {
 start_native() {
   local bin
   if ! bin="$(resolve_collector_bin)"; then
-    if [[ "${LLM_PIPELINE_OTEL_DOWNLOAD:-0}" == "1" ]]; then
+    if [[ "${RUNOFF_OTEL_DOWNLOAD:-0}" == "1" ]]; then
       download_collector_bin
       bin="$(resolve_collector_bin)" || die "download succeeded but binary missing"
     else
@@ -222,8 +222,8 @@ stop_docker() {
 cmd_start() {
   apply_endpoint_host_port
 
-  if [[ "${LLM_PIPELINE_OTEL_SKIP_START:-0}" == "1" ]]; then
-    echo "otel-collector: LLM_PIPELINE_OTEL_SKIP_START=1 — assuming external collector at $ENDPOINT"
+  if [[ "${RUNOFF_OTEL_SKIP_START:-0}" == "1" ]]; then
+    echo "otel-collector: RUNOFF_OTEL_SKIP_START=1 — assuming external collector at $ENDPOINT"
     if probe_port; then
       echo "otel-collector: port ${PORT} reachable"
       return 0
@@ -246,7 +246,7 @@ cmd_start() {
 
   case "$START_MODE" in
     native)
-      start_native || fail_if_required "native start failed (install otelcol-contrib or set LLM_PIPELINE_OTEL_DOWNLOAD=1)"
+      start_native || fail_if_required "native start failed (install otelcol-contrib or set RUNOFF_OTEL_DOWNLOAD=1)"
       ;;
     docker)
       start_docker || fail_if_required "docker start failed"
@@ -256,14 +256,14 @@ cmd_start() {
         :
       elif start_docker; then
         :
-      elif [[ "${LLM_PIPELINE_OTEL_DOWNLOAD:-0}" == "1" ]]; then
+      elif [[ "${RUNOFF_OTEL_DOWNLOAD:-0}" == "1" ]]; then
         start_native || fail_if_required "auto start failed after download"
       else
-        fail_if_required "no collector on PATH and LLM_PIPELINE_OTEL_DOWNLOAD not set. Options: brew install opentelemetry-collector; LLM_PIPELINE_OTEL_DOWNLOAD=1 npm run otel-collector:start; docker compose -f docker-compose.observability.yml up -d; or point OTEL_EXPORTER_OTLP_ENDPOINT at an existing collector with LLM_PIPELINE_OTEL_SKIP_START=1"
+        fail_if_required "no collector on PATH and RUNOFF_OTEL_DOWNLOAD not set. Options: brew install opentelemetry-collector; RUNOFF_OTEL_DOWNLOAD=1 npm run otel-collector:start; docker compose -f docker-compose.observability.yml up -d; or point OTEL_EXPORTER_OTLP_ENDPOINT at an existing collector with RUNOFF_OTEL_SKIP_START=1"
       fi
       ;;
     *)
-      die "unknown LLM_PIPELINE_OTEL_START_MODE=$START_MODE (use auto|native|docker)"
+      die "unknown RUNOFF_OTEL_START_MODE=$START_MODE (use auto|native|docker)"
       ;;
   esac
 }
@@ -290,7 +290,7 @@ cmd_status() {
   fi
   echo "endpoint: $ENDPOINT"
   echo "config:   $CONFIG"
-  echo "home:     ${LLM_PIPELINE_HOME:-$HOME/.llm-pipeline}"
+  echo "home:     ${RUNOFF_HOME:-$HOME/.runoff}"
   if probe_port; then
     echo "status:   listening on ${HOST}:${PORT}"
   else

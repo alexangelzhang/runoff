@@ -43,7 +43,7 @@ test("resolveOtlpTracesEndpoint appends /v1/traces", () => {
 });
 
 test("traceToOtlpHttpBody produces resourceSpans", () => {
-  const body = traceToOtlpHttpBody(sampleTrace, "llm-pipeline-test");
+  const body = traceToOtlpHttpBody(sampleTrace, "runoff-test");
   const spans = (body.resourceSpans as Array<{ scopeSpans: Array<{ spans: unknown[] }> }>)[0]!
     .scopeSpans[0]!.spans;
   assert.equal(spans.length, 1);

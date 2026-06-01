@@ -1,5 +1,5 @@
 #!/bin/bash
-# Optional: register llm-pipeline MCP server in Claude Code CLI.
+# Optional: register runoff MCP server in Claude Code CLI.
 # Preferred quick start: npm install && npm run demo
 # Docs: docs/guides/coding-agent-backends.md, docs/reference/differentiation.md
 
@@ -7,7 +7,7 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
-echo "=== llm-pipeline setup ==="
+echo "=== runoff setup ==="
 echo ""
 if [ -x "$SCRIPT_DIR/scripts/shell/check-prereqs.sh" ]; then
   bash "$SCRIPT_DIR/scripts/shell/check-prereqs.sh" || exit 1
@@ -45,7 +45,7 @@ if [ -f "$SCRIPT_DIR/.env" ]; then
 fi
 
 echo "Registering MCP server in Claude Code..."
-claude mcp add llm-pipeline $ENV_ARGS -- node "$SCRIPT_DIR/dist/index.js"
+claude mcp add runoff $ENV_ARGS -- node "$SCRIPT_DIR/dist/index.js"
 
 echo ""
 echo "Done. Restart Claude Code if needed."

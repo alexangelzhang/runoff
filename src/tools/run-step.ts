@@ -14,7 +14,7 @@ import { mcpJson, mcpErrorFrom } from "./mcp-response.js";
 
 export function register(server: McpServer, initialConfig: PipelineConfig) {
   server.tool(
-    "llm_run_step",
+    "runoff_run_step",
     `Execute a pipeline step using the configured provider. Available steps: ${Object.keys(initialConfig.pipeline).join(", ")}. ` +
     `Steps configured as "builtin" (e.g. claude) are handled by Claude Code itself and will return an error if called here.`,
     {

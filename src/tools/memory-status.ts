@@ -12,7 +12,7 @@ import { mcpJson, mcpErrorFrom } from "./mcp-response.js";
 
 export function register(server: McpServer) {
   server.tool(
-    "llm_memory_status",
+    "runoff_memory_status",
     "Show resolved pipeline memory backend (local / http / mem0 / zep). " +
       "Set probe=true to attempt a lightweight remote search (requires network/credentials).",
     {

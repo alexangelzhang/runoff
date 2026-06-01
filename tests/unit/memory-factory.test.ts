@@ -15,13 +15,13 @@ let origHome: string | undefined;
 test.beforeEach(() => {
   resetPipelineMemoryRegistry();
   memDir = mkdtempSync(join(tmpdir(), "mem-factory-"));
-  origHome = process.env.LLM_PIPELINE_HOME;
-  process.env.LLM_PIPELINE_HOME = memDir;
+  origHome = process.env.RUNOFF_HOME;
+  process.env.RUNOFF_HOME = memDir;
 });
 
 test.afterEach(() => {
-  if (origHome !== undefined) process.env.LLM_PIPELINE_HOME = origHome;
-  else delete process.env.LLM_PIPELINE_HOME;
+  if (origHome !== undefined) process.env.RUNOFF_HOME = origHome;
+  else delete process.env.RUNOFF_HOME;
   rmSync(memDir, { recursive: true, force: true });
 });
 

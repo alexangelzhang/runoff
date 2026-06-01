@@ -5,7 +5,7 @@
 在 Phase 8.3 链路（`trace` → `experiments.jsonl` → `experiment-judge`）上增加：
 
 - **eval-report**：variant 汇总 + 推荐 winner
-- **dataset**：可复现 JSONL（schema `llm-pipeline-eval-v1`）
+- **dataset**：可复现 JSONL（schema `runoff-eval-v1`）
 
 ## 写入（自动）
 
@@ -15,7 +15,7 @@
 2. 用 prompt+config 哈希作为 `variant`
 3. 若有同 experiment 的已 approved baseline，则 `judgeExperiment` 打 `keep` / `discard` / `regression`
 
-日志路径：`~/.llm-pipeline/experiments.jsonl`
+日志路径：`~/.runoff/experiments.jsonl`
 
 ## MCP：`llm_query_experiments`
 
@@ -24,7 +24,7 @@
 | `entries`（默认） | 否（可过滤） | 原始行 |
 | `summary` | 是 | 按 variant 聚合 |
 | `eval-report` | 是 | winner + `recommendation` |
-| `dataset` | 是 | 写入 `~/.llm-pipeline/datasets/<id>.jsonl` + 预览 |
+| `dataset` | 是 | 写入 `~/.runoff/datasets/<id>.jsonl` + 预览 |
 
 ### 示例
 

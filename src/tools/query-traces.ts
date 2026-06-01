@@ -19,7 +19,7 @@ const TRACE_STATUS_FILTER = PIPELINE_STATUS_FILTERS;
 
 export function register(server: McpServer) {
   server.tool(
-    "llm_query_traces",
+    "runoff_query_traces",
     "Query pipeline execution traces. Use traceId for a single run; format=postmortem for failure analysis; " +
     "detail=true for full JSON. Returns summaries and optional aggregate stats.",
     {

@@ -1,6 +1,6 @@
 # Contributing
 
-Thanks for helping improve **llm-pipeline** — repo-native, MCP-first code pipelines. See [`docs/reference/differentiation.md`](docs/reference/differentiation.md).
+Thanks for helping improve **runoff** — repo-native, MCP-first code pipelines. See [`docs/reference/differentiation.md`](docs/reference/differentiation.md).
 
 ## Prerequisites
 

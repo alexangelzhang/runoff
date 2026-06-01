@@ -20,7 +20,7 @@ repo = sys.argv[2]
 hold_seconds = float(sys.argv[3])
 lock_home = sys.argv[4]
 
-os.environ["LLM_PIPELINE_HOME"] = lock_home
+os.environ["RUNOFF_HOME"] = lock_home
 sys.path.insert(0, os.path.join(repo_root, "scripts", "python"))
 
 from workspace_manager import RepoLock  # noqa: E402
@@ -50,7 +50,7 @@ test("Resilience: Lock Contention & Backoff", async (t) => {
             env: {
               ...process.env,
               PYTHONPATH: repoRoot,
-              LLM_PIPELINE_HOME: lockHome,
+              RUNOFF_HOME: lockHome,
             },
           },
         );

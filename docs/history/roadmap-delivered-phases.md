@@ -159,7 +159,7 @@ Guardrail 负责内容/格式/风险检测；Policy 负责能力边界与权限�
 - HTTP/SSE loopback Transport — `a2a/http-transport.ts`
 - HTTP/SSE 鉴权 + 服务发现（`GET /a2a/agents`，Bearer on `/a2a/send`）
 - HTTP/SSE mTLS + 外部服务发现 — `tls-config.ts`, `external-registry.ts`, `orchestration.a2a` config
-- 联邦 registry 持久化 — `federated-registry-store.ts`（`~/.llm-pipeline/a2a-federation/agents.json`）
+- 联邦 registry 持久化 — `federated-registry-store.ts`（`~/.runoff/a2a-federation/agents.json`）
 
 ### 7.10 Agent Memory — `DONE`
 
@@ -193,7 +193,7 @@ Guardrail 负责内容/格式/风险检测；Policy 负责能力边界与权限�
 - 8.2.2 语义缓存（token Jaccard ≥ 0.95 复用结果；`runtime.semanticCache`） (P1)
 - 8.2.3 路由打分升级（`scoreProviderCandidates` + trace 胜率） (P1)
 - 8.2.4 Provider tier 声明化（`ProviderConfig.tier`） (P1)
-- 8.2.5 缓存 L2 持久化（LRU 淘汰写 `~/.llm-pipeline/cache/l2-store.json`，启动预热） (P2)
+- 8.2.5 缓存 L2 持久化（LRU 淘汰写 `~/.runoff/cache/l2-store.json`，启动预热） (P2)
 - 8.2.6 Trace 时序衰减（`traceRecencyWeight` in `aggregateTraceStats`） (P1)
 
 ### 8.3 可观测性升级（对标 LangSmith / Arize / OTel / DeerFlow）
@@ -323,7 +323,7 @@ Phase 0 (DONE)
 | 层级  | 文档章节                    | 用途                                          |
 | --- | ----------------------- | ------------------------------------------- |
 | 战略  | industry-benchmark §1   | Vision 五层映射、能力矩阵、差异化                        |
-| 战术  | industry-benchmark §2–3 | 各框架 `blob/{ref}/{path}` 与 llm-pipeline 模块对照 |
+| 战术  | industry-benchmark §2–3 | 各框架 `blob/{ref}/{path}` 与 runoff 模块对照 |
 
 
 ### 对标框架（战略索引）

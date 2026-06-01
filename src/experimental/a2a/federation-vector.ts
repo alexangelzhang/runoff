@@ -11,7 +11,7 @@ const VECTOR_KEY = "federationVector";
 export function resolveFederationNodeId(configured?: string): string {
   return (
     configured ??
-    process.env.LLM_PIPELINE_FEDERATION_NODE_ID ??
+    process.env.RUNOFF_FEDERATION_NODE_ID ??
     process.env.HOSTNAME ??
     "local"
   );

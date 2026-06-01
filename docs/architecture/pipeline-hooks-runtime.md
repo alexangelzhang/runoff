@@ -5,7 +5,7 @@
 | Mode | How to enable | Event log |
 |------|----------------|-----------|
 | **memory** | default | `InMemoryEventLog` (process-local) |
-| **file** | `runtime.controlPlane: "file"` or `LLM_PIPELINE_CONTROL_PLANE=file` | `FileEventLog` → `~/.llm-pipeline/control-plane/events.jsonl` |
+| **file** | `runtime.controlPlane: "file"` or `RUNOFF_CONTROL_PLANE=file` | `FileEventLog` → `~/.runoff/control-plane/events.jsonl` |
 
 `PipelineHooks` uses the same `EventLog` instance as `createControlPlane()` when passed from `pipeline-mcp-run.ts`, so orchestration events survive restarts in **file** mode.
 

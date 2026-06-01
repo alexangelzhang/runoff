@@ -1,5 +1,5 @@
 #!/bin/bash
-# Launch llm-pipeline with Ghostty split panes
+# Launch runoff with Ghostty split panes
 # Usage: ./start.sh
 #
 # This script prints instructions for Ghostty native splits.
@@ -36,7 +36,7 @@ echo -e "${BOLD}Step 3:${RESET} In Claude Code, use ${CYAN}/dev-pipeline${RESET}
 echo -e "  Tasks will flow visually between the panes!"
 echo ""
 echo -e "${DIM}Config: $PROJECT_DIR/pipeline.config.json${RESET}"
-echo -e "${DIM}Tasks dir: ~/.llm-pipeline/tasks/${RESET}"
+echo -e "${DIM}Tasks dir: ~/.runoff/tasks/${RESET}"
 echo ""
 
 # Quick launch option: start watchers in current terminal

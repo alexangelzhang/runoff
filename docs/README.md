@@ -7,7 +7,7 @@
 | Doc | Audience |
 |-----|----------|
 | [guides/getting-started-30min.md](guides/getting-started-30min.md) | First run → real repo |
-| [reference/differentiation.md](reference/differentiation.md) | Why llm-pipeline vs LangGraph / CrewAI / OpenHands |
+| [reference/differentiation.md](reference/differentiation.md) | Why runoff vs LangGraph / CrewAI / OpenHands |
 | [guides/coding-agent-backends.md](guides/coding-agent-backends.md) | Codex, Gemini, Claude Code, OpenCode |
 | [guides/testing.md](guides/testing.md) | `tests/unit`, `e2e`, `integration`, `federation` |
 

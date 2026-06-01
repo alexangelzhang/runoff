@@ -1,4 +1,4 @@
-# Why llm-pipeline?
+# Why runoff?
 
 > **One line:** Multi-step **code-change pipelines** for coding agents — git worktree isolation, provider races, local traces — not another chat-loop framework.
 
@@ -15,7 +15,7 @@ Teams that already use **Claude Code, Codex CLI, Gemini CLI, OpenCode**, or any 
 
 ### 1. Repo-native delivery (not message-native)
 
-| llm-pipeline | Typical agent framework |
+| runoff | Typical agent framework |
 |--------------|-------------------------|
 | `agent-write` / `agent-read` on a git worktree | State / messages as primary artifact |
 | `workspace_manager.py` — worktree + cross-process lock | Sandboxes vary; rarely this IPC contract |
@@ -37,7 +37,7 @@ Teams that already use **Claude Code, Codex CLI, Gemini CLI, OpenCode**, or any 
   Cursor / Claude Desktop / Claude Code / …  (MCP host)
                     │
                     ▼
-            llm-pipeline (DAG, governance, trace)
+            runoff (DAG, governance, trace)
                     │
                     ▼
      Codex / Gemini / OpenCode / custom CLI  (cli provider → task_runner.py)
@@ -69,7 +69,7 @@ See [`coding-agent-backends.md`](guides/coding-agent-backends.md).
 
 ## Comparison matrix (strategic)
 
-| Capability | llm-pipeline | LangGraph | CrewAI | AutoGen | OpenHands |
+| Capability | runoff | LangGraph | CrewAI | AutoGen | OpenHands |
 |------------|:------------:|:---------:|:------:|:-------:|:---------:|
 | Declarative config DAG (JSON) | ✅ | code-first | Crew/Task | code-first | UI + agent |
 | Git worktree + lock contract | ✅ | — | — | — | partial |

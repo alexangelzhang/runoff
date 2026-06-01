@@ -16,13 +16,13 @@ jobs:
   real-provider-smoke:
     runs-on:
       - self-hosted
-      - llm-pipeline-real-smoke
+      - runoff-real-smoke
     timeout-minutes: 90
     env:
-      LLM_PIPELINE_RUN_REAL_PROVIDER_SMOKE: "1"
-      LLM_PIPELINE_REAL_CODEX_ARGV_JSON: ${{ secrets.LLM_PIPELINE_REAL_CODEX_ARGV_JSON }}
-      LLM_PIPELINE_REAL_GEMINI_ARGV_JSON: ${{ secrets.LLM_PIPELINE_REAL_GEMINI_ARGV_JSON }}
-      LLM_PIPELINE_REAL_TIMEOUT_MS: ${{ vars.LLM_PIPELINE_REAL_TIMEOUT_MS || '600000' }}
+      RUNOFF_RUN_REAL_PROVIDER_SMOKE: "1"
+      RUNOFF_REAL_CODEX_ARGV_JSON: ${{ secrets.RUNOFF_REAL_CODEX_ARGV_JSON }}
+      RUNOFF_REAL_GEMINI_ARGV_JSON: ${{ secrets.RUNOFF_REAL_GEMINI_ARGV_JSON }}
+      RUNOFF_REAL_TIMEOUT_MS: ${{ vars.RUNOFF_REAL_TIMEOUT_MS || '600000' }}
       GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       REAL_PROVIDER_SMOKE_REPORT_DIR: tmp/real-provider-smoke/nightly-${{ github.run_id }}-${{ github.run_attempt }}
@@ -43,8 +43,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          : "${LLM_PIPELINE_REAL_CODEX_ARGV_JSON:?missing secret LLM_PIPELINE_REAL_CODEX_ARGV_JSON}"
-          : "${LLM_PIPELINE_REAL_GEMINI_ARGV_JSON:?missing secret LLM_PIPELINE_REAL_GEMINI_ARGV_JSON}"
+          : "${RUNOFF_REAL_CODEX_ARGV_JSON:?missing secret RUNOFF_REAL_CODEX_ARGV_JSON}"
+          : "${RUNOFF_REAL_GEMINI_ARGV_JSON:?missing secret RUNOFF_REAL_GEMINI_ARGV_JSON}"
           command -v codex
           command -v gemini
           codex --version

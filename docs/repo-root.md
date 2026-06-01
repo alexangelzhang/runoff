@@ -28,5 +28,5 @@ Do **not** delete `.devcontainer/` or `.github/` to “clean” the tree; they a
 
 ## Not at root
 
-- Runtime data: `~/.llm-pipeline/` (traces, federation registry, L2 cache)
+- Runtime data: `~/.runoff/` (traces, federation registry, L2 cache)
 - Test artifacts: `tests/.tmp-traces-*` (gitignored; `npm run clean:test-traces`)

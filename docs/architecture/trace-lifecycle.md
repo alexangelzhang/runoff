@@ -1,6 +1,6 @@
 # Pipeline trace lifecycle (issue 6.10)
 
-Traces live under `~/.llm-pipeline/traces/` as `YYYY-MM-DD_<traceId>.json` (atomic tmp + rename).
+Traces live under `~/.runoff/traces/` as `YYYY-MM-DD_<traceId>.json` (atomic tmp + rename).
 
 ## States
 

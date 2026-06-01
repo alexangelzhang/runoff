@@ -4,7 +4,7 @@
 
 ## Executive summary
 
-Pipeline memory is **not one store** — it is layered by **lifetime**, **storage**, **read path**, and **Evolution timing**. Local disk under `~/.llm-pipeline/memory/` is the **source of truth (SoT)**. Remote backends (Mem0 / Zep / HTTP) are **write-through mirrors** with **async hybrid search** via MCP tools.
+Pipeline memory is **not one store** — it is layered by **lifetime**, **storage**, **read path**, and **Evolution timing**. Local disk under `~/.runoff/memory/` is the **source of truth (SoT)**. Remote backends (Mem0 / Zep / HTTP) are **write-through mirrors** with **async hybrid search** via MCP tools.
 
 **Single runtime entry point (governed):** `getPipelineMemory()` in `src/memory/pipeline-memory.ts` — used by pipeline hooks **and** MCP memory tools.
 
@@ -27,7 +27,7 @@ flowchart TB
   end
 
   subgraph store [Persistent SoT]
-    Local[PersistentAgentMemory<br/>~/.llm-pipeline/memory/*.json]
+    Local[PersistentAgentMemory<br/>~/.runoff/memory/*.json]
   end
 
   subgraph remote [Optional mirror]

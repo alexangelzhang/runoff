@@ -1,6 +1,6 @@
 # Coding agent backends (CLI providers)
 
-llm-pipeline **does not replace** Claude Code, Codex, Gemini CLI, or OpenCode. It **orchestrates** them as pipeline steps via the **`cli` provider type**.
+runoff **does not replace** Claude Code, Codex, Gemini CLI, or OpenCode. It **orchestrates** them as pipeline steps via the **`cli` provider type**.
 
 Same pipeline (`implement` → `review` → retry). Swap `providers` to swap the underlying agent.
 
@@ -9,7 +9,7 @@ Same pipeline (`implement` → `review` → retry). Swap `providers` to swap the
 ```mermaid
 flowchart LR
   Host[MCP host or pipeline run CLI]
-  Host --> LP[llm-pipeline]
+  Host --> LP[runoff]
   LP --> CFG[pipeline.config.json]
   LP --> TR[task_runner.py]
   TR --> CLI[Your coding agent CLI]
@@ -36,10 +36,10 @@ Template config: [`examples/configs/cli.config.json`](../examples/configs/cli.co
 
 ## Quick setup (any backend)
 
-1. Copy template into **your target repo** (not only llm-pipeline repo):
+1. Copy template into **your target repo** (not only runoff repo):
 
    ```bash
-   cp /path/to/llm-pipeline/examples/configs/cli.config.json ./pipeline.config.json
+   cp /path/to/runoff/examples/configs/cli.config.json ./pipeline.config.json
    ```
 
 2. Edit `providers` — enable one implement + one review backend.
@@ -51,7 +51,7 @@ Template config: [`examples/configs/cli.config.json`](../examples/configs/cli.co
 
    # Or CLI (no IDE):
    cd /path/to/your/repo
-   npx tsx /path/to/llm-pipeline/scripts/ts/dev/pipeline-cli.ts run \
+   npx tsx /path/to/runoff/scripts/ts/dev/pipeline-cli.ts run \
      --prompt "Add hello() with tests" \
      --work-dir .
    ```
@@ -76,7 +76,7 @@ Adjust commands to your installed CLI version. Verify with `which <binary>`.
 }
 ```
 
-Env: follow Codex CLI login/docs. For CI smoke see [`real-provider-smoke.md`](operations/real-provider-smoke.md) (`LLM_PIPELINE_REAL_CODEX_ARGV_JSON`).
+Env: follow Codex CLI login/docs. For CI smoke see [`real-provider-smoke.md`](operations/real-provider-smoke.md) (`RUNOFF_REAL_CODEX_ARGV_JSON`).
 
 ### Google Gemini CLI
 
@@ -106,7 +106,7 @@ Use the **`claude`** binary your installation provides (non-interactive flags va
 }
 ```
 
-**MCP path:** Claude Code / Claude Desktop can also host llm-pipeline as an MCP server (`npm run dev`, `cwd` = target repo) — then the **host** calls `llm_run_pipeline`, and pipeline steps still use `cli` providers above for implement/review agents.
+**MCP path:** Claude Code / Claude Desktop can also host runoff as an MCP server (`npm run dev`, `cwd` = target repo) — then the **host** calls `llm_run_pipeline`, and pipeline steps still use `cli` providers above for implement/review agents.
 
 ### OpenCode
 
@@ -174,9 +174,9 @@ Example MCP snippet:
 ```json
 {
   "mcpServers": {
-    "llm-pipeline": {
+    "runoff": {
       "command": "npx",
-      "args": ["tsx", "/absolute/path/to/llm-pipeline/src/index.ts"],
+      "args": ["tsx", "/absolute/path/to/runoff/src/index.ts"],
       "cwd": "/absolute/path/to/your/repo-with-pipeline.config.json"
     }
   }

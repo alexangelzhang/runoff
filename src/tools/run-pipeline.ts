@@ -34,7 +34,7 @@ export async function runPipelineMode(args: PipelineParams): Promise<PipelineRes
 
 export function register(server: McpServer) {
   server.tool(
-    "llm_run_pipeline",
+    "runoff_run_pipeline",
     "Execute full multi-agent pipeline with parallel stages and automatic retries.",
     {
       prompt: z.string().describe("Specification for the code changes"),

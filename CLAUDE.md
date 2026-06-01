@@ -1,4 +1,4 @@
-# CLAUDE.md — llm-pipeline project instructions
+# CLAUDE.md — runoff project instructions
 
 ## Token Efficiency Rules
 
@@ -91,7 +91,7 @@ scripts/ts/ci/check-ipc-sync.ts — CI helper: TS/Python IPC constants must matc
 | 改 A2A HTTP/mTLS/发现/联邦 | `src/experimental/a2a/http-transport.ts`, `external-registry.ts`, `federated-registry-store.ts` |
 | CI gates | `npm run ci:gates`（`scripts/ts/ci/run-ci-gates.ts`）, `npm run test:gates` |
 | 行业对标钉版本 | `npm run check-benchmark-pins`（ci:gates）；刷新 `npm run refresh-benchmark-pins` |
-| 改 prompt 版本回放 | `src/observability/prompt-version.ts`（`~/.llm-pipeline/prompt-versions/`） |
+| 改 prompt 版本回放 | `src/observability/prompt-version.ts`（`~/.runoff/prompt-versions/`） |
 | 改 trace 实体图 | `src/orchestration/trace-entities.ts` |
 | OTel OTLP 导出 | `src/observability/trace-exporter.ts`（`runtime.otelEndpoint`, `OTEL_EXPORTER_OTLP_ENDPOINT`） |
 | Orchestrator 驱波 | `src/orchestration/plan-scheduler.ts`, `pipeline-execution.ts` → `executionPlan` |

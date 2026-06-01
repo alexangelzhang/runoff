@@ -5,7 +5,7 @@ Use it before enabling the nightly workflow or wiring the pre-release gate into 
 
 ## 1. Runner shape
 
-- Use a dedicated self-hosted runner with labels `self-hosted` and `llm-pipeline-real-smoke`.
+- Use a dedicated self-hosted runner with labels `self-hosted` and `runoff-real-smoke`.
 - Keep it isolated from general CI runners so Codex/Gemini login state and CLI versions stay stable.
 - Grant the runner a writable workspace with enough disk for repo clones, smoke sandboxes, and uploaded artifacts.
 
@@ -19,9 +19,9 @@ Install and verify these tools on the runner host:
 - codex CLI
 - gemini CLI
 - **OTel collector gate** (pick one):
-  - `curl` — first pre-release run downloads `otelcol-contrib` into `$RUNNER_TOOL_CACHE/llm-pipeline-otel` (cached afterward), **or**
+  - `curl` — first pre-release run downloads `otelcol-contrib` into `$RUNNER_TOOL_CACHE/runoff-otel` (cached afterward), **or**
   - `otelcol-contrib` / `otelcol` on PATH (e.g. package install on the runner), **or**
-  - Repository variable `LLM_PIPELINE_OTEL_ENDPOINT` pointing at your company OTLP HTTP collector (no local install; best for offline / no-GitHub runners)
+  - Repository variable `RUNOFF_OTEL_ENDPOINT` pointing at your company OTLP HTTP collector (no local install; best for offline / no-GitHub runners)
 
 Recommended validation commands:
 
@@ -37,11 +37,11 @@ gemini --version
 
 Repository-level secrets/vars expected by the workflows:
 
-- `LLM_PIPELINE_REAL_CODEX_ARGV_JSON`
-- `LLM_PIPELINE_REAL_GEMINI_ARGV_JSON`
+- `RUNOFF_REAL_CODEX_ARGV_JSON`
+- `RUNOFF_REAL_GEMINI_ARGV_JSON`
 - `OPENAI_API_KEY` if the chosen Codex invocation needs it
 - `GEMINI_API_KEY` if Gemini CLI needs it
-- `LLM_PIPELINE_REAL_TIMEOUT_MS` as an optional repository variable
+- `RUNOFF_REAL_TIMEOUT_MS` as an optional repository variable
 
 Recommended argv values:
 
@@ -106,5 +106,5 @@ When a run fails, inspect artifacts in this order:
 3. `diagnostics/<case-id>/repo-diff.patch`
 4. `diagnostics/<case-id>/home-snapshots/{traces,sessions,tasks}/`
 
-If the failure is provider-environment related, verify CLI login state, PATH, and the JSON shape of `LLM_PIPELINE_REAL_CODEX_ARGV_JSON` / `LLM_PIPELINE_REAL_GEMINI_ARGV_JSON` first.
+If the failure is provider-environment related, verify CLI login state, PATH, and the JSON shape of `RUNOFF_REAL_CODEX_ARGV_JSON` / `RUNOFF_REAL_GEMINI_ARGV_JSON` first.
 

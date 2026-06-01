@@ -13,23 +13,23 @@ import { runPipelineMode } from "../../src/tools/run-pipeline.js";
  * Opt-in integration smoke against real CLI agents.
  *
  * Examples:
- *   LLM_PIPELINE_RUN_REAL_PROVIDER_SMOKE=1 \
- *   LLM_PIPELINE_REAL_CODEX_ARGV_JSON='["codex","exec","--full-auto","--skip-git-repo-check"]' \
+ *   RUNOFF_RUN_REAL_PROVIDER_SMOKE=1 \
+ *   RUNOFF_REAL_CODEX_ARGV_JSON='["codex","exec","--full-auto","--skip-git-repo-check"]' \
  *   npm run test:real-providers
  *
- *   LLM_PIPELINE_RUN_REAL_PROVIDER_SMOKE=1 \
- *   LLM_PIPELINE_RUN_REAL_RACE_SMOKE=1 \
- *   LLM_PIPELINE_REAL_CODEX_ARGV_JSON='["codex","exec","--full-auto","--skip-git-repo-check"]' \
- *   LLM_PIPELINE_REAL_GEMINI_ARGV_JSON='["gemini","-y","-p"]' \
+ *   RUNOFF_RUN_REAL_PROVIDER_SMOKE=1 \
+ *   RUNOFF_RUN_REAL_RACE_SMOKE=1 \
+ *   RUNOFF_REAL_CODEX_ARGV_JSON='["codex","exec","--full-auto","--skip-git-repo-check"]' \
+ *   RUNOFF_REAL_GEMINI_ARGV_JSON='["gemini","-y","-p"]' \
  *   npm run test:real-providers
  */
 
-const RUN_REAL_PROVIDER_SMOKE = process.env.LLM_PIPELINE_RUN_REAL_PROVIDER_SMOKE === "1";
-const RUN_REAL_RACE_SMOKE = process.env.LLM_PIPELINE_RUN_REAL_RACE_SMOKE === "1";
-const REAL_TIMEOUT_MS = Number(process.env.LLM_PIPELINE_REAL_TIMEOUT_MS ?? 300_000);
-const REAL_SMOKE_ARTIFACT_ROOT = process.env.LLM_PIPELINE_REAL_SMOKE_ARTIFACT_ROOT;
-const REAL_SMOKE_SANDBOX_ROOT = process.env.LLM_PIPELINE_REAL_SMOKE_SANDBOX_ROOT;
-const KEEP_SANDBOX = process.env.LLM_PIPELINE_REAL_SMOKE_KEEP_SANDBOX === "1";
+const RUN_REAL_PROVIDER_SMOKE = process.env.RUNOFF_RUN_REAL_PROVIDER_SMOKE === "1";
+const RUN_REAL_RACE_SMOKE = process.env.RUNOFF_RUN_REAL_RACE_SMOKE === "1";
+const REAL_TIMEOUT_MS = Number(process.env.RUNOFF_REAL_TIMEOUT_MS ?? 300_000);
+const REAL_SMOKE_ARTIFACT_ROOT = process.env.RUNOFF_REAL_SMOKE_ARTIFACT_ROOT;
+const REAL_SMOKE_SANDBOX_ROOT = process.env.RUNOFF_REAL_SMOKE_SANDBOX_ROOT;
+const KEEP_SANDBOX = process.env.RUNOFF_REAL_SMOKE_KEEP_SANDBOX === "1";
 
 type RealSmokeResult = "running" | "passed" | "failed" | "skipped";
 
@@ -126,7 +126,7 @@ function requireOptInArgv(
   providerEnvNames: string[],
 ): string[] | null {
   if (!RUN_REAL_PROVIDER_SMOKE) {
-    const reason = `set LLM_PIPELINE_RUN_REAL_PROVIDER_SMOKE=1 to run real ${label} smoke`;
+    const reason = `set RUNOFF_RUN_REAL_PROVIDER_SMOKE=1 to run real ${label} smoke`;
     markSkippedCase(caseId, label, providerEnvNames, reason);
     t.skip(reason);
     return null;
@@ -154,14 +154,14 @@ async function runSingleProviderSmoke(
   const argv = requireOptInArgv(t, caseId, label, argvEnvName, providerEnvNames);
   if (!argv) return;
 
-  const previousHome = process.env.LLM_PIPELINE_HOME;
+  const previousHome = process.env.RUNOFF_HOME;
   const previousCwd = process.cwd();
   const sandboxDir = makeSandbox(`llm-real-${label}-`);
   const homeDir = join(sandboxDir, "home");
   const configDir = join(sandboxDir, "config");
   mkdirSync(homeDir, { recursive: true });
   mkdirSync(configDir, { recursive: true });
-  process.env.LLM_PIPELINE_HOME = homeDir;
+  process.env.RUNOFF_HOME = homeDir;
 
   const repoDir = createGitRepo(sandboxDir, `${label}-repo`);
   const workDir = join(repoDir, "src");
@@ -248,8 +248,8 @@ async function runSingleProviderSmoke(
 
     clearConfigCache();
     process.chdir(previousCwd);
-    if (previousHome === undefined) delete process.env.LLM_PIPELINE_HOME;
-    else process.env.LLM_PIPELINE_HOME = previousHome;
+    if (previousHome === undefined) delete process.env.RUNOFF_HOME;
+    else process.env.RUNOFF_HOME = previousHome;
 
     if (!KEEP_SANDBOX) {
       rmSync(sandboxDir, { recursive: true, force: true });
@@ -258,49 +258,49 @@ async function runSingleProviderSmoke(
 }
 
 test("real codex provider smoke: standalone agent-write pipeline can modify a repo", async (t) => {
-  await runSingleProviderSmoke(t, "codex-standalone", "codex", "LLM_PIPELINE_REAL_CODEX_ARGV_JSON", "codex real smoke ok");
+  await runSingleProviderSmoke(t, "codex-standalone", "codex", "RUNOFF_REAL_CODEX_ARGV_JSON", "codex real smoke ok");
 });
 
 test("real gemini provider smoke: standalone agent-write pipeline can modify a repo", async (t) => {
-  await runSingleProviderSmoke(t, "gemini-standalone", "gemini", "LLM_PIPELINE_REAL_GEMINI_ARGV_JSON", "gemini real smoke ok");
+  await runSingleProviderSmoke(t, "gemini-standalone", "gemini", "RUNOFF_REAL_GEMINI_ARGV_JSON", "gemini real smoke ok");
 });
 
 test("real provider race smoke: codex + gemini can reach awaiting_judge with deferred workspaces", async (t) => {
   const caseId = "provider-race";
   const label = "codex+gemini race";
-  const providerEnvNames = ["LLM_PIPELINE_REAL_CODEX_ARGV_JSON", "LLM_PIPELINE_REAL_GEMINI_ARGV_JSON"];
+  const providerEnvNames = ["RUNOFF_REAL_CODEX_ARGV_JSON", "RUNOFF_REAL_GEMINI_ARGV_JSON"];
 
   if (!RUN_REAL_PROVIDER_SMOKE) {
-    const reason = "set LLM_PIPELINE_RUN_REAL_PROVIDER_SMOKE=1 to run real race smoke";
+    const reason = "set RUNOFF_RUN_REAL_PROVIDER_SMOKE=1 to run real race smoke";
     markSkippedCase(caseId, label, providerEnvNames, reason);
     t.skip(reason);
     return;
   }
 
   if (!RUN_REAL_RACE_SMOKE) {
-    const reason = "set LLM_PIPELINE_RUN_REAL_RACE_SMOKE=1 to run real race smoke";
+    const reason = "set RUNOFF_RUN_REAL_RACE_SMOKE=1 to run real race smoke";
     markSkippedCase(caseId, label, providerEnvNames, reason);
     t.skip(reason);
     return;
   }
 
-  const codexArgv = parseArgvEnv("LLM_PIPELINE_REAL_CODEX_ARGV_JSON");
-  const geminiArgv = parseArgvEnv("LLM_PIPELINE_REAL_GEMINI_ARGV_JSON");
+  const codexArgv = parseArgvEnv("RUNOFF_REAL_CODEX_ARGV_JSON");
+  const geminiArgv = parseArgvEnv("RUNOFF_REAL_GEMINI_ARGV_JSON");
   if (!codexArgv || !geminiArgv) {
-    const reason = "set both LLM_PIPELINE_REAL_CODEX_ARGV_JSON and LLM_PIPELINE_REAL_GEMINI_ARGV_JSON to run real race smoke";
+    const reason = "set both RUNOFF_REAL_CODEX_ARGV_JSON and RUNOFF_REAL_GEMINI_ARGV_JSON to run real race smoke";
     markSkippedCase(caseId, label, providerEnvNames, reason);
     t.skip(reason);
     return;
   }
 
-  const previousHome = process.env.LLM_PIPELINE_HOME;
+  const previousHome = process.env.RUNOFF_HOME;
   const previousCwd = process.cwd();
   const sandboxDir = makeSandbox("llm-real-race-");
   const homeDir = join(sandboxDir, "home");
   const configDir = join(sandboxDir, "config");
   mkdirSync(homeDir, { recursive: true });
   mkdirSync(configDir, { recursive: true });
-  process.env.LLM_PIPELINE_HOME = homeDir;
+  process.env.RUNOFF_HOME = homeDir;
 
   const repoDir = createGitRepo(sandboxDir, "real-race-repo");
   const workDir = join(repoDir, "src");
@@ -410,8 +410,8 @@ test("real provider race smoke: codex + gemini can reach awaiting_judge with def
 
     clearConfigCache();
     process.chdir(previousCwd);
-    if (previousHome === undefined) delete process.env.LLM_PIPELINE_HOME;
-    else process.env.LLM_PIPELINE_HOME = previousHome;
+    if (previousHome === undefined) delete process.env.RUNOFF_HOME;
+    else process.env.RUNOFF_HOME = previousHome;
 
     if (!KEEP_SANDBOX) {
       rmSync(sandboxDir, { recursive: true, force: true });
@@ -422,35 +422,35 @@ test("real provider race smoke: codex + gemini can reach awaiting_judge with def
 test("real provider race auto-pick smoke: codex + gemini finishes approved", async (t) => {
   const caseId = "provider-race-autopick";
   const label = "codex+gemini race auto-pick";
-  const providerEnvNames = ["LLM_PIPELINE_REAL_CODEX_ARGV_JSON", "LLM_PIPELINE_REAL_GEMINI_ARGV_JSON"];
+  const providerEnvNames = ["RUNOFF_REAL_CODEX_ARGV_JSON", "RUNOFF_REAL_GEMINI_ARGV_JSON"];
 
   if (!RUN_REAL_PROVIDER_SMOKE) {
-    markSkippedCase(caseId, label, providerEnvNames, "set LLM_PIPELINE_RUN_REAL_PROVIDER_SMOKE=1");
+    markSkippedCase(caseId, label, providerEnvNames, "set RUNOFF_RUN_REAL_PROVIDER_SMOKE=1");
     t.skip("opt-in");
     return;
   }
   if (!RUN_REAL_RACE_SMOKE) {
-    markSkippedCase(caseId, label, providerEnvNames, "set LLM_PIPELINE_RUN_REAL_RACE_SMOKE=1");
+    markSkippedCase(caseId, label, providerEnvNames, "set RUNOFF_RUN_REAL_RACE_SMOKE=1");
     t.skip("opt-in race");
     return;
   }
 
-  const codexArgv = parseArgvEnv("LLM_PIPELINE_REAL_CODEX_ARGV_JSON");
-  const geminiArgv = parseArgvEnv("LLM_PIPELINE_REAL_GEMINI_ARGV_JSON");
+  const codexArgv = parseArgvEnv("RUNOFF_REAL_CODEX_ARGV_JSON");
+  const geminiArgv = parseArgvEnv("RUNOFF_REAL_GEMINI_ARGV_JSON");
   if (!codexArgv || !geminiArgv) {
     markSkippedCase(caseId, label, providerEnvNames, "missing codex or gemini argv secrets");
     t.skip("missing argv");
     return;
   }
 
-  const previousHome = process.env.LLM_PIPELINE_HOME;
+  const previousHome = process.env.RUNOFF_HOME;
   const previousCwd = process.cwd();
   const sandboxDir = makeSandbox("llm-real-race-autopick-");
   const homeDir = join(sandboxDir, "home");
   const configDir = join(sandboxDir, "config");
   mkdirSync(homeDir, { recursive: true });
   mkdirSync(configDir, { recursive: true });
-  process.env.LLM_PIPELINE_HOME = homeDir;
+  process.env.RUNOFF_HOME = homeDir;
 
   const repoDir = createGitRepo(sandboxDir, "real-race-autopick-repo");
   const workDir = join(repoDir, "src");
@@ -529,8 +529,8 @@ test("real provider race auto-pick smoke: codex + gemini finishes approved", asy
     writeCaseMetadata(metadata);
     clearConfigCache();
     process.chdir(previousCwd);
-    if (previousHome === undefined) delete process.env.LLM_PIPELINE_HOME;
-    else process.env.LLM_PIPELINE_HOME = previousHome;
+    if (previousHome === undefined) delete process.env.RUNOFF_HOME;
+    else process.env.RUNOFF_HOME = previousHome;
     if (!KEEP_SANDBOX) rmSync(sandboxDir, { recursive: true, force: true });
   }
 });

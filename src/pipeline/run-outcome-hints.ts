@@ -32,7 +32,7 @@ export function formatPipelineRunOutcomeHints(
     `status:      ${result.status}`,
     `traceId:     ${result.traceId}`,
     `session:     ${session}`,
-    `checkpoint:  ~/.llm-pipeline/sessions/${session}.json`,
+    `checkpoint:  ~/.runoff/sessions/${session}.json`,
   ];
 
   if (result.error) {
@@ -48,7 +48,7 @@ export function formatPipelineRunOutcomeHints(
 
   lines.push("");
   lines.push("inspect:");
-  lines.push(`  ls ~/.llm-pipeline/traces/${result.traceId}.json`);
+  lines.push(`  ls ~/.runoff/traces/${result.traceId}.json`);
   lines.push("  npm run pipeline:doctor");
 
   switch (result.status) {

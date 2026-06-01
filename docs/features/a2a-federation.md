@@ -22,7 +22,7 @@ Outbound peer sync uses `orchestration.a2a.clientToken` (or the same token via e
 | `federationSyncRetries` | Per-peer fetch retries (default **2**) |
 | `federationBackupPath` | Copy `agents.json` after successful merge |
 | `federationConflictStrategy` | `local-wins` / `newest-wins` / `remote-wins` / `vector-wins` / **`crdt-merge`** (P7) |
-| `federationNodeId` | Node id for vector-clock stamps on persist (env `LLM_PIPELINE_FEDERATION_NODE_ID`) |
+| `federationNodeId` | Node id for vector-clock stamps on persist (env `RUNOFF_FEDERATION_NODE_ID`) |
 | `federationQuorumMin` | Min peers that must advertise an `agentId` before merge (P5; default **1**) |
 
 ### Vector-clock merge (P4)

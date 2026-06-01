@@ -12,7 +12,7 @@ import { resolveFederationNodeId, stampFederationCards } from "./federation-vect
 export type FederationStoreOptions = {
   storePath?: string;
   enabled?: boolean;
-  /** P4: bump vector clock on persist when set (or env LLM_PIPELINE_FEDERATION_NODE_ID). */
+  /** P4: bump vector clock on persist when set (or env RUNOFF_FEDERATION_NODE_ID). */
   nodeId?: string;
 };
 

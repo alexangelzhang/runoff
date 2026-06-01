@@ -19,7 +19,7 @@ import { getPipelineHomeDir } from "../core/paths.js";
 import { loadTraceById } from "./trace.js";
 import { postmortemOneLiner } from "./trace-postmortem.js";
 
-export const OBSERVABILITY_DATASET_SCHEMA = "llm-pipeline-eval-v1" as const;
+export const OBSERVABILITY_DATASET_SCHEMA = "runoff-eval-v1" as const;
 
 export type ObservabilityDatasetRow = {
   schema: typeof OBSERVABILITY_DATASET_SCHEMA;

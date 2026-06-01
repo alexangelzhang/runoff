@@ -51,11 +51,11 @@ test("createTraceId returns unique values", () => {
 
 test("recordTrace writes JSON file to traces dir", () => {
   const dir = makeTmpTracesDir();
-  const origEnv = process.env.LLM_PIPELINE_HOME;
+  const origEnv = process.env.RUNOFF_HOME;
   // getTracesDir uses getPipelineHomeDir() + "/traces"
-  // We set LLM_PIPELINE_HOME so getTracesDir returns dir's parent + "/traces"
+  // We set RUNOFF_HOME so getTracesDir returns dir's parent + "/traces"
   const parentDir = join(dir, "..");
-  process.env.LLM_PIPELINE_HOME = parentDir;
+  process.env.RUNOFF_HOME = parentDir;
   // Ensure the traces subdir exists
   const tracesDir = join(parentDir, "traces");
   mkdirSync(tracesDir, { recursive: true });
@@ -72,8 +72,8 @@ test("recordTrace writes JSON file to traces dir", () => {
     assert.equal(content.id, "abcd1234");
     assert.equal(content.finalStatus, "approved");
   } finally {
-    if (origEnv === undefined) delete process.env.LLM_PIPELINE_HOME;
-    else process.env.LLM_PIPELINE_HOME = origEnv;
+    if (origEnv === undefined) delete process.env.RUNOFF_HOME;
+    else process.env.RUNOFF_HOME = origEnv;
     rmSync(tracesDir, { recursive: true, force: true });
   }
 });
@@ -82,8 +82,8 @@ test("updateTrace selects file by _traceId.json suffix (not substring of another
   const dir = makeTmpTracesDir();
   const tracesDir = join(dir, "traces");
   mkdirSync(tracesDir, { recursive: true });
-  const origEnv = process.env.LLM_PIPELINE_HOME;
-  process.env.LLM_PIPELINE_HOME = dir;
+  const origEnv = process.env.RUNOFF_HOME;
+  process.env.RUNOFF_HOME = dir;
 
   try {
     const inner = "ab12cd34";
@@ -101,8 +101,8 @@ test("updateTrace selects file by _traceId.json suffix (not substring of another
     assert.equal(outerContent.finalStatus, "approved");
     assert.equal(innerContent.finalStatus, "failed");
   } finally {
-    if (origEnv === undefined) delete process.env.LLM_PIPELINE_HOME;
-    else process.env.LLM_PIPELINE_HOME = origEnv;
+    if (origEnv === undefined) delete process.env.RUNOFF_HOME;
+    else process.env.RUNOFF_HOME = origEnv;
     rmSync(dir, { recursive: true, force: true });
   }
 });
@@ -113,8 +113,8 @@ test("listTraces reads all trace files from directory", () => {
   const dir = makeTmpTracesDir();
   const tracesDir = join(dir, "traces");
   mkdirSync(tracesDir, { recursive: true });
-  const origEnv = process.env.LLM_PIPELINE_HOME;
-  process.env.LLM_PIPELINE_HOME = dir;
+  const origEnv = process.env.RUNOFF_HOME;
+  process.env.RUNOFF_HOME = dir;
 
   try {
     const t1 = makeTrace({ id: "aaaa1111", timestamp: "2026-03-27T10:00:00.000Z", finalStatus: "approved" });
@@ -127,21 +127,21 @@ test("listTraces reads all trace files from directory", () => {
     const ids = traces.map((t) => t.id).sort();
     assert.deepEqual(ids, ["aaaa1111", "bbbb2222"]);
   } finally {
-    if (origEnv === undefined) delete process.env.LLM_PIPELINE_HOME;
-    else process.env.LLM_PIPELINE_HOME = origEnv;
+    if (origEnv === undefined) delete process.env.RUNOFF_HOME;
+    else process.env.RUNOFF_HOME = origEnv;
     rmSync(dir, { recursive: true, force: true });
   }
 });
 
 test("listTraces returns empty array when no traces dir", () => {
-  const origEnv = process.env.LLM_PIPELINE_HOME;
-  process.env.LLM_PIPELINE_HOME = "/tmp/nonexistent-" + Math.random().toString(36).slice(2);
+  const origEnv = process.env.RUNOFF_HOME;
+  process.env.RUNOFF_HOME = "/tmp/nonexistent-" + Math.random().toString(36).slice(2);
   try {
     const traces = listTraces();
     assert.deepEqual(traces, []);
   } finally {
-    if (origEnv === undefined) delete process.env.LLM_PIPELINE_HOME;
-    else process.env.LLM_PIPELINE_HOME = origEnv;
+    if (origEnv === undefined) delete process.env.RUNOFF_HOME;
+    else process.env.RUNOFF_HOME = origEnv;
   }
 });
 
@@ -151,8 +151,8 @@ test("queryTraces filters by status", () => {
   const dir = makeTmpTracesDir();
   const tracesDir = join(dir, "traces");
   mkdirSync(tracesDir, { recursive: true });
-  const origEnv = process.env.LLM_PIPELINE_HOME;
-  process.env.LLM_PIPELINE_HOME = dir;
+  const origEnv = process.env.RUNOFF_HOME;
+  process.env.RUNOFF_HOME = dir;
 
   try {
     recordTrace(makeTrace({ id: "aa000001", finalStatus: "approved", timestamp: "2026-03-28T10:00:00.000Z" }));
@@ -167,8 +167,8 @@ test("queryTraces filters by status", () => {
     assert.equal(failed.length, 1);
     assert.equal(failed[0].id, "bb000002");
   } finally {
-    if (origEnv === undefined) delete process.env.LLM_PIPELINE_HOME;
-    else process.env.LLM_PIPELINE_HOME = origEnv;
+    if (origEnv === undefined) delete process.env.RUNOFF_HOME;
+    else process.env.RUNOFF_HOME = origEnv;
     rmSync(dir, { recursive: true, force: true });
   }
 });
@@ -177,8 +177,8 @@ test("queryTraces filters by mode", () => {
   const dir = makeTmpTracesDir();
   const tracesDir = join(dir, "traces");
   mkdirSync(tracesDir, { recursive: true });
-  const origEnv = process.env.LLM_PIPELINE_HOME;
-  process.env.LLM_PIPELINE_HOME = dir;
+  const origEnv = process.env.RUNOFF_HOME;
+  process.env.RUNOFF_HOME = dir;
 
   try {
     recordTrace(makeTrace({ id: "pp000001", mode: "pipeline", timestamp: "2026-03-28T10:00:00.000Z" }));
@@ -192,8 +192,8 @@ test("queryTraces filters by mode", () => {
     assert.equal(races.length, 1);
     assert.equal(races[0].mode, "race");
   } finally {
-    if (origEnv === undefined) delete process.env.LLM_PIPELINE_HOME;
-    else process.env.LLM_PIPELINE_HOME = origEnv;
+    if (origEnv === undefined) delete process.env.RUNOFF_HOME;
+    else process.env.RUNOFF_HOME = origEnv;
     rmSync(dir, { recursive: true, force: true });
   }
 });
@@ -202,8 +202,8 @@ test("queryTraces respects limit", () => {
   const dir = makeTmpTracesDir();
   const tracesDir = join(dir, "traces");
   mkdirSync(tracesDir, { recursive: true });
-  const origEnv = process.env.LLM_PIPELINE_HOME;
-  process.env.LLM_PIPELINE_HOME = dir;
+  const origEnv = process.env.RUNOFF_HOME;
+  process.env.RUNOFF_HOME = dir;
 
   try {
     for (let i = 0; i < 5; i++) {
@@ -212,8 +212,8 @@ test("queryTraces respects limit", () => {
     const limited = queryTraces({ limit: 2 });
     assert.equal(limited.length, 2);
   } finally {
-    if (origEnv === undefined) delete process.env.LLM_PIPELINE_HOME;
-    else process.env.LLM_PIPELINE_HOME = origEnv;
+    if (origEnv === undefined) delete process.env.RUNOFF_HOME;
+    else process.env.RUNOFF_HOME = origEnv;
     rmSync(dir, { recursive: true, force: true });
   }
 });
@@ -222,8 +222,8 @@ test("queryTraces filters by since/until date range", () => {
   const dir = makeTmpTracesDir();
   const tracesDir = join(dir, "traces");
   mkdirSync(tracesDir, { recursive: true });
-  const origEnv = process.env.LLM_PIPELINE_HOME;
-  process.env.LLM_PIPELINE_HOME = dir;
+  const origEnv = process.env.RUNOFF_HOME;
+  process.env.RUNOFF_HOME = dir;
 
   try {
     recordTrace(makeTrace({ id: "dt000001", timestamp: "2026-03-26T10:00:00.000Z" }));
@@ -240,8 +240,8 @@ test("queryTraces filters by since/until date range", () => {
     assert.equal(range.length, 1);
     assert.equal(range[0].id, "dt000002");
   } finally {
-    if (origEnv === undefined) delete process.env.LLM_PIPELINE_HOME;
-    else process.env.LLM_PIPELINE_HOME = origEnv;
+    if (origEnv === undefined) delete process.env.RUNOFF_HOME;
+    else process.env.RUNOFF_HOME = origEnv;
     rmSync(dir, { recursive: true, force: true });
   }
 });
@@ -250,8 +250,8 @@ test("listTraces skips corrupt JSON files without losing valid traces", () => {
   const dir = makeTmpTracesDir();
   const tracesDir = join(dir, "traces");
   mkdirSync(tracesDir, { recursive: true });
-  const origEnv = process.env.LLM_PIPELINE_HOME;
-  process.env.LLM_PIPELINE_HOME = dir;
+  const origEnv = process.env.RUNOFF_HOME;
+  process.env.RUNOFF_HOME = dir;
 
   try {
     recordTrace(makeTrace({ id: "ok000001", timestamp: "2026-03-28T10:00:00.000Z" }));
@@ -264,8 +264,8 @@ test("listTraces skips corrupt JSON files without losing valid traces", () => {
     const ids = traces.map((t) => t.id).sort();
     assert.deepEqual(ids, ["ok000001", "ok000002"]);
   } finally {
-    if (origEnv === undefined) delete process.env.LLM_PIPELINE_HOME;
-    else process.env.LLM_PIPELINE_HOME = origEnv;
+    if (origEnv === undefined) delete process.env.RUNOFF_HOME;
+    else process.env.RUNOFF_HOME = origEnv;
     rmSync(dir, { recursive: true, force: true });
   }
 });
@@ -276,8 +276,8 @@ test("aggregateTraceStats computes correct statistics", () => {
   const dir = makeTmpTracesDir();
   const tracesDir = join(dir, "traces");
   mkdirSync(tracesDir, { recursive: true });
-  const origEnv = process.env.LLM_PIPELINE_HOME;
-  process.env.LLM_PIPELINE_HOME = dir;
+  const origEnv = process.env.RUNOFF_HOME;
+  process.env.RUNOFF_HOME = dir;
 
   try {
     const recent = new Date().toISOString();
@@ -315,15 +315,15 @@ test("aggregateTraceStats computes correct statistics", () => {
     assert.ok(stats.providerStats["gemini"]);
     assert.equal(stats.providerStats["gemini"].stepCount, 1);
   } finally {
-    if (origEnv === undefined) delete process.env.LLM_PIPELINE_HOME;
-    else process.env.LLM_PIPELINE_HOME = origEnv;
+    if (origEnv === undefined) delete process.env.RUNOFF_HOME;
+    else process.env.RUNOFF_HOME = origEnv;
     rmSync(dir, { recursive: true, force: true });
   }
 });
 
 test("aggregateTraceStats returns zeros for empty traces", () => {
-  const origEnv = process.env.LLM_PIPELINE_HOME;
-  process.env.LLM_PIPELINE_HOME = "/tmp/nonexistent-" + Math.random().toString(36).slice(2);
+  const origEnv = process.env.RUNOFF_HOME;
+  process.env.RUNOFF_HOME = "/tmp/nonexistent-" + Math.random().toString(36).slice(2);
   try {
     const stats = aggregateTraceStats();
     assert.equal(stats.totalTraces, 0);
@@ -332,7 +332,7 @@ test("aggregateTraceStats returns zeros for empty traces", () => {
     assert.equal(stats.avgDurationMs, 0);
     assert.deepEqual(stats.providerStats, {});
   } finally {
-    if (origEnv === undefined) delete process.env.LLM_PIPELINE_HOME;
-    else process.env.LLM_PIPELINE_HOME = origEnv;
+    if (origEnv === undefined) delete process.env.RUNOFF_HOME;
+    else process.env.RUNOFF_HOME = origEnv;
   }
 });

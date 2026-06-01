@@ -17,10 +17,10 @@ import { formatDoctorReport, runDoctor } from "../../../src/pipeline/pipeline-do
 
 const ROOT = resolve(fileURLToPath(new URL("../../..", import.meta.url)));
 
-if (!process.env.LLM_PIPELINE_HOME) {
+if (!process.env.RUNOFF_HOME) {
   const ciHome = mkdtempSync(join(tmpdir(), "lp-ci-home-"));
   mkdirSync(join(ciHome, "tmp"), { recursive: true });
-  process.env.LLM_PIPELINE_HOME = ciHome;
+  process.env.RUNOFF_HOME = ciHome;
   process.env.TMPDIR = join(ciHome, "tmp");
 }
 

@@ -57,7 +57,7 @@ OTel pre-release gate（`pre-release:otel-gate`）已通过；4 个 real-provide
 ### 根因
 
 - Pipeline 经 `scripts/python/task_runner.py` 的 `_run_delegate()` 将 **prompt 写入 stdin** 调用 CLI。
-- 当前 smoke 示例 / 环境变量为 `LLM_PIPELINE_REAL_GEMINI_ARGV_JSON='["gemini"]'`。
+- 当前 smoke 示例 / 环境变量为 `RUNOFF_REAL_GEMINI_ARGV_JSON='["gemini"]'`。
 - **Gemini CLI 0.35+** 默认交互模式；headless 需 `-p` / `--prompt`（`gemini --help`）。无 `-p` 时不消费 stdin 中的任务 prompt。
 
 ### 建议修复（后续）
@@ -65,7 +65,7 @@ OTel pre-release gate（`pre-release:otel-gate`）已通过；4 个 real-provide
 1. 更新推荐 argv（仓库文档 + workflow secret 示例）：
 
    ```bash
-   export LLM_PIPELINE_REAL_GEMINI_ARGV_JSON='["gemini","-y","-p"]'
+   export RUNOFF_REAL_GEMINI_ARGV_JSON='["gemini","-y","-p"]'
    ```
 
    - `-y`：自动批准工具（smoke 无人值守）
@@ -90,9 +90,9 @@ OTel pre-release gate（`pre-release:otel-gate`）已通过；4 个 real-provide
 修好 Codex + Gemini argv 后重跑：
 
 ```bash
-export LLM_PIPELINE_RUN_REAL_PROVIDER_SMOKE=1
-export LLM_PIPELINE_REAL_CODEX_ARGV_JSON='["codex","exec","--full-auto","--skip-git-repo-check"]'
-export LLM_PIPELINE_REAL_GEMINI_ARGV_JSON='["gemini","-y","-p"]'
+export RUNOFF_RUN_REAL_PROVIDER_SMOKE=1
+export RUNOFF_REAL_CODEX_ARGV_JSON='["codex","exec","--full-auto","--skip-git-repo-check"]'
+export RUNOFF_REAL_GEMINI_ARGV_JSON='["gemini","-y","-p"]'
 npm run smoke:real:pre-release
 ```
 

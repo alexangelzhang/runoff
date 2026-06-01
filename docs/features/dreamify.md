@@ -21,8 +21,8 @@ Does not run during pipeline execution. Results are persisted and read on the ne
 
 | Path | Purpose |
 |------|---------|
-| `~/.llm-pipeline/dreamify/best-params.json` | Active params + `previous` for rollback |
-| `~/.llm-pipeline/dreamify/history/*.json` | Snapshot per tune run |
+| `~/.runoff/dreamify/best-params.json` | Active params + `previous` for rollback |
+| `~/.runoff/dreamify/history/*.json` | Snapshot per tune run |
 
 ## Config
 

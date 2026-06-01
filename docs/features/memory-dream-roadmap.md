@@ -1,7 +1,7 @@
 # Memory + Dream 路线图（Phase 9+）
 
 > 对标参考：personal-vault `wiki/outputs/analyses/agent-memory-layer-landscape-2026.md`（F/E/R 三算子框架）。  
-> **边界**：`llm-pipeline` = 执行侧记忆；`personal-vault` = 独立知识库，**不纳入本仓库集成范围**。
+> **边界**：`runoff` = 执行侧记忆；`personal-vault` = 独立知识库，**不纳入本仓库集成范围**。
 
 ## 1. 目标
 
@@ -20,7 +20,7 @@
 | **personal-vault** | 完全独立产品（wiki / 文献 / 概念 KG）。pipeline **不依赖** vault 读写。 |
 | **Cognee（vault 内）** | **不在 M2 默认范围**。若未来需要，仅在 **M4** 评估是否提供 **可选、单向、文件级导出**（如 `lessons.jsonl`）供人工 ingest vault——**非实时双写、非 API 耦合**。 |
 
-架构原则：**执行记忆留在 `~/.llm-pipeline/`**；机构/wiki 知识留在 vault。避免跨系统身份、Evolution 双源真相。
+架构原则：**执行记忆留在 `~/.runoff/`**；机构/wiki 知识留在 vault。避免跨系统身份、Evolution 双源真相。
 
 ## 3. 当前基线（已实现）
 
@@ -86,7 +86,7 @@ flowchart LR
 
 - **输入**：`buildExperimentEvalReport` / dataset rows（TOP1 可观测）
 - **搜索空间**：`minSemanticSimilarity`、`pattern limit`、decay λ、associative link 阈值
-- **输出**：`~/.llm-pipeline/dreamify/best-params.json`（版本化，可回滚）
+- **输出**：`~/.runoff/dreamify/best-params.json`（版本化，可回滚）
 - **不在 run 热路径做在线搜索**
 
 ## 6. 分阶段交付

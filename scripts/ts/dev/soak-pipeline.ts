@@ -19,7 +19,7 @@ const rounds = Math.max(1, Number(process.env.SOAK_ROUNDS ?? 10));
 const home = mkdtempSync(join(tmpdir(), "lp-soak-home-"));
 const repo = mkdtempSync(join(tmpdir(), "lp-soak-repo-"));
 
-process.env.LLM_PIPELINE_HOME = home;
+process.env.RUNOFF_HOME = home;
 
 try {
   execFileSync("git", ["init"], { cwd: repo });

@@ -1,4 +1,4 @@
-# llm-pipeline
+# runoff
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
@@ -15,7 +15,7 @@
 | **Local observability** | Traces + `experiments.jsonl` — no LangSmith required |
 
 ```
-  IDE / CLI host (MCP)          llm-pipeline              coding-agent CLI
+  IDE / CLI host (MCP)          runoff              coding-agent CLI
   ───────────────────►   DAG + governance + trace   ──►   Codex / Gemini / …
                                     │
                                     ▼
@@ -34,21 +34,21 @@ npm run setup:mcp                     # MCP JSON for Cursor / Claude Desktop / C
 ## Quick start (zero API keys)
 
 ```bash
-git clone <repo-url> llm-pipeline && cd llm-pipeline
+git clone <repo-url> runoff && cd runoff
 npm install
 npm run demo
 ```
 
-Mock **approved** run with trace + experiment under temp `LLM_PIPELINE_HOME`.
+Mock **approved** run with trace + experiment under temp `RUNOFF_HOME`.
 
 **30-minute path:** [`docs/guides/getting-started-30min.md`](docs/guides/getting-started-30min.md)
 
 ## Run on your repo
 
 ```bash
-npm run pipeline:init -- --work-dir /path/to/repo --profile feature
-npm run pipeline:doctor -- --config /path/to/repo/pipeline.config.json
-npm run pipeline:run -- \
+npm run runoff:init -- --work-dir /path/to/repo --profile feature
+npm run runoff:doctor -- --config /path/to/repo/pipeline.config.json
+npm run runoff:run -- \
   --prompt "Add hello() with unit tests" \
   --work-dir /path/to/repo \
   --config /path/to/repo/pipeline.config.json
@@ -61,7 +61,7 @@ Example configs: `examples/configs/feature.config.json`, `examples/configs/bugfi
 **Edit config in a browser** (providers, DAG, retry — saves via local HTTP):
 
 ```bash
-npm run pipeline:config:edit -- --config /path/to/pipeline.config.json
+npm run runoff:config:edit -- --config /path/to/pipeline.config.json
 ```
 
 ## MCP server
@@ -73,9 +73,9 @@ npm run dev
 ```json
 {
   "mcpServers": {
-    "llm-pipeline": {
+    "runoff": {
       "command": "npx",
-      "args": ["tsx", "/absolute/path/to/llm-pipeline/src/index.ts"],
+      "args": ["tsx", "/absolute/path/to/runoff/src/index.ts"],
       "cwd": "/absolute/path/to/your/project"
     }
   }
@@ -105,7 +105,7 @@ candidate 1  (opencode/DeepSeek)   src/utils/format.ts +60 lines
   formatRelativeTime(dateInput: string | Date)  — accepts Date too
   + future dates ("2 hours from now"), week unit, edge-case guards
 
-  npm run pipeline:race:apply -- --session abc123 --winner 1
+  npm run runoff:race:apply -- --session abc123 --winner 1
 ```
 
 Same spec. Two models made different API decisions independently. With `raceFinalize: defer` you see both before any code lands.
@@ -165,7 +165,7 @@ Full index: [**docs/README.md**](docs/README.md) · repo root files: [docs/repo-
 - DAG pipeline, orchestrator, provider race, governance, checkpoints
 - Optional: external memory, Dream offline worker, A2A federation (**experimental**)
 
-Data: `~/.llm-pipeline/` (`LLM_PIPELINE_HOME`).
+Data: `~/.runoff/` (`RUNOFF_HOME`).
 
 ## Project status
 

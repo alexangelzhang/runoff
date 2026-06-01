@@ -1,6 +1,6 @@
 # External Memory Backend (P3/P4)
 
-Local file memory remains the **primary** store (`~/.llm-pipeline/memory/`). Optional remote backends mirror writes and support async search via `LayeredAgentMemory`.
+Local file memory remains the **primary** store (`~/.runoff/memory/`). Optional remote backends mirror writes and support async search via `LayeredAgentMemory`.
 
 ## Backends
 
@@ -32,7 +32,7 @@ OSS self-hosted:
 { "type": "mem0", "baseUrl": "http://127.0.0.1:8888", "variant": "oss" }
 ```
 
-Env: `LLM_PIPELINE_MEM0_URL`, `LLM_PIPELINE_MEM0_OSS_URL`, `LLM_PIPELINE_MEMORY_API_KEY`, `LLM_PIPELINE_MEMORY_USER_ID`.
+Env: `RUNOFF_MEM0_URL`, `RUNOFF_MEM0_OSS_URL`, `RUNOFF_MEMORY_API_KEY`, `RUNOFF_MEMORY_USER_ID`.
 
 ## Enable (Zep)
 
@@ -49,7 +49,7 @@ Env: `LLM_PIPELINE_MEM0_URL`, `LLM_PIPELINE_MEM0_OSS_URL`, `LLM_PIPELINE_MEMORY_
 }
 ```
 
-Env: `LLM_PIPELINE_ZEP_URL` (default `https://api.getzep.com/api/v2`).
+Env: `RUNOFF_ZEP_URL` (default `https://api.getzep.com/api/v2`).
 
 ## Generic HTTP proxy
 
@@ -68,8 +68,8 @@ Env: `LLM_PIPELINE_ZEP_URL` (default `https://api.getzep.com/api/v2`).
 
 Environment fallbacks:
 
-- `LLM_PIPELINE_MEMORY_URL` — base URL when `baseUrl` omitted
-- `LLM_PIPELINE_MEMORY_API_KEY` — Bearer token
+- `RUNOFF_MEMORY_URL` — base URL when `baseUrl` omitted
+- `RUNOFF_MEMORY_API_KEY` — Bearer token
 
 ## HTTP contract (generic `http` type)
 
@@ -99,7 +99,7 @@ npm install @getzep/zep-cloud
 
 ```bash
 npm install mem0ai @getzep/zep-cloud   # optional
-export LLM_PIPELINE_MEMORY_API_KEY=…   # for live calls
+export RUNOFF_MEMORY_API_KEY=…   # for live calls
 npm run test:sdk-memory
 ```
 

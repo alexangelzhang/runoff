@@ -15,8 +15,8 @@ Pre-release smoke **must pass** all case IDs (see `PRE_RELEASE_REQUIRED_CASE_IDS
 
 | Backend | Smoke profile | Last pre-release pass | Notes |
 |---------|---------------|----------------------|--------|
-| Codex CLI | cases above | _Update on release_ | `LLM_PIPELINE_REAL_CODEX_ARGV_JSON` |
-| Gemini CLI | cases above | _Update on release_ | `LLM_PIPELINE_REAL_GEMINI_ARGV_JSON` |
+| Codex CLI | cases above | _Update on release_ | `RUNOFF_REAL_CODEX_ARGV_JSON` |
+| Gemini CLI | cases above | _Update on release_ | `RUNOFF_REAL_GEMINI_ARGV_JSON` |
 
 Mock-only pipelines do not require this matrix.
 

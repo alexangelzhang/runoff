@@ -35,7 +35,7 @@ function isoToNano(iso: string, offsetMs = 0): string {
 /** Convert PipelineTrace to a minimal OTel-compatible JSON structure. */
 export function traceToOtelPayload(
   trace: PipelineTrace,
-  serviceName = "llm-pipeline",
+  serviceName = "runoff",
 ): OtelExportPayload {
   const traceId = trace.id.replace(/-/g, "").slice(0, 32);
   let offset = 0;
@@ -103,7 +103,7 @@ export function toOtlpBinaryId(raw: string, byteLength: number): string {
 /** Build OTLP HTTP JSON body for POST /v1/traces. */
 export function traceToOtlpHttpBody(
   trace: PipelineTrace,
-  serviceName = "llm-pipeline",
+  serviceName = "runoff",
 ): Record<string, unknown> {
   const payload = traceToOtelPayload(trace, serviceName);
   const traceIdB64 = toOtlpBinaryId(payload.resource.traceId, 16);
@@ -130,7 +130,7 @@ export function traceToOtlpHttpBody(
         },
         scopeSpans: [
           {
-            scope: { name: "llm-pipeline" },
+            scope: { name: "runoff" },
             spans,
           },
         ],
@@ -159,7 +159,7 @@ export class OtlpHttpTraceExporter implements TraceExporter {
 
   async export(trace: PipelineTrace): Promise<void> {
     const url = resolveOtlpTracesEndpoint(this.options.endpoint);
-    const serviceName = this.options.serviceName ?? "llm-pipeline";
+    const serviceName = this.options.serviceName ?? "runoff";
     const body = JSON.stringify(traceToOtlpHttpBody(trace, serviceName));
     const headers: Record<string, string> = {
       "content-type": "application/json",
@@ -195,7 +195,7 @@ export function createTraceExporterFromConfig(
     }
     return new OtlpHttpTraceExporter({
       endpoint,
-      serviceName: config.runtime.otelServiceName ?? "llm-pipeline",
+      serviceName: config.runtime.otelServiceName ?? "runoff",
       headers: config.runtime.otelHeaders,
     });
   }

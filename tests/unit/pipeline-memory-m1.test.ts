@@ -19,14 +19,14 @@ let origHome: string | undefined;
 
 test.beforeEach(() => {
   memDir = mkdtempSync(join(tmpdir(), "pipeline-m1-"));
-  origHome = process.env.LLM_PIPELINE_HOME;
-  process.env.LLM_PIPELINE_HOME = memDir;
+  origHome = process.env.RUNOFF_HOME;
+  process.env.RUNOFF_HOME = memDir;
   resetSharedMemory();
 });
 
 test.afterEach(() => {
-  if (origHome !== undefined) process.env.LLM_PIPELINE_HOME = origHome;
-  else delete process.env.LLM_PIPELINE_HOME;
+  if (origHome !== undefined) process.env.RUNOFF_HOME = origHome;
+  else delete process.env.RUNOFF_HOME;
   rmSync(memDir, { recursive: true, force: true });
 });
 

@@ -27,13 +27,13 @@ function makeTrace(id: string): PipelineTrace {
 
 test.beforeEach(() => {
   home = mkdtempSync(join(tmpdir(), "query-traces-test-"));
-  origHome = process.env.LLM_PIPELINE_HOME;
-  process.env.LLM_PIPELINE_HOME = home;
+  origHome = process.env.RUNOFF_HOME;
+  process.env.RUNOFF_HOME = home;
 });
 
 test.afterEach(() => {
-  if (origHome !== undefined) process.env.LLM_PIPELINE_HOME = origHome;
-  else delete process.env.LLM_PIPELINE_HOME;
+  if (origHome !== undefined) process.env.RUNOFF_HOME = origHome;
+  else delete process.env.RUNOFF_HOME;
   rmSync(home, { recursive: true, force: true });
 });
 

@@ -55,4 +55,4 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Runtime uses **tsx**; `npx tsc --noEmit` may report historical debt — see [CONTRIBUTING.md](CONTRIBUTING.md)
 - Docker / devcontainer not provided; requires Node 20+, Python 3, Git locally
 
-[3.0.0]: https://github.com/your-org/llm-pipeline/releases/tag/v3.0.0
+[3.0.0]: https://github.com/your-org/runoff/releases/tag/v3.0.0

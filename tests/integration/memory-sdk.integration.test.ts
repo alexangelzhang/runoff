@@ -19,12 +19,12 @@ const zepInstalled = hasPackage("@getzep/zep-cloud");
 
 test(
   "LazyRemoteMemoryClient uses mem0 SDK when mem0ai installed",
-  { skip: !mem0Installed || !process.env.LLM_PIPELINE_MEMORY_API_KEY },
+  { skip: !mem0Installed || !process.env.RUNOFF_MEMORY_API_KEY },
   async () => {
     const client = new LazyRemoteMemoryClient(
       {
         type: "mem0",
-        apiKey: process.env.LLM_PIPELINE_MEMORY_API_KEY,
+        apiKey: process.env.RUNOFF_MEMORY_API_KEY,
         userId: "sdk-test",
         variant: "platform",
       },
@@ -37,12 +37,12 @@ test(
 
 test(
   "LazyRemoteMemoryClient uses zep SDK when @getzep/zep-cloud installed",
-  { skip: !zepInstalled || !process.env.LLM_PIPELINE_MEMORY_API_KEY },
+  { skip: !zepInstalled || !process.env.RUNOFF_MEMORY_API_KEY },
   async () => {
     const client = new LazyRemoteMemoryClient(
       {
         type: "zep",
-        apiKey: process.env.LLM_PIPELINE_MEMORY_API_KEY,
+        apiKey: process.env.RUNOFF_MEMORY_API_KEY,
         sessionId: "sdk-test-session",
       },
       "sdk",

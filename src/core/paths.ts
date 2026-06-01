@@ -22,7 +22,7 @@ export function getWorkspaceManagerScriptPath(): string {
 }
 
 export function getPipelineHomeDir(): string {
-  return process.env.LLM_PIPELINE_HOME ?? join(homedir(), ".llm-pipeline");
+  return process.env.RUNOFF_HOME ?? join(homedir(), ".runoff");
 }
 
 export function getTasksDir(): string {

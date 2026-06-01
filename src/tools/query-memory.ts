@@ -20,7 +20,7 @@ const CATEGORIES = [
 
 export function register(server: McpServer) {
   server.tool(
-    "llm_query_memory",
+    "runoff_query_memory",
     "Search pipeline agent memory (local disk + optional Mem0/Zep/http remote via retrieveMerged).",
     {
       query: z.string().optional().describe("Semantic or text search string"),

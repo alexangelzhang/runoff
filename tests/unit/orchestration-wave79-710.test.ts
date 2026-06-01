@@ -256,7 +256,7 @@ test("AgentMemory: store and retrieve", () => {
   const mem = new InMemoryAgentMemory();
   mem.store({
     agentId: A,
-    scope: { project: "llm-pipeline" },
+    scope: { project: "runoff" },
     category: "pattern",
     content: "Use branded types for type safety",
     relevance: 0.9,

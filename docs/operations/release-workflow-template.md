@@ -23,7 +23,7 @@ When manually triggered, the workflow runs these stages in order:
 ## Assumptions
 
 - The repository is packaged with `npm pack`
-- The real provider pre-release gate runs on a self-hosted runner labeled `llm-pipeline-real-smoke`
+- The real provider pre-release gate runs on a self-hosted runner labeled `runoff-real-smoke`
 - Real provider secrets and login state are already prepared as described in `docs/operations/real-provider-smoke-runner-checklist.md`
 
 ## Recommended rollout

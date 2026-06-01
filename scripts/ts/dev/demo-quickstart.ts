@@ -19,14 +19,14 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), "../../..");
 const CONFIG_SRC = join(ROOT, "examples", "configs", "quickstart.config.json");
 
 async function main(): Promise<void> {
-  const home = mkdtempSync(join(tmpdir(), "llm-pipeline-demo-"));
-  const runDir = mkdtempSync(join(tmpdir(), "llm-pipeline-demo-cwd-"));
-  process.env.LLM_PIPELINE_HOME = home;
+  const home = mkdtempSync(join(tmpdir(), "runoff-demo-"));
+  const runDir = mkdtempSync(join(tmpdir(), "runoff-demo-cwd-"));
+  process.env.RUNOFF_HOME = home;
   cpSync(CONFIG_SRC, join(runDir, "pipeline.config.json"));
   process.chdir(runDir);
   clearConfigCache();
 
-  console.log("llm-pipeline quickstart (mock providers, no API keys)\n");
+  console.log("runoff quickstart (mock providers, no API keys)\n");
   console.log(`  config:     ${CONFIG_SRC}`);
   console.log(`  data home:  ${getPipelineHomeDir()}\n`);
 

@@ -1,6 +1,6 @@
 # External Memory — Production Checklist (Phase 9+ TOP2)
 
-Local disk (`~/.llm-pipeline/memory/`) remains the **source of truth** for pipeline hooks. Remote backends (Mem0 / Zep / HTTP) mirror writes and support **async** hybrid search.
+Local disk (`~/.runoff/memory/`) remains the **source of truth** for pipeline hooks. Remote backends (Mem0 / Zep / HTTP) mirror writes and support **async** hybrid search.
 
 ## MCP tooling
 
@@ -57,7 +57,7 @@ Tests: `await flushPipelineMemoryFormationQueue()` after `onPipelineEnd` when as
 
 ## Production checklist
 
-1. Set `memoryBackend.type` and env fallbacks (`LLM_PIPELINE_MEMORY_API_KEY`, etc.).
+1. Set `memoryBackend.type` and env fallbacks (`RUNOFF_MEMORY_API_KEY`, etc.).
 2. Run `llm_memory_status` with `probe=true` before enabling in CI agents.
 3. Use `llm_query_memory` to verify remote search returns expected entries.
 4. Do not rely on remote-only reads during hot pipeline path until hooks adopt async enrichment (future).

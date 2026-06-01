@@ -74,16 +74,16 @@ let origHome: string | undefined;
 
 beforeEach(() => {
   tmpDir = mkdtempSync(join(tmpdir(), "pipeline-hooks-test-"));
-  origHome = process.env.LLM_PIPELINE_HOME;
-  process.env.LLM_PIPELINE_HOME = tmpDir;
+  origHome = process.env.RUNOFF_HOME;
+  process.env.RUNOFF_HOME = tmpDir;
   resetSharedMemory();
 });
 
 afterEach(() => {
   if (origHome !== undefined) {
-    process.env.LLM_PIPELINE_HOME = origHome;
+    process.env.RUNOFF_HOME = origHome;
   } else {
-    delete process.env.LLM_PIPELINE_HOME;
+    delete process.env.RUNOFF_HOME;
   }
   resetSharedMemory();
   try {

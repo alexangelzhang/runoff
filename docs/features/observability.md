@@ -1,15 +1,15 @@
 # 可观测模块（本地、轻量）
 
-> **定位**：借鉴 **LangSmith、LangFuse、Phoenix** 等产品的**思路**（非 SDK/SaaS 接入），在 **llm-pipeline 自有存储与 MCP** 内做轻量闭环。  
+> **定位**：借鉴 **LangSmith、LangFuse、Phoenix** 等产品的**思路**（非 SDK/SaaS 接入），在 **runoff 自有存储与 MCP** 内做轻量闭环。  
 > **我们不是** LangSmith/Langfuse 的 UI 或托管替代 — 见下文「明确不做」。
 
 ## 要回答的三个问题
 
 | 问题 | 模块 | 存储 / 入口 |
 |------|------|-------------|
-| 单次 pipeline 发生了什么？ | **Trace** | `~/.llm-pipeline/traces/` · MCP `llm_query_traces` |
-| 同一任务多配置/多 prompt 谁更好？ | **Experiment** | `~/.llm-pipeline/experiments.jsonl` · MCP `llm_query_experiments` |
-| 可选：给外部脚本或人工复盘？ | **Dataset 导出** | `~/.llm-pipeline/datasets/<experimentId>.jsonl` |
+| 单次 pipeline 发生了什么？ | **Trace** | `~/.runoff/traces/` · MCP `llm_query_traces` |
+| 同一任务多配置/多 prompt 谁更好？ | **Experiment** | `~/.runoff/experiments.jsonl` · MCP `llm_query_experiments` |
+| 可选：给外部脚本或人工复盘？ | **Dataset 导出** | `~/.runoff/datasets/<experimentId>.jsonl` |
 
 成本与跨进程追踪（已有、非本模块核心）：
 
@@ -66,7 +66,7 @@ llm_run_pipeline
 
 **LangFuse 借鉴已落地**：`traces/scores.jsonl` 记录 `traceId` + 数值/备注；eval-report 的 `traceInsights` 带一行 postmortem 摘要。
 
-**LangSmith 值得多借的一点**：**Dataset 行 ↔ Run** 一一对应、便于离线复现——已由 `llm-pipeline-eval-v1` + `traceId` 字段覆盖。
+**LangSmith 值得多借的一点**：**Dataset 行 ↔ Run** 一一对应、便于离线复现——已由 `runoff-eval-v1` + `traceId` 字段覆盖。
 
 ## 明确不做（非目标）
 
@@ -101,21 +101,21 @@ Spans are derived from pipeline/step traces at end of run — suitable for Jaege
 ```bash
 # 个人试用（无 Docker）
 brew install opentelemetry-collector   # macOS 可选
-LLM_PIPELINE_OTEL_DOWNLOAD=1 npm run otel-collector:start
+RUNOFF_OTEL_DOWNLOAD=1 npm run otel-collector:start
 npm run verify:otel-collector:local
 
 # 仅连公司已有 Collector
 export OTEL_EXPORTER_OTLP_ENDPOINT=https://internal-collector:4318
-export LLM_PIPELINE_OTEL_SKIP_START=1
-LLM_PIPELINE_OTEL_COLLECTOR_REQUIRED=1 npm run verify:otel-collector
+export RUNOFF_OTEL_SKIP_START=1
+RUNOFF_OTEL_COLLECTOR_REQUIRED=1 npm run verify:otel-collector
 ```
 
-CI：`verify:otel-export` 必过；`verify:otel-collector` 无 listener 时 SKIP。pre-release 用 `otel-collector.sh start` + `LLM_PIPELINE_OTEL_DOWNLOAD=1`，验证失败会真实失败（不再 `continue-on-error`）。
+CI：`verify:otel-export` 必过；`verify:otel-collector` 无 listener 时 SKIP。pre-release 用 `otel-collector.sh start` + `RUNOFF_OTEL_DOWNLOAD=1`，验证失败会真实失败（不再 `continue-on-error`）。
 
 ## 本地 UI（简易）
 
 ```bash
-npm run pipeline:observability:ui
+npm run runoff:observability:ui
 # 或
 npx tsx scripts/ts/dev/pipeline-cli.ts observability ui --port 8765
 ```
@@ -167,5 +167,5 @@ npx tsx scripts/ts/dev/pipeline-cli.ts traces tail
 ## 扩展原则（后续 UI / 观测）
 
 - UI：在现有 HTTP server 上增加图表、trace↔experiment 深链、实时 tail WebSocket（可选）。
-- 严格写盘：`LLM_PIPELINE_TRACE_STRICT=1` 时 trace 写入失败会抛错（默认仅 warn）。
+- 严格写盘：`RUNOFF_TRACE_STRICT=1` 时 trace 写入失败会抛错（默认仅 warn）。
 - 避免：新配置文件层、重复 trace 存储、托管 SaaS 耦合。

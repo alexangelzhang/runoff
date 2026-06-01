@@ -77,10 +77,10 @@ export function describeMemoryBackend(
     baseUrl: backend.type === "local" ? undefined : backend.baseUrl,
     sessionId: backend.type === "zep" ? backend.sessionId : undefined,
     userIdPresent: Boolean(
-      raw?.userId ?? process.env.LLM_PIPELINE_MEMORY_USER_ID,
+      raw?.userId ?? process.env.RUNOFF_MEMORY_USER_ID,
     ),
     apiKeyPresent: Boolean(
-      raw?.apiKey ?? process.env.LLM_PIPELINE_MEMORY_API_KEY,
+      raw?.apiKey ?? process.env.RUNOFF_MEMORY_API_KEY,
     ),
     readPath,
     notes,

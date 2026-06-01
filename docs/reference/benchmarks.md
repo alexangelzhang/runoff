@@ -4,7 +4,7 @@
 
 SWE-bench measures whether an agent can resolve GitHub issues end-to-end — find the right files, write the fix, pass the tests — using a single model call or agent loop. It's a useful benchmark for that task.
 
-llm-pipeline is infrastructure for building and running those loops, not a model or an agent itself. Asking for its SWE-bench score is like asking for the SWE-bench score of GitHub Actions.
+runoff is infrastructure for building and running those loops, not a model or an agent itself. Asking for its SWE-bench score is like asking for the SWE-bench score of GitHub Actions.
 
 What can be measured:
 
@@ -16,10 +16,10 @@ What can be measured:
 
 **Real provider smoke:**
 - Each release runs `npm run smoke:real:pre-release` against the configured CLI backends
-- Results logged in `~/.llm-pipeline/traces/` and checked against `docs/reference/supported-backends.md`
+- Results logged in `~/.runoff/traces/` and checked against `docs/reference/supported-backends.md`
 - Nightly CI: `.github/workflows/real-provider-smoke-nightly.yml`
 
-These tests verify that the pipeline layer does what it says. The quality of the code produced by a specific agent running inside the pipeline depends on that agent — Codex, Gemini, Claude Code — not on llm-pipeline.
+These tests verify that the pipeline layer does what it says. The quality of the code produced by a specific agent running inside the pipeline depends on that agent — Codex, Gemini, Claude Code — not on runoff.
 
 ---
 
@@ -47,7 +47,7 @@ For reproducible token-cost measurements across 10 task scenarios:
 
 ## Industry comparison reference
 
-For a strategic comparison of llm-pipeline against LangGraph, CrewAI, AutoGen, and OpenHands:
+For a strategic comparison of runoff against LangGraph, CrewAI, AutoGen, and OpenHands:
 
 → [**differentiation.md**](differentiation.md) — feature matrix + architecture rationale  
 → [**industry-benchmark.md**](industry-benchmark.md) — pinned commit-level audit against 5 frameworks

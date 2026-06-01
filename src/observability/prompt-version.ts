@@ -1,7 +1,7 @@
 /**
  * Phase 8.3.11 — Prompt version storage and replay (LangSmith-style).
  *
- * Append-only JSONL per trace: ~/.llm-pipeline/prompt-versions/{traceId}.jsonl
+ * Append-only JSONL per trace: ~/.runoff/prompt-versions/{traceId}.jsonl
  */
 
 import { createHash } from "node:crypto";

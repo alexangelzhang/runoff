@@ -70,8 +70,8 @@ function startWatcher(provider: string, homeDir: string): { child: ChildProcess;
     detached: true,
     env: {
       ...process.env,
-      LLM_PIPELINE_HOME: homeDir,
-      LLM_PIPELINE_MAX_CONCURRENT: "1",
+      RUNOFF_HOME: homeDir,
+      RUNOFF_MAX_CONCURRENT: "1",
     },
     stdio: ["ignore", "pipe", "pipe"],
   });
@@ -133,11 +133,11 @@ function enqueueTask(homeDir: string, provider: string, task: Record<string, unk
 }
 
 test("session workspace agent-write keeps source repo untouched until finalize and survives resume", async () => {
-  const previousHome = process.env.LLM_PIPELINE_HOME;
+  const previousHome = process.env.RUNOFF_HOME;
   const sandboxDir = mkdtempSync(join(tmpdir(), "llm-orch-session-"));
   const homeDir = join(sandboxDir, "home");
   mkdirSync(homeDir, { recursive: true });
-  process.env.LLM_PIPELINE_HOME = homeDir;
+  process.env.RUNOFF_HOME = homeDir;
 
   const repoDir = realpathSync(createGitRepo(sandboxDir, "winner-repo"));
 
@@ -199,20 +199,20 @@ test("session workspace agent-write keeps source repo untouched until finalize a
     assert.equal(activeWorkspaces.size, 0);
   } finally {
     await stopWatcher(watcher.child);
-    process.env.LLM_PIPELINE_HOME = previousHome;
+    process.env.RUNOFF_HOME = previousHome;
     rmSync(sandboxDir, { recursive: true, force: true });
   }
 });
 
 test("runPipelineMode agent race waits for judge and finalizes the chosen workspace", async () => {
-  const previousHome = process.env.LLM_PIPELINE_HOME;
+  const previousHome = process.env.RUNOFF_HOME;
   const previousCwd = process.cwd();
   const sandboxDir = mkdtempSync(join(tmpdir(), "llm-orch-pipeline-race-"));
   const homeDir = join(sandboxDir, "home");
   const configDir = join(sandboxDir, "config");
   mkdirSync(homeDir, { recursive: true });
   mkdirSync(configDir, { recursive: true });
-  process.env.LLM_PIPELINE_HOME = homeDir;
+  process.env.RUNOFF_HOME = homeDir;
 
   const repoDir = realpathSync(createGitRepo(sandboxDir, "pipeline-race-repo"));
   const repoSrcDir = join(repoDir, "src");
@@ -323,21 +323,21 @@ test("runPipelineMode agent race waits for judge and finalizes the chosen worksp
     activeWorkspaces.clear();
     clearConfigCache();
     process.chdir(previousCwd);
-    if (previousHome === undefined) delete process.env.LLM_PIPELINE_HOME;
-    else process.env.LLM_PIPELINE_HOME = previousHome;
+    if (previousHome === undefined) delete process.env.RUNOFF_HOME;
+    else process.env.RUNOFF_HOME = previousHome;
     rmSync(sandboxDir, { recursive: true, force: true });
   }
 });
 
 test("runPipelineMode agent race auto-pick applies winner without awaiting_judge", async () => {
-  const previousHome = process.env.LLM_PIPELINE_HOME;
+  const previousHome = process.env.RUNOFF_HOME;
   const previousCwd = process.cwd();
   const sandboxDir = mkdtempSync(join(tmpdir(), "llm-orch-pipeline-race-autopick-"));
   const homeDir = join(sandboxDir, "home");
   const configDir = join(sandboxDir, "config");
   mkdirSync(homeDir, { recursive: true });
   mkdirSync(configDir, { recursive: true });
-  process.env.LLM_PIPELINE_HOME = homeDir;
+  process.env.RUNOFF_HOME = homeDir;
 
   const repoDir = realpathSync(createGitRepo(sandboxDir, "pipeline-race-autopick-repo"));
   const repoSrcDir = join(repoDir, "src");
@@ -393,21 +393,21 @@ test("runPipelineMode agent race auto-pick applies winner without awaiting_judge
     activeWorkspaces.clear();
     clearConfigCache();
     process.chdir(previousCwd);
-    if (previousHome === undefined) delete process.env.LLM_PIPELINE_HOME;
-    else process.env.LLM_PIPELINE_HOME = previousHome;
+    if (previousHome === undefined) delete process.env.RUNOFF_HOME;
+    else process.env.RUNOFF_HOME = previousHome;
     rmSync(sandboxDir, { recursive: true, force: true });
   }
 });
 
 test("mixed standalone agent-write plus race stays isolated until winner apply", async () => {
-  const previousHome = process.env.LLM_PIPELINE_HOME;
+  const previousHome = process.env.RUNOFF_HOME;
   const previousCwd = process.cwd();
   const sandboxDir = mkdtempSync(join(tmpdir(), "llm-orch-mixed-race-"));
   const homeDir = join(sandboxDir, "home");
   const configDir = join(sandboxDir, "config");
   mkdirSync(homeDir, { recursive: true });
   mkdirSync(configDir, { recursive: true });
-  process.env.LLM_PIPELINE_HOME = homeDir;
+  process.env.RUNOFF_HOME = homeDir;
 
   const repoDir = realpathSync(createGitRepo(sandboxDir, "mixed-race-repo"));
   const repoSrcDir = join(repoDir, "src");
@@ -518,21 +518,21 @@ test("mixed standalone agent-write plus race stays isolated until winner apply",
     activeWorkspaces.clear();
     clearConfigCache();
     process.chdir(previousCwd);
-    if (previousHome === undefined) delete process.env.LLM_PIPELINE_HOME;
-    else process.env.LLM_PIPELINE_HOME = previousHome;
+    if (previousHome === undefined) delete process.env.RUNOFF_HOME;
+    else process.env.RUNOFF_HOME = previousHome;
     rmSync(sandboxDir, { recursive: true, force: true });
   }
 });
 
 test("runPipelineMode surfaces apply failures and preserves workspace for recovery", async () => {
-  const previousHome = process.env.LLM_PIPELINE_HOME;
+  const previousHome = process.env.RUNOFF_HOME;
   const previousCwd = process.cwd();
   const sandboxDir = mkdtempSync(join(tmpdir(), "llm-orch-apply-fail-"));
   const homeDir = join(sandboxDir, "home");
   const configDir = join(sandboxDir, "config");
   mkdirSync(homeDir, { recursive: true });
   mkdirSync(configDir, { recursive: true });
-  process.env.LLM_PIPELINE_HOME = homeDir;
+  process.env.RUNOFF_HOME = homeDir;
 
   const repoDir = realpathSync(createGitRepo(sandboxDir, "apply-fail-repo"));
   const repoSrcDir = join(repoDir, "src");
@@ -610,18 +610,18 @@ test("runPipelineMode surfaces apply failures and preserves workspace for recove
     activeWorkspaces.clear();
     clearConfigCache();
     process.chdir(previousCwd);
-    if (previousHome === undefined) delete process.env.LLM_PIPELINE_HOME;
-    else process.env.LLM_PIPELINE_HOME = previousHome;
+    if (previousHome === undefined) delete process.env.RUNOFF_HOME;
+    else process.env.RUNOFF_HOME = previousHome;
     rmSync(sandboxDir, { recursive: true, force: true });
   }
 });
 
 test("race-style finalize applies the winner patch and abort cleans up candidates", async () => {
-  const previousHome = process.env.LLM_PIPELINE_HOME;
+  const previousHome = process.env.RUNOFF_HOME;
   const sandboxDir = mkdtempSync(join(tmpdir(), "llm-orch-race-"));
   const homeDir = join(sandboxDir, "home");
   mkdirSync(homeDir, { recursive: true });
-  process.env.LLM_PIPELINE_HOME = homeDir;
+  process.env.RUNOFF_HOME = homeDir;
 
   const repoDir = realpathSync(createGitRepo(sandboxDir));
 
@@ -741,7 +741,7 @@ test("race-style finalize applies the winner patch and abort cleans up candidate
     activeWorkspaces.clear();
     assert.equal(activeWorkspaces.size, 0);
   } finally {
-    process.env.LLM_PIPELINE_HOME = previousHome;
+    process.env.RUNOFF_HOME = previousHome;
     rmSync(sandboxDir, { recursive: true, force: true });
   }
 });

@@ -61,7 +61,7 @@ export class ZepMemoryClient implements RemoteMemoryClient {
   }
 
   private sessionId(entry?: MemoryEntry): string {
-    return this.config.sessionId ?? this.config.userId ?? entry?.scope?.user ?? "llm-pipeline";
+    return this.config.sessionId ?? this.config.userId ?? entry?.scope?.user ?? "runoff";
   }
 
   async push(entry: MemoryEntry): Promise<void> {

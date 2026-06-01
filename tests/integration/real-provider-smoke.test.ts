@@ -11,7 +11,7 @@ import {
   renderRealProviderSmokeSummaryMarkdown,
 } from "../../src/pipeline/real-provider-smoke-runner.ts";
 
-const ROOT = "/tmp/llm-pipeline-test-root";
+const ROOT = "/tmp/runoff-test-root";
 
 test("parseRealProviderSmokeArgs: nightly defaults are strict + race", () => {
   const options = parseRealProviderSmokeArgs(["--mode", "nightly"], ROOT, join(ROOT, "reports"));
@@ -48,7 +48,7 @@ test("evaluateRealProviderSmokeOutcome: strict mode fails on skipped cases", () 
         result: "skipped",
         skipReason: "missing argv",
         startedAt: new Date().toISOString(),
-        providerEnvNames: ["LLM_PIPELINE_REAL_CODEX_ARGV_JSON"],
+        providerEnvNames: ["RUNOFF_REAL_CODEX_ARGV_JSON"],
       },
     ],
   });
@@ -66,7 +66,7 @@ test("evaluateRealProviderSmokeOutcome: all passed with exit 0 succeeds", () => 
         label: "codex",
         result: "passed",
         startedAt: new Date().toISOString(),
-        providerEnvNames: ["LLM_PIPELINE_REAL_CODEX_ARGV_JSON"],
+        providerEnvNames: ["RUNOFF_REAL_CODEX_ARGV_JSON"],
       },
     ],
   });
@@ -83,7 +83,7 @@ test("loadRealProviderSmokeCases: reads case metadata from report dir", () => {
       label: "codex",
       result: "passed",
       startedAt: "2026-05-26T00:00:00.000Z",
-      providerEnvNames: ["LLM_PIPELINE_REAL_CODEX_ARGV_JSON"],
+      providerEnvNames: ["RUNOFF_REAL_CODEX_ARGV_JSON"],
     }),
     "utf-8",
   );

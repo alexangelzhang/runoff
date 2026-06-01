@@ -10,7 +10,7 @@ export function observabilityUiHtml(apiBase: string): string {
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>llm-pipeline observability</title>
+  <title>runoff observability</title>
   <style>
     :root { font-family: system-ui, sans-serif; color: #e8e8e8; background: #12141a; }
     body { margin: 0; padding: 1rem 1.25rem; }
@@ -30,7 +30,7 @@ export function observabilityUiHtml(apiBase: string): string {
   </style>
 </head>
 <body>
-  <h1>llm-pipeline observability</h1>
+  <h1>runoff observability</h1>
   <p class="muted" id="api-label"></p>
   <nav>
     <button type="button" id="tab-traces" class="active">Traces</button>

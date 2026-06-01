@@ -18,14 +18,14 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), "../../..");
 const CONFIG_SRC = join(ROOT, "examples", "configs", "race-demo.config.json");
 
 async function main(): Promise<void> {
-  const home = mkdtempSync(join(tmpdir(), "llm-pipeline-race-demo-"));
-  const runDir = mkdtempSync(join(tmpdir(), "llm-pipeline-race-demo-cwd-"));
-  process.env.LLM_PIPELINE_HOME = home;
+  const home = mkdtempSync(join(tmpdir(), "runoff-race-demo-"));
+  const runDir = mkdtempSync(join(tmpdir(), "runoff-race-demo-cwd-"));
+  process.env.RUNOFF_HOME = home;
   cpSync(CONFIG_SRC, join(runDir, "pipeline.config.json"));
   process.chdir(runDir);
   clearConfigCache();
 
-  console.log("llm-pipeline race mode demo (mock providers, no API keys)");
+  console.log("runoff race mode demo (mock providers, no API keys)");
   console.log("Two providers compete on the implement step.\n");
   console.log(`  config:    ${CONFIG_SRC}`);
   console.log(`  data home: ${getPipelineHomeDir()}\n`);

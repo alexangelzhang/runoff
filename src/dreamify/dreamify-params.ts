@@ -1,5 +1,5 @@
 /**
- * M3 Dreamify — persisted retrieval hyperparameters (~/.llm-pipeline/dreamify/).
+ * M3 Dreamify — persisted retrieval hyperparameters (~/.runoff/dreamify/).
  */
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";

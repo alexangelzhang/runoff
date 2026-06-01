@@ -16,14 +16,14 @@ describe("observability dataset + eval report", () => {
   let tmpDir: string;
 
   beforeEach(() => {
-    prevHome = process.env.LLM_PIPELINE_HOME;
+    prevHome = process.env.RUNOFF_HOME;
     tmpDir = mkdtempSync(join(tmpdir(), "llm-obs-"));
-    process.env.LLM_PIPELINE_HOME = tmpDir;
+    process.env.RUNOFF_HOME = tmpDir;
   });
 
   afterEach(() => {
-    if (prevHome === undefined) delete process.env.LLM_PIPELINE_HOME;
-    else process.env.LLM_PIPELINE_HOME = prevHome;
+    if (prevHome === undefined) delete process.env.RUNOFF_HOME;
+    else process.env.RUNOFF_HOME = prevHome;
     rmSync(tmpDir, { recursive: true, force: true });
   });
 
@@ -62,7 +62,7 @@ describe("observability dataset + eval report", () => {
     });
   }
 
-  it("buildExperimentDatasetRows uses llm-pipeline-eval-v1 schema", () => {
+  it("buildExperimentDatasetRows uses runoff-eval-v1 schema", () => {
     seed();
     const rows = buildExperimentDatasetRows("exp-ab");
     assert.equal(rows.length, 2);
@@ -70,7 +70,7 @@ describe("observability dataset + eval report", () => {
     assert.equal(rows[1]!.outputs.judgeOverall, 0.95);
   });
 
-  it("exportExperimentDatasetJsonl writes under ~/.llm-pipeline/datasets", () => {
+  it("exportExperimentDatasetJsonl writes under ~/.runoff/datasets", () => {
     seed();
     const { path, rowCount } = exportExperimentDatasetJsonl("exp-ab");
     assert.equal(rowCount, 2);

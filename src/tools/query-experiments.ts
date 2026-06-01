@@ -19,10 +19,10 @@ const VERDICT_FILTER = ["keep", "discard", "regression"] as const;
 
 export function register(server: McpServer) {
   server.tool(
-    "llm_query_experiments",
-    "Query A/B experiment log (~/.llm-pipeline/experiments.jsonl). " +
+    "runoff_query_experiments",
+    "Query A/B experiment log (~/.runoff/experiments.jsonl). " +
       "Formats: entries (default), summary (per variant), eval-report (winner + recommendation), " +
-      "dataset (JSONL export under ~/.llm-pipeline/datasets/).",
+      "dataset (JSONL export under ~/.runoff/datasets/).",
     {
       experimentId: z
         .string()

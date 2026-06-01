@@ -9,9 +9,9 @@
 set -uo pipefail
 
 PROVIDER="${1:?Usage: $0 <provider-name>}"
-export LLM_PIPELINE_HOME="${LLM_PIPELINE_HOME:-$HOME/.llm-pipeline}"
-TASKS_DIR="$LLM_PIPELINE_HOME/tasks"
-MAX_CONCURRENT="${LLM_PIPELINE_MAX_CONCURRENT:-2}"
+export RUNOFF_HOME="${RUNOFF_HOME:-$HOME/.runoff}"
+TASKS_DIR="$RUNOFF_HOME/tasks"
+MAX_CONCURRENT="${RUNOFF_MAX_CONCURRENT:-2}"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 TASK_RUNNER="$SCRIPT_DIR/../python/task_runner.py"
 

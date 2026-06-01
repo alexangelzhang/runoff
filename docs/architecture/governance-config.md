@@ -118,7 +118,7 @@ If `rules` is omitted or empty, the runtime applies **default rules** from `defa
 | `defer` | Throws deferred error → run/checkpoint `awaiting_approval` or `awaiting_plan_approval`; resume via MCP `approvalDecision`. |
 | `callback` | Uses MCP/CLI callback when provided. |
 
-Environment overrides: `LLM_PIPELINE_APPROVAL_MODE`, `LLM_PIPELINE_AUTO_APPROVE=1`.
+Environment overrides: `RUNOFF_APPROVAL_MODE`, `RUNOFF_AUTO_APPROVE=1`.
 
 ## Audit trail
 

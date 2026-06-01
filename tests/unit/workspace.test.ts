@@ -22,9 +22,9 @@ function createTestRepo(): string {
 }
 
 test("SessionWorkspace create and destroy lifecycle", async () => {
-  const previousHome = process.env.LLM_PIPELINE_HOME;
-  const homeDir = mkdtempSync(join(tmpdir(), "llm-pipeline-ws-"));
-  process.env.LLM_PIPELINE_HOME = homeDir;
+  const previousHome = process.env.RUNOFF_HOME;
+  const homeDir = mkdtempSync(join(tmpdir(), "runoff-ws-"));
+  process.env.RUNOFF_HOME = homeDir;
   const repo = createTestRepo();
 
   try {
@@ -38,17 +38,17 @@ test("SessionWorkspace create and destroy lifecycle", async () => {
     await ws.destroy();
     assert.ok(!existsSync(ws.worktreePath), "worktree should be cleaned up");
   } finally {
-    if (previousHome === undefined) delete process.env.LLM_PIPELINE_HOME;
-    else process.env.LLM_PIPELINE_HOME = previousHome;
+    if (previousHome === undefined) delete process.env.RUNOFF_HOME;
+    else process.env.RUNOFF_HOME = previousHome;
     rmSync(repo, { recursive: true, force: true });
     rmSync(homeDir, { recursive: true, force: true });
   }
 });
 
 test("SessionWorkspace resolveWorkDir maps original path into worktree", async () => {
-  const previousHome = process.env.LLM_PIPELINE_HOME;
-  const homeDir = mkdtempSync(join(tmpdir(), "llm-pipeline-ws-"));
-  process.env.LLM_PIPELINE_HOME = homeDir;
+  const previousHome = process.env.RUNOFF_HOME;
+  const homeDir = mkdtempSync(join(tmpdir(), "runoff-ws-"));
+  process.env.RUNOFF_HOME = homeDir;
   const repo = createTestRepo();
 
   try {
@@ -65,17 +65,17 @@ test("SessionWorkspace resolveWorkDir maps original path into worktree", async (
 
     await ws.destroy();
   } finally {
-    if (previousHome === undefined) delete process.env.LLM_PIPELINE_HOME;
-    else process.env.LLM_PIPELINE_HOME = previousHome;
+    if (previousHome === undefined) delete process.env.RUNOFF_HOME;
+    else process.env.RUNOFF_HOME = previousHome;
     rmSync(repo, { recursive: true, force: true });
     rmSync(homeDir, { recursive: true, force: true });
   }
 });
 
 test("SessionWorkspace collectPatch and applyToSource", async () => {
-  const previousHome = process.env.LLM_PIPELINE_HOME;
-  const homeDir = mkdtempSync(join(tmpdir(), "llm-pipeline-ws-"));
-  process.env.LLM_PIPELINE_HOME = homeDir;
+  const previousHome = process.env.RUNOFF_HOME;
+  const homeDir = mkdtempSync(join(tmpdir(), "runoff-ws-"));
+  process.env.RUNOFF_HOME = homeDir;
   const repo = createTestRepo();
 
   try {
@@ -105,17 +105,17 @@ test("SessionWorkspace collectPatch and applyToSource", async () => {
 
     await ws.destroy();
   } finally {
-    if (previousHome === undefined) delete process.env.LLM_PIPELINE_HOME;
-    else process.env.LLM_PIPELINE_HOME = previousHome;
+    if (previousHome === undefined) delete process.env.RUNOFF_HOME;
+    else process.env.RUNOFF_HOME = previousHome;
     rmSync(repo, { recursive: true, force: true });
     rmSync(homeDir, { recursive: true, force: true });
   }
 });
 
 test("SessionWorkspace resume reuses existing worktree", async () => {
-  const previousHome = process.env.LLM_PIPELINE_HOME;
-  const homeDir = mkdtempSync(join(tmpdir(), "llm-pipeline-ws-"));
-  process.env.LLM_PIPELINE_HOME = homeDir;
+  const previousHome = process.env.RUNOFF_HOME;
+  const homeDir = mkdtempSync(join(tmpdir(), "runoff-ws-"));
+  process.env.RUNOFF_HOME = homeDir;
   const repo = createTestRepo();
 
   try {
@@ -141,8 +141,8 @@ test("SessionWorkspace resume reuses existing worktree", async () => {
     await ws2.destroy();
     assert.ok(!existsSync(worktreePath));
   } finally {
-    if (previousHome === undefined) delete process.env.LLM_PIPELINE_HOME;
-    else process.env.LLM_PIPELINE_HOME = previousHome;
+    if (previousHome === undefined) delete process.env.RUNOFF_HOME;
+    else process.env.RUNOFF_HOME = previousHome;
     rmSync(repo, { recursive: true, force: true });
     rmSync(homeDir, { recursive: true, force: true });
   }
@@ -156,9 +156,9 @@ test("SessionWorkspace resume rejects missing worktree", async () => {
 });
 
 test("SessionWorkspace no-op applyToSource with empty patch", async () => {
-  const previousHome = process.env.LLM_PIPELINE_HOME;
-  const homeDir = mkdtempSync(join(tmpdir(), "llm-pipeline-ws-"));
-  process.env.LLM_PIPELINE_HOME = homeDir;
+  const previousHome = process.env.RUNOFF_HOME;
+  const homeDir = mkdtempSync(join(tmpdir(), "runoff-ws-"));
+  process.env.RUNOFF_HOME = homeDir;
   const repo = createTestRepo();
 
   try {
@@ -173,8 +173,8 @@ test("SessionWorkspace no-op applyToSource with empty patch", async () => {
 
     await ws.destroy();
   } finally {
-    if (previousHome === undefined) delete process.env.LLM_PIPELINE_HOME;
-    else process.env.LLM_PIPELINE_HOME = previousHome;
+    if (previousHome === undefined) delete process.env.RUNOFF_HOME;
+    else process.env.RUNOFF_HOME = previousHome;
     rmSync(repo, { recursive: true, force: true });
     rmSync(homeDir, { recursive: true, force: true });
   }

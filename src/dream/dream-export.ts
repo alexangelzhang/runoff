@@ -7,7 +7,7 @@ import { dirname, join } from "node:path";
 import { getPipelineHomeDir } from "../core/paths.js";
 import type { AgentMemory, MemoryEntry } from "../orchestration/memory.js";
 
-export const DREAM_EXPORT_SCHEMA = "llm-pipeline-dream-export-v1" as const;
+export const DREAM_EXPORT_SCHEMA = "runoff-dream-export-v1" as const;
 
 export type DreamExportCategory = "pattern" | "lesson" | "trace_summary" | "entity_relation";
 

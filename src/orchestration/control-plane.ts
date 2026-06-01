@@ -22,7 +22,7 @@ export interface ControlPlane {
 }
 
 export function resolveControlPlaneMode(config: PipelineConfig): ControlPlaneMode {
-  const env = process.env.LLM_PIPELINE_CONTROL_PLANE;
+  const env = process.env.RUNOFF_CONTROL_PLANE;
   if (env === "file" || env === "durable") return "file";
   if (env === "memory") return "memory";
   return config.runtime?.controlPlane === "file" ? "file" : "memory";

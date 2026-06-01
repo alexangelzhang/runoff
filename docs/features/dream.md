@@ -18,9 +18,9 @@ Not run on the hot pipeline path. Trigger via MCP `llm_dream_run` or import `run
 
 | Path | Purpose |
 |------|---------|
-| `~/.llm-pipeline/dream-state.json` | `lastDreamAt` cursor |
-| `~/.llm-pipeline/dream-audit.jsonl` | One JSON line per rule/audit action |
-| `~/.llm-pipeline/memory/` | Local memory (source of truth) |
+| `~/.runoff/dream-state.json` | `lastDreamAt` cursor |
+| `~/.runoff/dream-audit.jsonl` | One JSON line per rule/audit action |
+| `~/.runoff/memory/` | Local memory (source of truth) |
 
 ## Config
 

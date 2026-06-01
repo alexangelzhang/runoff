@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Fail-fast prerequisite check for llm-pipeline (Node, Python, Git).
+# Fail-fast prerequisite check for runoff (Node, Python, Git).
 set -euo pipefail
 
 fail=0
@@ -13,7 +13,7 @@ need_cmd() {
   fi
 }
 
-echo "=== llm-pipeline prerequisites ==="
+echo "=== runoff prerequisites ==="
 
 need_cmd node "Install Node.js 20+ (https://nodejs.org/)"
 need_cmd python3 "Install Python 3 (https://www.python.org/)"

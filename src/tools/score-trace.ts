@@ -10,8 +10,8 @@ import { mcpError, mcpJson, mcpErrorFrom } from "./mcp-response.js";
 
 export function register(server: McpServer) {
   server.tool(
-    "llm_score_trace",
-    "Record a numeric score for a pipeline trace (stored in ~/.llm-pipeline/traces/scores.jsonl). " +
+    "runoff_score_trace",
+    "Record a numeric score for a pipeline trace (stored in ~/.runoff/traces/scores.jsonl). " +
     "Use for human feedback or custom evaluators.",
     {
       traceId: z.string().describe("Pipeline trace id"),

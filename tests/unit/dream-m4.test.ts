@@ -22,15 +22,15 @@ let origHome: string | undefined;
 
 test.beforeEach(() => {
   home = mkdtempSync(join(tmpdir(), "dream-m4-"));
-  origHome = process.env.LLM_PIPELINE_HOME;
-  process.env.LLM_PIPELINE_HOME = home;
+  origHome = process.env.RUNOFF_HOME;
+  process.env.RUNOFF_HOME = home;
   resetPipelineMemoryRegistry();
   setDreamifyRetrievalOverride(null);
 });
 
 test.afterEach(() => {
-  if (origHome !== undefined) process.env.LLM_PIPELINE_HOME = origHome;
-  else delete process.env.LLM_PIPELINE_HOME;
+  if (origHome !== undefined) process.env.RUNOFF_HOME = origHome;
+  else delete process.env.RUNOFF_HOME;
   setDreamifyRetrievalOverride(null);
   rmSync(home, { recursive: true, force: true });
 });
@@ -91,7 +91,7 @@ test("exportDreamMemoryJsonl writes schema rows", () => {
   assert.ok(rowCount >= 1);
   const line = readFileSync(path, "utf8").trim().split("\n")[0]!;
   const row = JSON.parse(line) as { schema: string; category: string };
-  assert.equal(row.schema, "llm-pipeline-dream-export-v1");
+  assert.equal(row.schema, "runoff-dream-export-v1");
   assert.equal(row.category, "lesson");
 });
 

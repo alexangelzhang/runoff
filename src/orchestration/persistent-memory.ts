@@ -1,7 +1,7 @@
 /**
  * Persistent Agent Memory (OpenSpace-inspired Feature 3).
  *
- * File-backed AgentMemory that persists to ~/.llm-pipeline/memory/.
+ * File-backed AgentMemory that persists to ~/.runoff/memory/.
  * Enables cross-run knowledge sharing — patterns and lessons survive restarts.
  */
 
@@ -26,7 +26,7 @@ function entryPath(dir: string, id: string): string {
 }
 
 /**
- * File-backed AgentMemory. Each entry is a separate JSON file in ~/.llm-pipeline/memory/.
+ * File-backed AgentMemory. Each entry is a separate JSON file in ~/.runoff/memory/.
  * Loads all entries on construction, writes on every mutation.
  */
 export class PersistentAgentMemory implements AgentMemory {
