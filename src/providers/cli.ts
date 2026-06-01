@@ -16,6 +16,8 @@ import {
 /** Subset of provider JSON needed at runtime (avoid importing config.ts → circular). */
 export type CLIProviderRuntimeOptions = {
   timeoutMs?: number;
+  /** Allocate a pseudo-TTY for the delegate process (for TTY-requiring CLIs like Gemini). */
+  pty?: boolean;
 };
 
 function atomicWriteJsonFile(filePath: string, data: unknown): void {
@@ -161,6 +163,7 @@ export class CLIProvider implements LLMProvider {
       timestamp: startedAt,
       startedAt,
       ...(delegateArgv ? { delegateArgv } : {}),
+      ...(this.runtimeOptions.pty ? { delegatePty: true } : {}),
       ...(req.finalizeStrategy ? { finalizeStrategy: req.finalizeStrategy } : {}),
       ...(sharedLockKey ? { sharedLockKey } : {}),
     });

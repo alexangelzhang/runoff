@@ -38,6 +38,11 @@ export const taskPayloadSchema = z.object({
    * stdout → result content (then agent modes collect git diff). Omitted → in-process stub (tests/CI).
    */
   delegateArgv: z.array(z.string()).min(1).optional(),
+  /**
+   * When true, task_runner.py allocates a pseudo-TTY for the delegate process.
+   * Required for CLI tools that detect the absence of a TTY and refuse to run (e.g. Gemini CLI).
+   */
+  delegatePty: z.boolean().optional(),
   finalizeStrategy: z.enum(["auto", "defer"]).optional(),
   sharedLockKey: z.string().optional(),
 });

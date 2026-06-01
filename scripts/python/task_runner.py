@@ -1,11 +1,16 @@
 #!/usr/bin/env python3
 import argparse
 import base64
+import fcntl
 import json
 import os
+import pty
+import re
+import select
 import subprocess
 import sys
 import tempfile
+import time
 from datetime import datetime, timezone
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
@@ -28,6 +33,7 @@ TASK_PAYLOAD_FIELD_NAMES = (
     "agentId",
     "parentHandoffId",
     "delegateArgv",
+    "delegatePty",
     "finalizeStrategy",
     "sharedLockKey",
 )
@@ -85,6 +91,7 @@ class TaskPayload:
     agentId: Optional[str] = None
     parentHandoffId: Optional[str] = None
     delegateArgv: Optional[List[str]] = None
+    delegatePty: bool = False
     finalizeStrategy: str = "auto"
     sharedLockKey: Optional[str] = None
 
@@ -170,6 +177,7 @@ class TaskPayload:
             agentId=data.get("agentId"),
             parentHandoffId=data.get("parentHandoffId"),
             delegateArgv=cls._parse_delegate_argv(data.get("delegateArgv")),
+            delegatePty=bool(data.get("delegatePty", False)),
             finalizeStrategy=cls._parse_finalize_strategy(data.get("finalizeStrategy")),
             sharedLockKey=cls._parse_optional_string("sharedLockKey", data.get("sharedLockKey")),
         )
@@ -275,6 +283,105 @@ def _run_delegate(argv: List[str], cwd: str, stdin_text: str) -> subprocess.Comp
         capture_output=True,
         timeout=DELEGATE_EXEC_TIMEOUT_SEC,
     )
+
+
+def _run_delegate_pty(argv: List[str], cwd: str, stdin_text: str, timeout: int = DELEGATE_EXEC_TIMEOUT_SEC) -> subprocess.CompletedProcess[str]:
+    """Run delegate with a pseudo-TTY so the child process sees isatty()==True.
+
+    Uses pty.openpty() to create a master/slave pair. The child's stdin/stdout/stderr
+    are all connected to the slave fd. We write the prompt to the master, then read
+    all output until the process exits or the timeout fires.
+    """
+    master_fd, slave_fd = pty.openpty()
+
+    proc = subprocess.Popen(
+        argv,
+        stdin=slave_fd,
+        stdout=slave_fd,
+        stderr=slave_fd,
+        cwd=cwd,
+        close_fds=True,
+    )
+    os.close(slave_fd)
+
+    # Set master non-blocking so select() works cleanly.
+    flags = fcntl.fcntl(master_fd, fcntl.F_GETFL)
+    fcntl.fcntl(master_fd, fcntl.F_SETFL, flags | os.O_NONBLOCK)
+
+    output_chunks: List[bytes] = []
+    deadline = time.time() + timeout
+    prompt_sent = False
+    quit_sent = False
+    # Accumulated output for ready-signal detection.
+    accumulated = b""
+    # Sentinel that indicates the CLI is ready to accept input.
+    # Gemini CLI prints "YOLO mode is enabled." before its prompt.
+    READY_SENTINEL = b"mode is enabled"
+
+    def _write_bytes(fd: int, data: bytes) -> None:
+        written = 0
+        while written < len(data):
+            try:
+                n = os.write(fd, data[written:])
+                written += n
+            except BlockingIOError:
+                time.sleep(0.02)
+
+    while True:
+        remaining = deadline - time.time()
+        if remaining <= 0:
+            proc.kill()
+            proc.wait()
+            os.close(master_fd)
+            raise subprocess.TimeoutExpired(argv, timeout)
+
+        ready, _, _ = select.select([master_fd], [], [], min(remaining, 0.5))
+        if ready:
+            try:
+                chunk = os.read(master_fd, 4096)
+                if chunk:
+                    output_chunks.append(chunk)
+                    accumulated += chunk
+                    # Send prompt once CLI signals readiness.
+                    if not prompt_sent and READY_SENTINEL in accumulated:
+                        time.sleep(0.3)  # Let any further startup output flush.
+                        _write_bytes(master_fd, (stdin_text.rstrip("\n") + "\n").encode())
+                        prompt_sent = True
+                else:
+                    break  # EOF
+            except OSError:
+                break  # slave closed
+
+        if proc.poll() is not None:
+            # Process exited — drain remaining output.
+            time.sleep(0.1)
+            try:
+                while True:
+                    chunk = os.read(master_fd, 4096)
+                    if not chunk:
+                        break
+                    output_chunks.append(chunk)
+            except OSError:
+                pass
+            break
+
+        # After prompt is sent, watch for a completion indicator, then send /quit.
+        if prompt_sent and not quit_sent:
+            recent = b"".join(output_chunks[-10:])
+            # Gemini prints something like "has been updated" or file content when done.
+            # We use a 3-second silence window: if no new output for 3s after prompt, assume done.
+            # Simpler: just send /quit after a fixed wait post-prompt.
+            if b"\n" in recent and len(recent) > 100:
+                time.sleep(2.0)  # Wait for Gemini to finish writing the file.
+                _write_bytes(master_fd, b"/quit\n")
+                quit_sent = True
+
+    os.close(master_fd)
+    returncode = proc.wait(timeout=5) if proc.poll() is None else proc.returncode
+    raw_output = b"".join(output_chunks).decode(errors="replace")
+    # Strip terminal control sequences (basic ANSI escape codes).
+    clean_output = re.sub(r"\x1b\[[0-9;]*[A-Za-z]|\x1b\][^\x07]*\x07|\r", "", raw_output)
+    return subprocess.CompletedProcess(argv, returncode, stdout=clean_output, stderr="")
 
 
 def _git_output(args: List[str], cwd: str, timeout: int = GIT_DIFF_TIMEOUT_SEC) -> str:
@@ -388,7 +495,10 @@ def _apply_patch_to_repo(repo_root: str, patch_bytes: bytes) -> None:
 def _execute_delegate_or_stub(task: TaskPayload, work_dir: str, final_prompt: str) -> str:
     if task.delegateArgv:
         try:
-            proc = _run_delegate(task.delegateArgv, work_dir, final_prompt)
+            if task.delegatePty:
+                proc = _run_delegate_pty(task.delegateArgv, work_dir, final_prompt)
+            else:
+                proc = _run_delegate(task.delegateArgv, work_dir, final_prompt)
         except subprocess.TimeoutExpired:
             raise RuntimeError(f"delegateArgv subprocess timed out after {DELEGATE_EXEC_TIMEOUT_SEC}s")
         if proc.returncode != 0:
