@@ -102,3 +102,11 @@ scripts/ts/ci/check-ipc-sync.ts — CI helper: TS/Python IPC constants must matc
 - 不要在 src/tools/run-pipeline.ts 里堆编排逻辑 — 新功能放到 `src/orchestration/` 或 `src/pipeline/`
 - 不要删除 mock provider（tests 依赖它）
 - 不要改 workspace isolation 逻辑而不跑 smoke tests
+
+## 架构陷阱
+
+**DAGOrchestrator 短路 review verdict**：`DAGOrchestrator.onStepComplete` 在所有步骤完成时返回 `{type:"done", success:true}`，这会在 `if (orchestrator && orchestrationContext)` 分支里直接 `state.approved = true; break`，导致 review step 的 `NEEDS_REVISION` verdict 永远不被处理。
+
+DAG 模式下 retry 不是 review-driven 的——它只通过 `stepFailed=true`（implement 步骤 response.failed）触发，而 stepFailed 会立即让 finalStatus=failed（不是 retry）。真正的 review-driven retry 只在 `llm-driven` orchestration 模式下有效。
+
+**影响**：mock provider 的 review 差异化测试在 DAG 模式下无效，测不出 retry 轮次差异。benchmark 数据只能反映 token 成本，不反映质量差异。
