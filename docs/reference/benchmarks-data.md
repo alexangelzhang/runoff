@@ -229,4 +229,38 @@ Both implementations are correct. DeepSeek's is more defensive and API-rich; cla
 
 ### Infrastructure note
 
-`git apply --3way` fails for brand-new files (no 3-way base). The patch still applies cleanly without `--3way`. This is a known limitation tracked in `issues/OPEN-BACKLOG.md`.
+`git apply --3way` fails for brand-new files (no 3-way base). The patch still applies cleanly without `--3way`. Fixed in task_runner + workspace_manager.
+
+---
+
+## Real-provider race round 5: claude-code vs gemini-acp (2026-06-01)
+
+**First race using Gemini CLI v0.45.0 ACP mode** — agent-write via JSON-RPC stdio, no PTY.
+
+**Task:** Extract four pure utility functions from `src/components/SourcePanel.tsx` into a new `src/utils/source-utils.ts`.
+
+### What each model produced
+
+**claude-code** — complete implementation:
+- Created `src/utils/source-utils.ts` with all four exported functions + `BADGE_COLORS` constant
+- Updated `SourcePanel.tsx` to import from the new file
+- Result: compiles and works correctly
+
+**gemini-acp (Gemini 2.5 Pro via ACP)** — incomplete:
+- Updated `SourcePanel.tsx` to remove the functions and add the import line
+- Did **not** create `src/utils/source-utils.ts`
+- Result: broken state — TypeScript would error because the import target doesn't exist
+
+### Why this matters
+
+This is the scenario race mode is designed for. Without race, you would have applied Gemini's incomplete output and discovered the compile error only at build time. With `raceFinalize: defer`, both diffs are visible before any code lands.
+
+Gemini's output is "plausible but wrong" — it understood the task conceptually (remove from SourcePanel, add import) but missed half the work (create the target file). Claude Code completed both sides.
+
+**Winner selected:** claude-code (candidate 0).
+
+### ACP infrastructure note
+
+Gemini's `workspacePath` showed as `n/a` in the checkpoint because ACP does not commit changes — files are modified unstaged. The diff was visible via `git diff HEAD` in the worktree. The race apply mechanism fell back to direct file copy after `git apply --3way` found a conflict with the already-written import stub.
+
+This is an infrastructure gap to fix: ACP delegate should commit its changes (or at least stage them) so the normal worktree-based apply path works cleanly.
