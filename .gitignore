@@ -13,3 +13,5 @@ tmp/
 tests/.tmp-traces-*/
 tests/traces/
 !tests/traces/.gitkeep
+docs/.vitepress/dist
+docs/.vitepress/cache

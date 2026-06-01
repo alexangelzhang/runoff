@@ -3,8 +3,21 @@
   "version": "3.0.0",
   "description": "Multi-step code-change pipelines for coding agents — race mode, git worktree isolation, local traces",
   "license": "MIT",
-  "repository": { "type": "git", "url": "https://github.com/alexangelzhang/runoff.git" },
-  "keywords": ["mcp", "llm", "pipeline", "orchestration", "ai-agent", "dag", "coding-agent", "race-mode", "anthropic"],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/alexangelzhang/runoff.git"
+  },
+  "keywords": [
+    "mcp",
+    "llm",
+    "pipeline",
+    "orchestration",
+    "ai-agent",
+    "dag",
+    "coding-agent",
+    "race-mode",
+    "anthropic"
+  ],
   "homepage": "https://github.com/alexangelzhang/runoff#readme",
   "type": "module",
   "main": "dist/index.js",
@@ -13,6 +26,9 @@
   },
   "scripts": {
     "build": "tsc",
+    "build:docs": "vitepress build docs",
+    "dev:docs": "vitepress dev docs",
+    "preview:docs": "vitepress preview docs",
     "start": "node dist/index.js",
     "dev": "tsx src/index.ts",
     "demo": "tsx scripts/ts/dev/demo-quickstart.ts",
@@ -65,7 +81,8 @@
     "zod": "^3.25.0"
   },
   "devDependencies": {
-    "@types/node": "^22.0.0"
+    "@types/node": "^22.0.0",
+    "vitepress": "^1.6.4"
   },
   "comments": {
     "typescript-in-deps": "typescript is in dependencies (not devDependencies) because src/ast_utils.ts imports it at runtime for isSyntaxValid()"
