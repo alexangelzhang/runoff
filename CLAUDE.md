@@ -115,4 +115,6 @@ DAG 模式下 retry 不是 review-driven 的——它只通过 `stepFailed=true`
 
 **注意**：不能在 `cli.ts` 里注入 `--dir req.workDir`——`req.workDir` 是原始 repo 路径，会让 opencode 直接写原始仓库，绕过 worktree 隔离。必须在 task_runner.py 的 `_inject_dir_flag()` 里注入，时机是 worktree 创建之后。
 
-**`git apply --3way` 对新建文件失败**：新文件不在 base commit 里，`--3way` 无法计算三方合并基准，报 "does not exist in index"。patch 内容本身正确，直接用 `git apply`（不带 `--3way`）或手动复制文件可以绕过。已在 `issues/OPEN-BACKLOG.md` 跟踪。
+**`git apply --3way` 对新建文件失败**：新文件不在 base commit 里，`--3way` 无法计算三方合并基准，报 "does not exist in index"。patch 内容本身正确，直接用 `git apply`（不带 `--3way`）或手动复制文件可以绕过。已修复（task_runner + workspace_manager 均加了 fallback）。
+
+**Gemini CLI agent-write**：v0.44.x TUI 无法程序化驱动（pty 写入不响应）。v0.45.0+ 支持 ACP（`--acp` flag，JSON-RPC over stdio），已实现 `_run_delegate_acp()`。provider config 加 `"acp": true` 即可启用，内置版本检测会在运行时报错并给出升级命令。
