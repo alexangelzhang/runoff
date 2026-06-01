@@ -264,3 +264,56 @@ Gemini's output is "plausible but wrong" — it understood the task conceptually
 Gemini's `workspacePath` showed as `n/a` in the checkpoint because ACP does not commit changes — files are modified unstaged. The diff was visible via `git diff HEAD` in the worktree. The race apply mechanism fell back to direct file copy after `git apply --3way` found a conflict with the already-written import stub.
 
 This is an infrastructure gap to fix: ACP delegate should commit its changes (or at least stage them) so the normal worktree-based apply path works cleanly.
+
+**Fixed in subsequent commit**: `_run_delegate_acp()` now runs `git add -A && git commit` after session/prompt completes. See Round 6 below.
+
+---
+
+## Real-provider race round 6: claude-code vs gemini-acp — Gemini wins with stricter typing (2026-06-01)
+
+**First race where both ACP candidates have `workspacePath`** (after the ACP commit fix).
+
+**Task:** Add `SupportedSourceType = 'obsidian' | 'github' | 'notion'` type alias to `src/utils/source-utils.ts` and use it in `badgeColor`'s signature.
+
+### What each model produced
+
+**claude-code** — minimal change, keeps `BADGE_COLORS` loosely typed:
+```diff
++export type SupportedSourceType = 'obsidian' | 'github' | 'notion';
+
+-export function badgeColor(sourceType: string): string {
++export function badgeColor(sourceType: SupportedSourceType): string {
+```
+
+**gemini-acp (Gemini 2.5 Pro)** — more thorough, tightens the whole chain:
+```diff
++export type SupportedSourceType = "obsidian" | "github" | "notion";
+
+-const BADGE_COLORS: Record<string, string> = {
++const BADGE_COLORS: Record<SupportedSourceType, string> = {
+
+-export function badgeColor(sourceType: string): string {
+-  return BADGE_COLORS[sourceType.toLowerCase()] ?? "#888";
++export function badgeColor(sourceType: SupportedSourceType): string {
++  return BADGE_COLORS[sourceType] ?? "#888";
+```
+
+### Key differences
+
+| | claude-code | gemini-acp |
+|---|---|---|
+| `BADGE_COLORS` key type | `string` (unchanged) | `SupportedSourceType` (tightened) |
+| `.toLowerCase()` | kept | **removed** (redundant once type is exact) |
+| Quote style | single | double |
+
+Gemini identified that once `sourceType` is typed as `SupportedSourceType`, the `.toLowerCase()` call is both unnecessary and potentially incorrect (it would allow `"Obsidian"` but the literal type doesn't include it). Claude Code's change was correct but incomplete.
+
+### Why this matters
+
+This is the scenario race mode exists for: both outputs compile and pass a quick review, but one is strictly better. With `raceFinalize: defer` you see both diffs in your terminal before either lands in your repo.
+
+**Winner selected:** gemini-acp (candidate 1).
+
+### Infrastructure note
+
+This is the first race where the ACP commit fix was active. Both `claude-code` and `gemini-acp` show `workspacePath` in the checkpoint, and the winner was applied via the normal worktree path (`appliedVia: "workspace"`) — no manual file copy required.
