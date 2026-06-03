@@ -70,6 +70,8 @@ export type OrchestrationConfig = {
   useAgentTools?: boolean;
   /** Phase 8: provider name for external LLM planner (llm-driven mode). */
   plannerProvider?: string;
+  /** Provider name to use as rubric judge in runoff_race_judge (must not be a race candidate). */
+  judgeProvider?: string;
   /** Phase 9+: DeerFlow-style reflect → re-plan (llm-driven only). */
   reflect?: {
     enabled?: boolean;

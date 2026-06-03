@@ -131,9 +131,8 @@ export function resolveJudgeProvider(
   config: PipelineConfig,
   excludeProviders: string[] = [],
 ): { provider: LLMProvider; name: string } | null {
-  // Prefer a provider explicitly configured as judge (cast — field may be added in config)
-  const judgeProviderName = (config.orchestration as Record<string, unknown> | undefined)
-    ?.judgeProvider as string | undefined;
+  // Prefer a provider explicitly configured as judge
+  const judgeProviderName = config.orchestration?.judgeProvider;
   if (judgeProviderName && config.providers[judgeProviderName]) {
     const pc = config.providers[judgeProviderName]!;
     if (!excludeProviders.includes(judgeProviderName) && pc.type !== "mock") {
