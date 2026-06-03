@@ -102,6 +102,7 @@ scripts/ts/ci/check-ipc-sync.ts — CI helper: TS/Python IPC constants must matc
 - 不要在 src/tools/run-pipeline.ts 里堆编排逻辑 — 新功能放到 `src/orchestration/` 或 `src/pipeline/`
 - 不要删除 mock provider（tests 依赖它）
 - 不要改 workspace isolation 逻辑而不跑 smoke tests
+- 测试里不能用 `type: "openai"` 或 `type: "anthropic"` 的 provider config——`createProvider` 会立即构造客户端并验证 API key，没有 key 会抛异常。用 `type: "cli"（command: "echo"）` 或 `type: "mock"` 代替
 
 ## 架构陷阱
 
