@@ -86,6 +86,8 @@ export function register(server: McpServer) {
           candidates,
           config,
           excludeProviders: exclusions,
+          // Pass the repo root so an agent-read provider can explore it before rubric generation
+          repoPath: session.applyTargetPath,
         });
 
         let applyResult: Record<string, unknown> | undefined;
@@ -97,6 +99,7 @@ export function register(server: McpServer) {
           status: "judged",
           traceId,
           judgeProvider: judgeResult.judgeProvider,
+          agenticContext: judgeResult.agenticContext,
           rubricItemCount: judgeResult.rubric.length,
           rubric: judgeResult.rubric,
           ranked: judgeResult.ranked.map((c, rank) => ({

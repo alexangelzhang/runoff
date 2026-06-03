@@ -1,19 +1,19 @@
 /**
  * Rubric-based judge for race candidates.
  *
- * Implements a simplified version of the Agentic Rubrics approach
- * (Scale AI, arXiv 2601.04171): generate a weighted checklist from
- * task description + diffs, then score each candidate patch against it.
+ * Implements the Agentic Rubrics approach (Scale AI, arXiv 2601.04171):
+ *   Phase 0 (optional): context agent explores the repo to gather codebase-specific context
+ *   Phase 1: generate a weighted checklist from task description + repo context + diffs
+ *   Phase 2: score each candidate patch against the rubric (yes/no per item)
  *
- * Two phases:
- *   1. generateRubric  — LLM produces rubric items across 4 axes
- *   2. scoreCandidate  — LLM scores one patch against the rubric (yes/no per item)
+ * Without a context provider, falls back to single-shot rubric generation from diffs alone
+ * (simplified mode — rubric items will be less codebase-specific).
  */
 
 import type { PipelineConfig } from "../core/config.js";
 import { createProvider } from "../core/config.js";
 import type { LLMProvider } from "../providers/types.js";
-import { isTextResponse } from "../providers/types.js";
+import { isTextResponse, isAgentResponse } from "../providers/types.js";
 
 // --- Types ---
 
@@ -52,23 +52,53 @@ export interface RaceJudgeResult {
   /** Index into the original candidates array for the winner */
   winnerIndex: number;
   judgeProvider: string;
+  /** Whether agentic repo context was collected before rubric generation */
+  agenticContext: boolean;
 }
 
 // --- Prompt builders ---
 
+function buildContextCollectionPrompt(taskDescription: string): string {
+  return `You are a senior engineer preparing to review candidate patches for a software fix.
+
+## Task
+${taskDescription}
+
+## Your Goal
+Explore the repository to understand:
+1. Which files are relevant to this task (entry points, affected modules, test files)
+2. Key functions, classes, or interfaces touched by this change
+3. Existing patterns, constraints, or invariants the fix must respect
+4. How similar past fixes were structured in this codebase
+
+Use available file exploration tools (grep, find, view) to gather this context.
+Do NOT attempt to write or modify any files.
+
+When done, output a concise summary (under 600 words) covering:
+- Relevant files and their roles
+- Key code contracts or invariants to preserve
+- Specific methods or types the fix must interact with
+- Any edge cases implied by the existing code or tests`;
+}
+
 function buildRubricGenPrompt(
   taskDescription: string,
   diffs: Array<{ provider: string; diff: string }>,
+  repoContext?: string,
 ): string {
   const diffSummary = diffs
     .map((d) => `### ${d.provider}\n${d.diff.slice(0, 1500)}`)
     .join("\n\n");
 
+  const contextSection = repoContext
+    ? `\n## Repository Context (from codebase exploration)\n${repoContext}\n`
+    : "";
+
   return `You are a code review expert generating evaluation criteria for competing patches.
 
 ## Task
 ${taskDescription}
-
+${contextSection}
 ## Candidate Diffs (for context only — generate criteria from task requirements, not by favouring a specific diff)
 ${diffSummary}
 
@@ -81,9 +111,9 @@ Generate a rubric checklist with 12–20 items across exactly these four axes:
 
 Each item must be:
 - Specific and binary (answerable yes/no by inspecting the diff)
-- Grounded in the task description, not in a particular candidate's approach
+- Grounded in the task description${repoContext ? " and repository context" : ""}, not in a particular candidate's approach
 - Assigned a weight: 1=nice-to-have, 2=important, 3=must-have
-
+${repoContext ? "\nUse the repository context to write codebase-specific criteria (e.g. naming specific methods, classes, or invariants found during exploration).\n" : ""}
 Output valid JSON only — no markdown, no explanation:
 {
   "rubric": [
@@ -161,14 +191,74 @@ export function resolveJudgeProvider(
   return null;
 }
 
+/** Resolve the agent-read provider for repo context collection. Returns null if none configured. */
+function resolveContextProvider(
+  config: PipelineConfig,
+  excludeProviders: string[] = [],
+): { provider: LLMProvider; name: string } | null {
+  // Prefer explicitly configured context provider
+  const contextProviderName = config.orchestration?.contextProvider;
+  if (contextProviderName && config.providers[contextProviderName]) {
+    const pc = config.providers[contextProviderName]!;
+    if (!excludeProviders.includes(contextProviderName)) {
+      const p = createProvider(contextProviderName, pc);
+      if (p) return { provider: p, name: contextProviderName };
+    }
+  }
+
+  // Fall back: first agent-read provider not in exclusion list
+  for (const [key, pc] of Object.entries(config.providers)) {
+    if (excludeProviders.includes(key)) continue;
+    if (pc.type === "mock") continue;
+    const mode = (pc as { mode?: string }).mode;
+    if (mode !== "agent-read") continue;
+    const p = createProvider(key, pc);
+    if (p) return { provider: p, name: key };
+  }
+
+  return null;
+}
+
 // --- Core logic ---
+
+/**
+ * Phase 0 (optional): use an agent-read provider to explore the repo
+ * and collect codebase-specific context for rubric generation.
+ * Returns null if no suitable provider is available (graceful degradation).
+ */
+export async function collectRepoContext(
+  taskDescription: string,
+  repoPath: string,
+  provider: LLMProvider,
+): Promise<string | null> {
+  try {
+    const prompt = buildContextCollectionPrompt(taskDescription);
+    const response = await provider.execute({ prompt, workDir: repoPath });
+
+    if (response.failed) return null;
+
+    // agent-read returns AgentResponse; the summary field holds the exploration output
+    if (isAgentResponse(response)) {
+      return response.summary?.trim() || null;
+    }
+    // text-mode fallback (e.g. mock in tests)
+    if (isTextResponse(response)) {
+      return response.content?.trim() || null;
+    }
+    return null;
+  } catch {
+    // Context collection is best-effort — never block rubric generation
+    return null;
+  }
+}
 
 export async function generateRubric(
   taskDescription: string,
   diffs: Array<{ provider: string; diff: string }>,
   provider: LLMProvider,
+  repoContext?: string,
 ): Promise<RubricItem[]> {
-  const prompt = buildRubricGenPrompt(taskDescription, diffs);
+  const prompt = buildRubricGenPrompt(taskDescription, diffs, repoContext);
   const response = await provider.execute({ prompt });
 
   if (!isTextResponse(response) || response.failed) {
@@ -226,8 +316,10 @@ export async function judgeRaceCandidates(opts: {
   candidates: Array<{ providerName: string; diff: string }>;
   config: PipelineConfig;
   excludeProviders?: string[];
+  /** Absolute path to repo root — enables agentic context collection before rubric generation. */
+  repoPath?: string;
 }): Promise<RaceJudgeResult> {
-  const { taskDescription, candidates, config, excludeProviders = [] } = opts;
+  const { taskDescription, candidates, config, excludeProviders = [], repoPath } = opts;
 
   const judgeResolved = resolveJudgeProvider(config, excludeProviders);
   if (!judgeResolved) {
@@ -238,9 +330,23 @@ export async function judgeRaceCandidates(opts: {
   }
   const { provider: judgeProvider, name: judgeProviderName } = judgeResolved;
 
-  // Phase 1: generate rubric from all diffs combined
+  // Phase 0 (optional): collect repo context via agent-read provider
+  let repoContext: string | undefined;
+  let agenticContext = false;
+  if (repoPath) {
+    const contextResolved = resolveContextProvider(config, excludeProviders);
+    if (contextResolved) {
+      const ctx = await collectRepoContext(taskDescription, repoPath, contextResolved.provider);
+      if (ctx) {
+        repoContext = ctx;
+        agenticContext = true;
+      }
+    }
+  }
+
+  // Phase 1: generate rubric from all diffs + optional repo context
   const diffs = candidates.map((c) => ({ provider: c.providerName, diff: c.diff }));
-  const rubric = await generateRubric(taskDescription, diffs, judgeProvider);
+  const rubric = await generateRubric(taskDescription, diffs, judgeProvider, repoContext);
 
   // Phase 2: score each candidate (sequential — same provider, same rubric)
   const judged: CandidateJudgement[] = [];
@@ -268,6 +374,7 @@ export async function judgeRaceCandidates(opts: {
     ranked,
     winnerIndex,
     judgeProvider: judgeProviderName,
+    agenticContext,
   };
 }
 

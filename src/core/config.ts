@@ -72,6 +72,8 @@ export type OrchestrationConfig = {
   plannerProvider?: string;
   /** Provider name to use as rubric judge in runoff_race_judge (must not be a race candidate). */
   judgeProvider?: string;
+  /** Agent-read provider name for repo context collection before rubric generation. */
+  contextProvider?: string;
   /** Phase 9+: DeerFlow-style reflect → re-plan (llm-driven only). */
   reflect?: {
     enabled?: boolean;

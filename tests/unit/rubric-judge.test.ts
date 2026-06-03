@@ -7,6 +7,7 @@ import {
   scoreCandidate,
   resolveJudgeProvider,
   judgeRaceCandidates,
+  collectRepoContext,
   type RubricItem,
 } from "../../src/orchestration/rubric-judge.js";
 
@@ -244,4 +245,102 @@ test("judgeRaceCandidates: throws when fewer than 0 providers available", async 
     }),
     /No suitable judge provider/,
   );
+});
+
+// --- collectRepoContext ---
+
+test("collectRepoContext: returns summary from agent response", async () => {
+  const provider: LLMProvider = {
+    name: "ctx",
+    mode: "agent-read",
+    async execute(_req: LLMRequest): Promise<LLMResponse> {
+      return {
+        kind: "agent",
+        model: "ctx",
+        summary: "Relevant files: parser.ts, parser.test.ts. Key method: parseExpression().",
+        changes: "",
+        filesModified: [],
+        diffStat: "",
+      };
+    },
+  };
+  const ctx = await collectRepoContext("Fix parser bug", "/repo", provider);
+  assert.ok(ctx !== null);
+  assert.ok(ctx!.includes("parseExpression"));
+});
+
+test("collectRepoContext: returns content from text response (mock fallback)", async () => {
+  const provider: LLMProvider = {
+    name: "ctx",
+    mode: "text",
+    async execute(_req: LLMRequest): Promise<LLMResponse> {
+      return { kind: "text", content: "Key file: src/parser.ts", code: "", explanation: "", model: "ctx" };
+    },
+  };
+  const ctx = await collectRepoContext("Fix parser bug", "/repo", provider);
+  assert.ok(ctx !== null);
+  assert.ok(ctx!.includes("parser.ts"));
+});
+
+test("collectRepoContext: returns null when provider fails", async () => {
+  const provider = makeFailingProvider();
+  const ctx = await collectRepoContext("task", "/repo", provider);
+  assert.equal(ctx, null);
+});
+
+test("collectRepoContext: returns null on empty summary", async () => {
+  const provider: LLMProvider = {
+    name: "ctx",
+    mode: "agent-read",
+    async execute(_req: LLMRequest): Promise<LLMResponse> {
+      return { kind: "agent", model: "ctx", summary: "   ", changes: "", filesModified: [], diffStat: "" };
+    },
+  };
+  const ctx = await collectRepoContext("task", "/repo", provider);
+  assert.equal(ctx, null);
+});
+
+test("collectRepoContext: passes workDir to provider", async () => {
+  let capturedWorkDir: string | undefined;
+  const provider: LLMProvider = {
+    name: "ctx",
+    mode: "agent-read",
+    async execute(req: LLMRequest): Promise<LLMResponse> {
+      capturedWorkDir = req.workDir;
+      return { kind: "agent", model: "ctx", summary: "ok", changes: "", filesModified: [], diffStat: "" };
+    },
+  };
+  await collectRepoContext("task", "/my/repo", provider);
+  assert.equal(capturedWorkDir, "/my/repo");
+});
+
+// --- generateRubric with repoContext ---
+
+test("generateRubric: includes repo context in prompt when provided", async () => {
+  let capturedPrompt = "";
+  const provider: LLMProvider = {
+    name: "judge",
+    mode: "text",
+    async execute(req: LLMRequest): Promise<LLMResponse> {
+      capturedPrompt = req.prompt;
+      return { kind: "text", content: rubricJson(SAMPLE_RUBRIC), code: "", explanation: "", model: "judge" };
+    },
+  };
+  await generateRubric("Fix bug", [], provider, "Key file: src/parser.ts — parseExpression() is the entry point");
+  assert.ok(capturedPrompt.includes("Repository Context"));
+  assert.ok(capturedPrompt.includes("parseExpression"));
+});
+
+test("generateRubric: omits repo context section when not provided", async () => {
+  let capturedPrompt = "";
+  const provider: LLMProvider = {
+    name: "judge",
+    mode: "text",
+    async execute(req: LLMRequest): Promise<LLMResponse> {
+      capturedPrompt = req.prompt;
+      return { kind: "text", content: rubricJson(SAMPLE_RUBRIC), code: "", explanation: "", model: "judge" };
+    },
+  };
+  await generateRubric("Fix bug", [], provider);
+  assert.ok(!capturedPrompt.includes("Repository Context"));
 });
