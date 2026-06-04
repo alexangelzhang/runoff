@@ -22,6 +22,16 @@ export interface PipelineParams {
   approvalReason?: string;
 }
 
+/** A past race pattern surfaced at judge-pause time so the human judge has evidence. */
+export interface HistoricalPattern {
+  /** Plain-text summary of what the pattern captured. */
+  summary: string;
+  /** The traceId of the race run that produced this pattern. */
+  evidenceTraceId: string;
+  /** The provider that won in that historical race (if recorded). */
+  winnerProvider?: string;
+}
+
 export interface PipelineResult {
   status: PipelineStatus;
   rounds: number;
@@ -35,4 +45,11 @@ export interface PipelineResult {
   error?: string;
   /** Non-fatal warnings (trace persist, enrichment, etc.). */
   warnings?: string[];
+  /**
+   * Relevant historical race patterns retrieved at judge-pause time.
+   * Each entry traces back to a specific past run via evidenceTraceId,
+   * making the memory auditable: "this suggestion came from run X".
+   * Only populated when status === "awaiting_judge".
+   */
+  historicalPatterns?: HistoricalPattern[];
 }

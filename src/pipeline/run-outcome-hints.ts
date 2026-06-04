@@ -57,6 +57,15 @@ export function formatPipelineRunOutcomeHints(
       lines.push("race finalize:");
       lines.push(`  npm run pipeline:race:apply -- --session ${session} --winner 0`);
       lines.push(`  npm run pipeline:race:abort -- --trace-id ${result.traceId}`);
+      if (result.historicalPatterns && result.historicalPatterns.length > 0) {
+        lines.push("");
+        lines.push("historical patterns (past races — evidenceTraceId links to the run that produced each):");
+        for (const p of result.historicalPatterns) {
+          const winner = p.winnerProvider ? ` [winner: ${p.winnerProvider}]` : "";
+          lines.push(`  • ${p.summary.split("\n")[0]}${winner}`);
+          lines.push(`    evidence: ~/.runoff/traces/${p.evidenceTraceId}.json`);
+        }
+      }
       break;
     case "awaiting_approval":
     case "awaiting_plan_approval":

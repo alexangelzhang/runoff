@@ -28,6 +28,9 @@ import {
   releasePausedPipelineWorkspace,
 } from "./pipeline-mcp-workspace.js";
 import type { SessionWorkspace } from "../runtime/workspace.js";
+import { PatternCache } from "./pattern-cache.js";
+import { getPipelineMemory } from "../memory/pipeline-memory.js";
+import type { HistoricalPattern } from "../core/pipeline-run-types.js";
 
 export type PipelineRunParams = PipelineParams & { signal?: AbortSignal };
 
@@ -321,6 +324,37 @@ export async function executePipelineRun(args: PipelineRunParams): Promise<Pipel
     });
 
     await saveCheckpoint(sessionId, checkpointSnapshot(Math.min(endRound, maxRounds), finalStatus));
+
+    // P0: surface evidence-grounded historical patterns at judge-pause time
+    if (finalStatus === "awaiting_judge") {
+      try {
+        const memory = getPipelineMemory();
+        const cache = new PatternCache(memory);
+        const entries = await cache.matchPatternEntriesAsync(prompt, 5);
+        if (entries.length > 0) {
+          const patterns: HistoricalPattern[] = entries
+            .flatMap((e) => {
+              const meta = e.metadata as Record<string, unknown> | undefined;
+              const evidenceTraceId = typeof meta?.evidenceTraceId === "string" ? meta.evidenceTraceId : "";
+              if (!evidenceTraceId) return [];
+              const hp: HistoricalPattern = {
+                summary: e.content.slice(0, 200),
+                evidenceTraceId,
+              };
+              if (typeof meta?.winnerProvider === "string") {
+                hp.winnerProvider = meta.winnerProvider;
+              }
+              return [hp];
+            });
+          if (patterns.length > 0) {
+            finalResult.historicalPatterns = patterns;
+          }
+        }
+      } catch {
+        // Non-fatal — never delay or block judge response
+      }
+    }
+
     return finalResult;
   } finally {
     await cleanupPipelineWorkspaceInFinally({
