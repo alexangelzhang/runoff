@@ -3,7 +3,7 @@
  */
 
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdtempSync, rmSync, writeFileSync, realpathSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, writeFileSync, realpathSync, appendFileSync, readFileSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { loadCheckpoint, saveCheckpoint, type PipelineState } from "../core/state.js";
@@ -16,8 +16,62 @@ import {
   type RaceSession,
 } from "./race-registry.js";
 import { SessionWorkspace } from "./workspace.js";
+import { getPipelineMemory } from "../memory/pipeline-memory.js";
+import { runDreamifyTune } from "../dreamify/dreamify-tuner.js";
 
 const GIT_APPLY_TIMEOUT_MS = 120_000;
+const PICKS_RETUNE_EVERY = 10;
+
+/**
+ * P1-b: append pick to ~/.runoff/picks.jsonl; every PICKS_RETUNE_EVERY picks,
+ * fire an async dreamify retune so retrieval weights stay data-driven.
+ * Fire-and-forget — never throws, never delays applyRaceSession return.
+ */
+function recordRacePickAndMaybeTune(opts: {
+  traceId: string;
+  winnerIndex: number;
+  winnerProvider: string;
+  providers: string[];
+}): void {
+  try {
+    const home = process.env.RUNOFF_HOME ?? join(
+      (process.env.HOME ?? process.env.USERPROFILE ?? "/tmp"),
+      ".runoff",
+    );
+    const picksDir = join(home, "picks");
+    mkdirSync(picksDir, { recursive: true });
+    const picksPath = join(picksDir, "picks.jsonl");
+
+    const entry = JSON.stringify({
+      ts: new Date().toISOString(),
+      traceId: opts.traceId,
+      winnerIndex: opts.winnerIndex,
+      winnerProvider: opts.winnerProvider,
+      providers: opts.providers,
+    });
+    appendFileSync(picksPath, entry + "\n", "utf8");
+
+    // Count lines to decide whether to retune
+    const lines = readFileSync(picksPath, "utf8").trim().split("\n").filter(Boolean);
+    if (lines.length % PICKS_RETUNE_EVERY !== 0) return;
+
+    // Async retune — don't block apply return
+    setImmediate(() => {
+      try {
+        const memory = getPipelineMemory();
+        const report = runDreamifyTune({ experimentId: "race-picks", memory, dryRun: false });
+        if (report.improved) {
+          logger.info("race-picks-tune", `Retune improved score: ${report.baseline.breakdown.score.toFixed(3)} → ${report.best.breakdown.score.toFixed(3)}`);
+        }
+      } catch (tuneErr: unknown) {
+        logger.warn("race-picks-tune", `Retune failed (non-fatal): ${tuneErr instanceof Error ? tuneErr.message : String(tuneErr)}`);
+      }
+    });
+  } catch (err: unknown) {
+    // Never surface pick-recording errors to the caller
+    logger.warn("race-picks", `Pick record failed (non-fatal): ${err instanceof Error ? err.message : String(err)}`);
+  }
+}
 
 function applyPatchText(applyTargetPath: string, patchText: string): void {
   if (!patchText.trim()) {
@@ -331,6 +385,13 @@ export async function applyRaceSession(traceId: string, winnerIndex: number): Pr
 
     cleanupErrors.push(...(await updateCheckpointAfterRaceDecision(session, "approved")));
     deleteRaceSession(traceId);
+
+    recordRacePickAndMaybeTune({
+      traceId,
+      winnerIndex,
+      winnerProvider: winner.providerName,
+      providers: session.candidates.map((c) => c.providerName),
+    });
 
     return {
       status: "applied",
