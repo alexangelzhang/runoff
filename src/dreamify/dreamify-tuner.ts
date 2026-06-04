@@ -17,6 +17,11 @@ export interface DreamifyGridAxes {
   patternLimit?: number[];
   decayHalfLifeDays?: number[];
   fileLinkMinOverlap?: number[];
+  /** Fusion weights for the 4-strategy multi-retrieve. Single-element = fixed; multiple = tuned. */
+  semanticWeight?: number[];
+  bm25Weight?: number[];
+  graphWeight?: number[];
+  entityWeight?: number[];
 }
 
 export const DEFAULT_DREAMIFY_GRID: Required<DreamifyGridAxes> = {
@@ -24,6 +29,12 @@ export const DEFAULT_DREAMIFY_GRID: Required<DreamifyGridAxes> = {
   patternLimit: [2, 3, 5],
   decayHalfLifeDays: [3, 7, 14],
   fileLinkMinOverlap: [1, 2],
+  // Single-element defaults keep grid size at 54 (3×3×3×2×1×1×1×1).
+  // Widen these axes to enable data-driven weight tuning once enough race picks accumulate.
+  semanticWeight: [0.45],
+  bm25Weight: [0.3],
+  graphWeight: [0.15],
+  entityWeight: [0.1],
 };
 
 export interface DreamifyTuneOptions {
@@ -61,12 +72,24 @@ function buildGrid(axes: DreamifyGridAxes): DreamifyRetrievalParams[] {
     for (const patternLimit of g.patternLimit) {
       for (const days of g.decayHalfLifeDays) {
         for (const fileLinkMinOverlap of g.fileLinkMinOverlap) {
-          out.push({
-            minSemanticSimilarity,
-            patternLimit,
-            decayHalfLifeMs: daysToMs(days),
-            fileLinkMinOverlap,
-          });
+          for (const semanticWeight of g.semanticWeight) {
+            for (const bm25Weight of g.bm25Weight) {
+              for (const graphWeight of g.graphWeight) {
+                for (const entityWeight of g.entityWeight) {
+                  out.push({
+                    minSemanticSimilarity,
+                    patternLimit,
+                    decayHalfLifeMs: daysToMs(days),
+                    fileLinkMinOverlap,
+                    semanticWeight,
+                    bm25Weight,
+                    graphWeight,
+                    entityWeight,
+                  });
+                }
+              }
+            }
+          }
         }
       }
     }

@@ -156,10 +156,10 @@ export function matchPatternEntriesMultiStrategy(
 
   return fuseRanked(
     [
-      { entries: semantic, weight: 0.45 },
-      { entries: bm25, weight: 0.3 },
-      { entries: graph, weight: 0.15 },
-      { entries: entityBoost, weight: 0.1 },
+      { entries: semantic, weight: params.semanticWeight ?? 0.45 },
+      { entries: bm25, weight: params.bm25Weight ?? 0.3 },
+      { entries: graph, weight: params.graphWeight ?? 0.15 },
+      { entries: entityBoost, weight: params.entityWeight ?? 0.1 },
     ],
     limit,
   );

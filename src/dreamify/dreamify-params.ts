@@ -17,6 +17,11 @@ export interface DreamifyRetrievalParams {
   fileLinkMinOverlap: number;
   /** M4: fuse semantic + BM25-lite + graph hop (also from orchestration.dreamify.multiStrategy). */
   multiStrategy?: boolean;
+  /** M4 fusion weights — tunable via DreamifyGridAxes. Must be in (0,1]. Default: 0.45/0.30/0.15/0.10. */
+  semanticWeight?: number;
+  bm25Weight?: number;
+  graphWeight?: number;
+  entityWeight?: number;
 }
 
 export interface ResolvedDreamifyRetrieval extends DreamifyRetrievalParams {
@@ -83,6 +88,10 @@ function normalizeRetrieval(p: Partial<DreamifyRetrievalParams>): DreamifyRetrie
         ? p.fileLinkMinOverlap
         : DEFAULT_DREAMIFY_RETRIEVAL.fileLinkMinOverlap,
     multiStrategy: p.multiStrategy === true,
+    semanticWeight: typeof p.semanticWeight === "number" ? p.semanticWeight : undefined,
+    bm25Weight: typeof p.bm25Weight === "number" ? p.bm25Weight : undefined,
+    graphWeight: typeof p.graphWeight === "number" ? p.graphWeight : undefined,
+    entityWeight: typeof p.entityWeight === "number" ? p.entityWeight : undefined,
   };
 }
 
