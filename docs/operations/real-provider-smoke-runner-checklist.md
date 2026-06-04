@@ -33,6 +33,20 @@ codex --version
 gemini --version
 ```
 
+> **Codex vendor binary check (ENOENT guard):** The `codex` npm wrapper may exist while the
+> platform-specific binary is missing, causing `ENOENT` at runtime. After installing, verify:
+>
+> ```bash
+> # macOS arm64
+> ls $(npm root -g)/@openai/codex/vendor/aarch64-apple-darwin/codex/codex
+> # Linux x64
+> ls $(npm root -g)/@openai/codex/vendor/x86_64-unknown-linux-gnu/codex/codex
+> ```
+>
+> If missing: `npm uninstall -g @openai/codex && npm install -g @openai/codex@latest`
+>
+> `precheckRealProviderCliEnv()` performs this check automatically and reports `[error]` before any run.
+
 ## 3. Auth and secrets
 
 Repository-level secrets/vars expected by the workflows:

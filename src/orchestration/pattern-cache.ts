@@ -76,6 +76,8 @@ export interface ExecutionPattern {
   stepHints: StepHint[];
   /** When this pattern was captured. */
   capturedAt: string;
+  /** In race mode: the provider whose diff was selected by the human judge. */
+  winnerProvider?: string;
 }
 
 export interface StepHint {
@@ -123,6 +125,8 @@ export function extractPattern(trace: PipelineTrace): ExecutionPattern | null {
         return sum + s.usage.promptTokens + s.usage.completionTokens;
       }, 0);
 
+  const winnerProvider = trace.candidates?.find((c) => c.isWinner)?.provider;
+
   return {
     promptHash: hashPrompt(trace.prompt),
     promptSummary: trace.prompt.slice(0, MAX_PROMPT_SUMMARY),
@@ -132,6 +136,7 @@ export function extractPattern(trace: PipelineTrace): ExecutionPattern | null {
     rounds: trace.totalRounds,
     stepHints,
     capturedAt: trace.timestamp,
+    ...(winnerProvider ? { winnerProvider } : {}),
   };
 }
 

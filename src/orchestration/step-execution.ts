@@ -257,10 +257,16 @@ export async function executePipelineStep(
         ? raceEntries.map((e) => e.providerName).join("+")
         : racePick.entry.providerName
       : providerNames[0];
+  const raceFinalize = config.runtime?.raceFinalize ?? "defer";
   const awaitingJudge =
     !racePick.merged &&
-    isAgentRace &&
-    responses.some(({ resp }) => isAgentResponse(resp) && !!resp.workspace);
+    providers.length > 1 &&
+    (
+      // Agent race: pause when at least one candidate produced a real workspace
+      (isAgentRace && responses.some(({ resp }) => isAgentResponse(resp) && !!resp.workspace)) ||
+      // Text race with explicit defer config: pause so human can compare diffs
+      (!isAgentRace && raceFinalize === "defer")
+    );
 
   const durationMs = Date.now() - sStart;
   let candidateSnapshot: Candidate | undefined;
@@ -320,12 +326,12 @@ export async function executePipelineStep(
   };
 
   const raceWinnerIndex =
-    isAgentRace && awaitingJudge
+    awaitingJudge
       ? Math.max(0, responses.findIndex((r) => r.provider.name === racePick.entry.providerName))
       : undefined;
 
   let raceSession: RaceSession | undefined;
-  if (isAgentRace && awaitingJudge) {
+  if (awaitingJudge) {
     trace.raceParticipants = providerNames;
     const applyTargetPath =
       responses
@@ -344,7 +350,8 @@ export async function executePipelineStep(
         workspaceRepoRoot: isAgentResponse(resp) ? resp.workspace?.workspaceRepoRoot : undefined,
         workspaceBaseRef: isAgentResponse(resp) ? resp.workspace?.workspaceBaseRef : undefined,
         workspaceSharedLockKey: isAgentResponse(resp) ? resp.workspace?.workspaceSharedLockKey : undefined,
-        patchText: isAgentResponse(resp) ? resp.changes : undefined,
+        // Agent race: use workspace changes; text race: use code output as patch
+        patchText: isAgentResponse(resp) ? resp.changes : (isTextResponse(resp) ? resp.code : undefined),
         filesModified: isAgentResponse(resp) ? resp.filesModified : undefined,
         diffStat: isAgentResponse(resp) ? resp.diffStat : undefined,
       })),

@@ -22,6 +22,7 @@ import { register as registerDreamifyTune } from "./tools/dreamify-tune.js";
 import { register as registerDreamExport } from "./tools/dream-export.js";
 import { register as registerRace } from "./tools/race.js";
 import { register as registerRaceJudge } from "./tools/race-judge.js";
+import { register as registerQueryPicks } from "./tools/query-picks.js";
 import { register as registerRunPipeline } from "./tools/run-pipeline.js";
 import { register as registerShowAgentGraph } from "./tools/show-agent-graph.js";
 import { logger } from "./core/logger.js";
@@ -46,6 +47,7 @@ registerDreamifyTune(server);
 registerDreamExport(server);
 registerRace(server);
 registerRaceJudge(server);
+registerQueryPicks(server);
 registerRunPipeline(server);
 registerShowAgentGraph(server);
 
