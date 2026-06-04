@@ -17,6 +17,7 @@
     "controlPlane": "file"
   },
   "orchestration": {
+    "mode": "dag",
     "raceEarlyTermination": true
   }
 }

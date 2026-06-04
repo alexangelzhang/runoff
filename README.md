@@ -5,14 +5,24 @@
 
 > **Run two coding agents on the same task. Pick the winner.**
 
-**runoff** is a multi-step code-change pipeline for coding agents — declarative DAG, git worktree isolation, provider races, and local traces. Works as an **MCP server** (Cursor, Claude Desktop, Claude Code) or a standalone **CLI**.
+Give runoff one prompt. It runs **Claude Code and Codex** (or any two providers) on the **identical task** in parallel git worktrees. Both produce real diffs. You see them side by side, pick the one you want, and it merges. The other disappears.
 
 ```
-  IDE / MCP host                runoff                coding-agent CLI
-  ──────────────►   implement → review → retry   ──►   Claude Code / Codex / Gemini / …
-                           ↑ race mode ↑
-                   two providers, one task, you pick
+$ npx runoff run --prompt "Add formatRelativeTime() with edge cases"
+
+  candidate 0  claude-code        +27 lines   string input only
+  candidate 1  codex/DeepSeek     +60 lines   string | Date, future dates, week unit
+
+  → npx runoff race apply --winner 1
 ```
+
+No more hoping a single model got it right. Two models compete. You decide.
+
+![runoff race demo](docs/assets/demo.gif)
+
+**Why race instead of hoping?** A model that wrote subtly broken code is the worst model to catch its own bug — they share the same blind spots. runoff treats AI output like code review: the author and the reviewer should not be the same.
+
+Works as an **MCP server** (Cursor, Claude Desktop, Claude Code) or a standalone **CLI**. Runs entirely local — no SaaS, no telemetry, traces stay on your machine.
 
 ## Install
 

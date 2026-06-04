@@ -69,8 +69,61 @@ See [`coding-agent-backends.md`](guides/coding-agent-backends.md).
 
 ## Comparison matrix (strategic)
 
+### Tier 1: Same-category tools (coding agent orchestrators — real competition)
+
+Verified 2026-06 via AnySearch + page extract.
+
+| Capability | runoff | Vibe Kanban | projd | Cadence |
+|------------|:------:|:-----------:|:-----:|:-------:|
+| Declarative config (JSON/YAML) | ✅ JSON DAG | — (UI kanban) | ✅ JSON feature files | ✅ YAML profile |
+| Git worktree isolation | ✅ | ✅ | ✅ | ✅ (v7.11+) |
+| Parallel agents | ✅ | ✅ | ✅ up to 20 | ✅ multi-PR |
+| **Same-task provider race** | ✅ **core** | — (diff tasks) | — (review PRs) | — (diff phases) |
+| Human judge + pick winner | ✅ | — | ✅ (review PR) | — |
+| **Learn from judge picks** | ✅ Dream/Dreamify | — | — | — |
+| Multi-provider support | 4 CLIs | Claude/Codex/Gemini/Copilot | Claude-first | 16+ providers |
+| Local trace + experiment eval | ✅ | — | TUI dashboard | — |
+| MCP tool surface for IDE hosts | ✅ | — | — | — |
+| Smoke-test / lint gates | ✅ | — | ✅ enforced | ✅ validate phase |
+| Risk-tiered review depth | — | — | — | ✅ low/medium/high |
+| Stars (2026-06) | 0 (early) | **26.8k** | early | active v8+ |
+
+**Legend:** ✅ = first-class on main path; — = not the product focus.
+
+**Key finding:** worktree isolation and parallel execution are **table stakes** in 2026 — every tool has them. runoff's unique atom: **same-task provider race → human judge → learn from picks**. No tier-1 competitor does all three.
+
+### How the tier-1 tools differ from runoff
+
+#### Vibe Kanban (BloopAI, 26.8k ★)
+
+- **What it is:** Visual kanban board for spawning parallel agents, each in its own worktree.
+- **Model:** Different agents work on **different tasks** in parallel; you watch a dashboard.
+- **Gap vs us:** No same-task race, no pick-winner mechanic, no learning from outcomes. Visual UI, not config-file-driven.
+- **When to pick Vibe Kanban:** You want a visual dashboard to run many parallel tasks fast.
+- **When to pick runoff:** You want to know which AI writes the *best* code for *one* task, and you want the system to remember your taste over time.
+
+#### projd (0spoon)
+
+- **What it is:** JSON feature files + worktree isolation + dependency-wave dispatch + PreToolUse guardrails + TUI dashboard.
+- **Model:** Single agent (Claude) builds features in dependency order; you review the resulting PRs.
+- **Closest overlap:** Declarative JSON config and "you review" mechanic feel similar — but projd is single-provider dispatch, runoff is multi-provider competition.
+- **Gap vs us:** No same-task race across providers. No cross-run learning.
+- **When to pick projd:** You want guardrails + phased dispatch without provider comparison.
+- **When to pick runoff:** You want to pit two providers against each other on the same prompt and learn from the winner.
+
+#### Cadence (v8.4)
+
+- **What it is:** Multi-model SDLC harness — different models for different phases (write/review/triage/council), YAML config, 16+ providers, risk-tiered review depth.
+- **Model:** Different models do **different SDLC roles** (author ≠ reviewer). Not racing — dividing.
+- **Closest overlap:** YAML-as-SoT pipeline config and multi-provider support. Both fight the single-model blind-spot problem — from different angles (role-split vs same-task race).
+- **Gap vs us:** Different phases, not same-phase race. No trace-grounded cross-run learning.
+- **When to pick Cadence:** Full SDLC pipeline with role-differentiated models.
+- **When to pick runoff:** Run the *same step* on N providers and have the system learn your quality preferences over time.
+
+### Tier 2: General orchestration frameworks
+
 | Capability | runoff | LangGraph | CrewAI | AutoGen | OpenHands |
-|------------|:------------:|:---------:|:------:|:-------:|:---------:|
+|------------|:------:|:---------:|:------:|:-------:|:---------:|
 | Declarative config DAG (JSON) | ✅ | code-first | Crew/Task | code-first | UI + agent |
 | Git worktree + lock contract | ✅ | — | — | — | partial |
 | Provider race + judge pause | ✅ | — | — | — | — |
@@ -79,9 +132,7 @@ See [`coding-agent-backends.md`](guides/coding-agent-backends.md).
 | Conversational multi-agent chat | — | graph | ✅ core | ✅ core | ✅ |
 | Self-hosted code-agent focus | ✅ | general | general | general | ✅ |
 
-**Legend:** ✅ = first-class on main path; — = not the product focus (may exist elsewhere).
-
-### AutoGen (Microsoft)
+#### AutoGen (Microsoft)
 
 - **Strength:** Group chat, human-in-the-loop patterns, Azure ecosystem.
 - **Overlap with us:** Multi-agent orchestration conceptually.

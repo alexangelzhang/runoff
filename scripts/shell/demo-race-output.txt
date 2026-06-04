@@ -1,0 +1,29 @@
+runoff race mode demo
+Two providers compete on the same task.
+
+  prompt: "Add formatRelativeTime() with edge cases"
+
+  [mock-a]  running implement...  ✓  (1.2s)
+  [mock-b]  running implement...  ✓  (1.8s)
+
+──────────────────────────────────────────────────
+  candidate 0  (mock-a / claude-code)    +27 lines
+
+    formatRelativeTime(isoString: string): string
+    handles: seconds, minutes, hours, days
+    input: ISO string only
+
+──────────────────────────────────────────────────
+  candidate 1  (mock-b / opencode)       +60 lines
+
+    formatRelativeTime(dateInput: string | Date): string
+    handles: seconds, minutes, hours, days, weeks
+    future dates: "2 hours from now"
+    edge cases: null, invalid date, DST boundary
+
+──────────────────────────────────────────────────
+
+  Pipeline paused — awaiting judge decision.
+
+  Apply:   npx runoff race apply --session demo --winner <0|1>
+  Abort:   npx runoff race abort  --session demo
