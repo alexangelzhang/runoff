@@ -9,6 +9,7 @@ import {
   createHarnessCandidate,
   decideHarnessCandidate,
   evaluateHarnessCandidate,
+  exportHarnessPromotionBundle,
   listHarnessCandidates,
   proposeHarnessCandidate,
   rankHarnessCandidates,
@@ -17,7 +18,7 @@ import {
 } from "../orchestration/harness-evolution.js";
 import { mcpError, mcpErrorFrom, mcpJson } from "./mcp-response.js";
 
-const ACTIONS = ["coreset", "create", "propose", "evaluate", "rank", "decide", "list"] as const;
+const ACTIONS = ["coreset", "create", "propose", "evaluate", "rank", "decide", "export", "list"] as const;
 
 function parseJsonArray<T>(raw: string | undefined, name: string): T[] {
   if (!raw?.trim()) return [];
@@ -31,7 +32,7 @@ export function register(server: McpServer) {
     "runoff_harness_evolve",
     "Manage local harness evolution: coreset selection, change manifests, isolated variants, regression gates, self-preference ranking, and accept/rollback records.",
     {
-      action: z.enum(ACTIONS).describe("coreset | create | propose | evaluate | rank | decide | list"),
+      action: z.enum(ACTIONS).describe("coreset | create | propose | evaluate | rank | decide | export | list"),
       candidateId: z.string().optional().describe("Harness candidate id"),
       summary: z.string().optional().describe("Candidate manifest summary for action=create"),
       provider: z.string().optional().describe("Provider name for action=propose"),
@@ -116,6 +117,13 @@ export function register(server: McpServer) {
             return mcpJson({
               action: args.action,
               decision: decideHarnessCandidate({ candidateId: args.candidateId, decision: args.decision, reason: args.reason }),
+            });
+          }
+          case "export": {
+            if (!args.candidateId?.trim()) return mcpError("Harness evolve error", "candidateId is required for action=export");
+            return mcpJson({
+              action: args.action,
+              bundle: exportHarnessPromotionBundle({ candidateId: args.candidateId }),
             });
           }
           case "list":

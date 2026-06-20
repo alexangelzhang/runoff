@@ -102,8 +102,9 @@ Trace postmortems and experiment eval reports surface `observationSummary` so of
 | Coreset selection | `coreset` ranks difficult traces while preserving diversity keys |
 | Self-preference rank | `rank` performs deterministic pairwise preference over gate results |
 | Acceptance guard / rollback audit | `decide` accepts only when proposal audit is clean, observed diff exists, and held-in/held-out gate passed; otherwise it rolls back or blocks forced accept without mutating the user repo |
+| Promotion bundle | `export` writes `promotion/bundle.json` plus copied observed variant files for accepted candidates only |
 
-This is a substrate, not a fully autonomous optimizer: proposers edit only candidate variant directories, and promotion still goes through manifest + proposal audit + gate + rank + decision artifacts.
+This is a substrate, not a fully autonomous optimizer: proposers edit only candidate variant directories, and promotion still goes through manifest + proposal audit + gate + rank + decision + export artifacts.
 
 **LangFuse 借鉴已落地**：`traces/scores.jsonl` 记录 `traceId` + 数值/备注；eval-report 的 `traceInsights` 带一行 postmortem 摘要。
 

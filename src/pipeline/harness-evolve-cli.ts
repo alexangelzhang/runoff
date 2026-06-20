@@ -10,6 +10,7 @@ import {
   createHarnessCandidate,
   decideHarnessCandidate,
   evaluateHarnessCandidate,
+  exportHarnessPromotionBundle,
   listHarnessCandidates,
   proposeHarnessCandidate,
   rankHarnessCandidates,
@@ -60,6 +61,11 @@ export type HarnessEvolveDecideOptions = {
   candidateId: string;
   decision?: "accept" | "rollback";
   reason?: string;
+  json?: boolean;
+};
+
+export type HarnessEvolveExportOptions = {
+  candidateId: string;
   json?: boolean;
 };
 
@@ -168,4 +174,15 @@ export function harnessEvolveDecide(opts: HarnessEvolveDecideOptions): void {
   }
   console.log(`${decision.decision.toUpperCase()} ${decision.candidateId}: ${decision.reason}`);
   console.log(`  acceptance: ${decision.acceptanceChecks.accepted ? "pass" : "blocked"}`);
+}
+
+export function harnessEvolveExport(opts: HarnessEvolveExportOptions): void {
+  const bundle = exportHarnessPromotionBundle({ candidateId: opts.candidateId });
+  if (opts.json) {
+    console.log(JSON.stringify({ bundle }, null, 2));
+    return;
+  }
+  console.log(`EXPORTED ${bundle.candidateId}`);
+  console.log(`  bundle: ${bundle.bundleDir}`);
+  console.log(`  files:  ${bundle.files.filter((file) => file.copied).length}/${bundle.files.length} copied`);
 }

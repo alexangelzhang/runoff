@@ -8,7 +8,7 @@
  */
 
 import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync } from "node:fs";
-import { join, normalize, resolve } from "node:path";
+import { dirname, join, normalize, resolve } from "node:path";
 import { createHash, randomUUID } from "node:crypto";
 import type { LLMProvider, LLMResponse } from "../providers/types.js";
 import { getHarnessEvolutionDir } from "../core/paths.js";
@@ -135,6 +135,25 @@ export interface HarnessProposalResult {
   reportedButUnchangedFiles: string[];
 }
 
+export interface HarnessPromotionBundle {
+  schema: typeof HARNESS_EVOLUTION_SCHEMA;
+  candidateId: string;
+  exportedAt: string;
+  bundleDir: string;
+  filesDir: string;
+  files: Array<{
+    path: string;
+    copied: boolean;
+    sha256?: string;
+    size?: number;
+  }>;
+  manifest: HarnessChangeManifest;
+  proposal: HarnessProposalResult;
+  gate: HarnessGateResult;
+  decision: HarnessDecisionRecord;
+  instructions: string[];
+}
+
 interface FileSnapshotEntry {
   hash: string;
   size: number;
@@ -180,6 +199,10 @@ function proposalPath(candidateId: string): string {
   return join(candidateDir(candidateId), "proposal.json");
 }
 
+function promotionDir(candidateId: string): string {
+  return join(candidateDir(candidateId), "promotion");
+}
+
 function variantDir(candidateId: string): string {
   return join(candidateDir(candidateId), "variant");
 }
@@ -207,6 +230,28 @@ function snapshotVariantFiles(dir: string, prefix = ""): Map<string, FileSnapsho
     });
   }
   return out;
+}
+
+function copyPromotionFile(variantRoot: string, filesRoot: string, file: string): HarnessPromotionBundle["files"][number] {
+  const normalized = normalizeSurfacePath(file);
+  const source = resolve(variantRoot, normalized);
+  const variantRootResolved = resolve(variantRoot);
+  if (!source.startsWith(`${variantRootResolved}/`) && source !== variantRootResolved) {
+    throw new Error(`Refusing to export file outside variant: ${file}`);
+  }
+  if (!existsSync(source)) return { path: normalized, copied: false };
+  const stat = statSync(source);
+  if (!stat.isFile()) return { path: normalized, copied: false };
+  const target = join(filesRoot, normalized);
+  mkdirSync(dirname(target), { recursive: true });
+  cpSync(source, target, { force: true });
+  const content = readFileSync(source);
+  return {
+    path: normalized,
+    copied: true,
+    sha256: createHash("sha256").update(content).digest("hex"),
+    size: stat.size,
+  };
 }
 
 function diffVariantSnapshots(before: Map<string, FileSnapshotEntry>, after: Map<string, FileSnapshotEntry>): VariantDiff {
@@ -709,4 +754,42 @@ export function decideHarnessCandidate(input: {
   } satisfies HarnessCandidateRecord);
   atomicWriteJson(decisionPath(input.candidateId), decisionRecord);
   return decisionRecord;
+}
+
+export function exportHarnessPromotionBundle(input: {
+  candidateId: string;
+}): HarnessPromotionBundle {
+  const record = loadHarnessCandidate(input.candidateId);
+  if (!record) throw new Error(`Harness candidate not found: ${input.candidateId}`);
+  if (record.status !== "accepted") throw new Error(`Harness candidate is not accepted: ${input.candidateId}`);
+  if (!record.proposal) throw new Error(`Harness candidate has no proposal: ${input.candidateId}`);
+  if (!record.gate) throw new Error(`Harness candidate has no gate result: ${input.candidateId}`);
+  if (!record.decision) throw new Error(`Harness candidate has no decision record: ${input.candidateId}`);
+  if (!record.decision.acceptanceChecks.accepted) {
+    throw new Error(`Harness candidate acceptance checks are not passing: ${input.candidateId}`);
+  }
+
+  const dir = promotionDir(input.candidateId);
+  const filesDir = join(dir, "files");
+  mkdirSync(filesDir, { recursive: true });
+  const files = record.proposal.observedFilesModified.map((file) => copyPromotionFile(record.variant.variantDir, filesDir, file));
+  const bundle: HarnessPromotionBundle = {
+    schema: HARNESS_EVOLUTION_SCHEMA,
+    candidateId: input.candidateId,
+    exportedAt: new Date().toISOString(),
+    bundleDir: dir,
+    filesDir,
+    files,
+    manifest: record.manifest,
+    proposal: record.proposal,
+    gate: record.gate,
+    decision: record.decision,
+    instructions: [
+      "Review this promotion bundle before applying anything to a user repository.",
+      "Files under files/ are copied from the accepted candidate variant directory.",
+      "This bundle is audit evidence only; runoff did not mutate the source repository.",
+    ],
+  };
+  atomicWriteJson(join(dir, "bundle.json"), bundle);
+  return bundle;
 }

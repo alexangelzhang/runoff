@@ -4,7 +4,7 @@
  *
  *   pipeline run | init | doctor | config edit | config validate | mcp
  *   pipeline runs list|show
- *   pipeline harness coreset|create|propose|evaluate|rank|decide|list
+ *   pipeline harness coreset|create|propose|evaluate|rank|decide|export|list
  *   pipeline traces list|show|tail | observability ui
  */
 
@@ -33,6 +33,7 @@ import {
   harnessEvolveCreate,
   harnessEvolveDecide,
   harnessEvolveEvaluate,
+  harnessEvolveExport,
   harnessEvolveList,
   harnessEvolvePropose,
   harnessEvolveRank,
@@ -66,6 +67,7 @@ Usage:
   pipeline harness evaluate <candidateId> --pairs-json <json> [--json]
   pipeline harness rank [--candidate-ids-json <json>] [--json]
   pipeline harness decide <candidateId> [--decision accept|rollback] [--reason <text>] [--json]
+  pipeline harness export <candidateId> [--json]
   pipeline harness list [--limit <n>] [--json]
   pipeline traces list [--status <status>] [--session <id>] [--limit <n>] [--json]
   pipeline traces show <traceId> [--postmortem] [--json]
@@ -132,7 +134,7 @@ function parseArgs(argv: string[]): CliArgs {
     out.traceId = argv[2];
     positionalConsumed = 1;
   }
-  if (out.command === "harness" && (out.sub === "evaluate" || out.sub === "decide") && argv[2] && !argv[2].startsWith("-")) {
+  if (out.command === "harness" && (out.sub === "evaluate" || out.sub === "decide" || out.sub === "export") && argv[2] && !argv[2].startsWith("-")) {
     out.traceId = argv[2];
     positionalConsumed = 1;
   }
@@ -409,11 +411,19 @@ async function cmdHarness(args: CliArgs): Promise<void> {
     });
     return;
   }
+  if (args.sub === "export") {
+    if (!args.traceId) throw new Error("candidate id required: pipeline harness export <candidateId>");
+    harnessEvolveExport({
+      candidateId: args.traceId,
+      json: args.json,
+    });
+    return;
+  }
   if (args.sub === "list") {
     harnessEvolveList({ limit: args.limit, json: args.json });
     return;
   }
-  throw new Error("Usage: pipeline harness coreset|create|propose|evaluate|rank|decide|list");
+  throw new Error("Usage: pipeline harness coreset|create|propose|evaluate|rank|decide|export|list");
 }
 
 async function cmdObservabilityUi(args: CliArgs): Promise<void> {

@@ -10,6 +10,7 @@ import {
   createHarnessCandidate,
   decideHarnessCandidate,
   evaluateHarnessCandidate,
+  exportHarnessPromotionBundle,
   loadHarnessCandidate,
   listHarnessCandidates,
   proposeHarnessCandidate,
@@ -386,6 +387,61 @@ test("harness evolution blocks forced accept when proposal audit is not clean", 
     assert.equal(rollback.acceptanceChecks.accepted, false);
     assert.equal(rollback.acceptanceChecks.noSurfaceViolations, false);
     assert.equal(loadHarnessCandidate("candidate-blocked")?.status, "rolled_back");
+  } finally {
+    if (oldHome === undefined) delete process.env.RUNOFF_HOME;
+    else process.env.RUNOFF_HOME = oldHome;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("harness evolution exports promotion bundle only after accepted decision", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "runoff-harness-export-"));
+  const oldHome = process.env.RUNOFF_HOME;
+  try {
+    process.env.RUNOFF_HOME = join(dir, "home");
+    const provider = new ProposalProvider("agent-proposer", {
+      summary: "Exportable harness proposal",
+      changes: "diff --git a/skill/SKILL.md b/skill/SKILL.md\n",
+      filesModified: ["skill/SKILL.md"],
+      diffStat: "1 file changed",
+    }, (req) => {
+      mkdirSync(join(req.workDir!, "skill"), { recursive: true });
+      writeFileSync(join(req.workDir!, "skill", "SKILL.md"), "updated", "utf-8");
+    });
+    await proposeHarnessCandidate({
+      candidateId: "candidate-export",
+      provider,
+      summary: "Export clean proposal",
+      editableSurface: ["skill/"],
+    });
+    assert.throws(
+      () => exportHarnessPromotionBundle({ candidateId: "candidate-export" }),
+      /not accepted/,
+    );
+    recordTrace(trace("export-base-in", { finalStatus: "failed" }));
+    recordTrace(trace("export-cand-in", { finalStatus: "approved" }));
+    recordTrace(trace("export-base-out", { totalDurationMs: 2000 }));
+    recordTrace(trace("export-cand-out", { totalDurationMs: 1000 }));
+    evaluateHarnessCandidate({
+      candidateId: "candidate-export",
+      pairs: [
+        { split: "held-in", baselineTraceId: "export-base-in", candidateTraceId: "export-cand-in" },
+        { split: "held-out", baselineTraceId: "export-base-out", candidateTraceId: "export-cand-out" },
+      ],
+    });
+    decideHarnessCandidate({ candidateId: "candidate-export" });
+
+    const bundle = exportHarnessPromotionBundle({ candidateId: "candidate-export" });
+
+    assert.equal(bundle.candidateId, "candidate-export");
+    assert.equal(bundle.decision.acceptanceChecks.accepted, true);
+    assert.equal(bundle.files.length, 1);
+    assert.equal(bundle.files[0]?.path, "skill/SKILL.md");
+    assert.equal(bundle.files[0]?.copied, true);
+    assert.equal(existsSync(join(bundle.filesDir, "skill", "SKILL.md")), true);
+    assert.equal(existsSync(join(bundle.bundleDir, "bundle.json")), true);
+    const persisted = JSON.parse(readFileSync(join(bundle.bundleDir, "bundle.json"), "utf-8")) as { candidateId: string };
+    assert.equal(persisted.candidateId, "candidate-export");
   } finally {
     if (oldHome === undefined) delete process.env.RUNOFF_HOME;
     else process.env.RUNOFF_HOME = oldHome;

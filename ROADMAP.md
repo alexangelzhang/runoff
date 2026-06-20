@@ -43,7 +43,7 @@ All Phase 0–8 checklist items and B2–B8 are **DONE**. Per-phase notes, depen
 | Capability | Doc |
 |------------|-----|
 | Harness control plane | `runoff_query_runs` · `src/orchestration/run-query.ts` · durable RunStore/EventLog status, pending approvals, resume hints, event cursors |
-| Harness evolution substrate | `runoff_harness_evolve` · `src/orchestration/harness-evolution.ts` · change manifest, isolated proposer, observed variant diff, held-in/out gate, variant isolation, coreset, self-preference rank, acceptance guard/rollback audit |
+| Harness evolution substrate | `runoff_harness_evolve` · `src/orchestration/harness-evolution.ts` · change manifest, isolated proposer, observed variant diff, held-in/out gate, variant isolation, coreset, self-preference rank, acceptance guard/rollback audit, promotion bundle export |
 | Local observability | [docs/features/observability.md](docs/features/observability.md) · `src/observability/trace.ts` · `StepResult.observation` / `PipelineResult.observation` work-memory layer |
 | Memory / Dream / Dreamify | [docs/features/memory-production.md](docs/features/memory-production.md), [dream.md](docs/features/dream.md), [dreamify.md](docs/features/dreamify.md) · hot-path formation queue + B6 forget: **shipped**; graph query/export: **Future** in [ROADMAP.md](../ROADMAP.md) |
 | Reflect re-plan (MVP) | [docs/features/deerflow-reflect.md](docs/features/deerflow-reflect.md) |
