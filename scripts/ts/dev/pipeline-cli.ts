@@ -4,6 +4,7 @@
  *
  *   pipeline run | init | doctor | config edit | config validate | mcp
  *   pipeline runs list|show
+ *   pipeline harness coreset|create|evaluate|rank|decide|list
  *   pipeline traces list|show|tail | observability ui
  */
 
@@ -27,6 +28,14 @@ import {
   resolveRaceTraceId,
 } from "../../../src/runtime/race-finalize.js";
 import { startObservabilityUiServer } from "../../../src/pipeline/observability-ui-server.js";
+import {
+  harnessEvolveCoreset,
+  harnessEvolveCreate,
+  harnessEvolveDecide,
+  harnessEvolveEvaluate,
+  harnessEvolveList,
+  harnessEvolveRank,
+} from "../../../src/pipeline/harness-evolve-cli.js";
 import { runsList, runsShow } from "../../../src/pipeline/run-control-cli.js";
 import { tracesList, tracesShow, tracesTail } from "../../../src/pipeline/trace-cli.js";
 import type { PipelineStatus } from "../../../src/core/state.js";
@@ -50,6 +59,12 @@ Usage:
   pipeline race abort --trace-id <id> [--reason <text>]
   pipeline runs list [--status <status>] [--session-id <id>] [--limit <n>] [--json]
   pipeline runs show <runId> [--json]
+  pipeline harness coreset [--limit <n>] [--since <iso>] [--json]
+  pipeline harness create --summary <text> [--candidate-id <id>] [--source-dir <dir>] [--json]
+  pipeline harness evaluate <candidateId> --pairs-json <json> [--json]
+  pipeline harness rank [--candidate-ids-json <json>] [--json]
+  pipeline harness decide <candidateId> [--decision accept|rollback] [--reason <text>] [--json]
+  pipeline harness list [--limit <n>] [--json]
   pipeline traces list [--status <status>] [--session <id>] [--limit <n>] [--json]
   pipeline traces show <traceId> [--postmortem] [--json]
   pipeline traces tail [--once]
@@ -80,6 +95,12 @@ type CliArgs = {
   sessionId?: string;
   winner?: number;
   reason?: string;
+  summary?: string;
+  sourceDir?: string;
+  pairsJson?: string;
+  candidateIdsJson?: string;
+  decision?: "accept" | "rollback";
+  since?: string;
   cleanupOrphans?: boolean;
   json?: boolean;
   postmortem?: boolean;
@@ -92,14 +113,18 @@ type CliArgs = {
 
 function parseArgs(argv: string[]): CliArgs {
   const out: CliArgs = { command: argv[0] ?? "help" };
-  if (out.command === "config" || out.command === "race" || out.command === "runs" || out.command === "traces" || out.command === "observability") {
+  if (out.command === "config" || out.command === "race" || out.command === "runs" || out.command === "harness" || out.command === "traces" || out.command === "observability") {
     out.sub = argv[1] ?? "help";
   }
   const multiSub =
-    out.command === "config" || out.command === "race" || out.command === "runs" || out.command === "traces" || out.command === "observability";
+    out.command === "config" || out.command === "race" || out.command === "runs" || out.command === "harness" || out.command === "traces" || out.command === "observability";
   const start = multiSub ? 2 : 1;
   let positionalConsumed = 0;
   if (out.command === "runs" && out.sub === "show" && argv[2] && !argv[2].startsWith("-")) {
+    out.traceId = argv[2];
+    positionalConsumed = 1;
+  }
+  if (out.command === "harness" && (out.sub === "evaluate" || out.sub === "decide") && argv[2] && !argv[2].startsWith("-")) {
     out.traceId = argv[2];
     positionalConsumed = 1;
   }
@@ -128,6 +153,17 @@ function parseArgs(argv: string[]): CliArgs {
     else if (a === "--port") out.port = Number(next());
     else if (a === "--no-open") out.noOpen = true;
     else if (a === "--trace-id") out.traceId = next();
+    else if (a === "--candidate-id") out.traceId = next();
+    else if (a === "--source-dir") out.sourceDir = next();
+    else if (a === "--summary") out.summary = next();
+    else if (a === "--pairs-json") out.pairsJson = next();
+    else if (a === "--candidate-ids-json") out.candidateIdsJson = next();
+    else if (a === "--since") out.since = next();
+    else if (a === "--decision") {
+      const decision = next();
+      if (decision !== "accept" && decision !== "rollback") throw new Error("--decision must be accept or rollback");
+      out.decision = decision;
+    }
     else if (a === "--session") out.sessionId = next();
     else if (a === "--winner") out.winner = Number(next());
     else if (a === "--reason") out.reason = next();
@@ -287,6 +323,62 @@ function cmdRuns(args: CliArgs): void {
   throw new Error("Usage: pipeline runs list|show");
 }
 
+function parseJsonArray<T>(raw: string | undefined, name: string): T[] {
+  if (!raw?.trim()) return [];
+  const parsed = JSON.parse(raw) as unknown;
+  if (!Array.isArray(parsed)) throw new Error(`${name} must be a JSON array`);
+  return parsed as T[];
+}
+
+function cmdHarness(args: CliArgs): void {
+  if (args.home) process.env.RUNOFF_HOME = resolve(args.home);
+  if (args.sub === "coreset") {
+    harnessEvolveCoreset({ limit: args.limit, since: args.since, json: args.json });
+    return;
+  }
+  if (args.sub === "create") {
+    if (!args.summary?.trim()) throw new Error("--summary is required");
+    harnessEvolveCreate({
+      candidateId: args.traceId,
+      summary: args.summary,
+      sourceDir: args.sourceDir,
+      json: args.json,
+    });
+    return;
+  }
+  if (args.sub === "evaluate") {
+    if (!args.traceId) throw new Error("candidate id required: pipeline harness evaluate <candidateId>");
+    harnessEvolveEvaluate({
+      candidateId: args.traceId,
+      pairs: parseJsonArray(args.pairsJson, "--pairs-json"),
+      json: args.json,
+    });
+    return;
+  }
+  if (args.sub === "rank") {
+    harnessEvolveRank({
+      candidateIds: parseJsonArray(args.candidateIdsJson, "--candidate-ids-json"),
+      json: args.json,
+    });
+    return;
+  }
+  if (args.sub === "decide") {
+    if (!args.traceId) throw new Error("candidate id required: pipeline harness decide <candidateId>");
+    harnessEvolveDecide({
+      candidateId: args.traceId,
+      decision: args.decision,
+      reason: args.reason,
+      json: args.json,
+    });
+    return;
+  }
+  if (args.sub === "list") {
+    harnessEvolveList({ limit: args.limit, json: args.json });
+    return;
+  }
+  throw new Error("Usage: pipeline harness coreset|create|evaluate|rank|decide|list");
+}
+
 async function cmdObservabilityUi(args: CliArgs): Promise<void> {
   if (args.home) process.env.RUNOFF_HOME = resolve(args.home);
   const handle = await startObservabilityUiServer({ port: args.port });
@@ -361,6 +453,10 @@ async function main(): Promise<void> {
   }
   if (args.command === "runs") {
     cmdRuns(args);
+    return;
+  }
+  if (args.command === "harness") {
+    cmdHarness(args);
     return;
   }
   if (args.command === "traces") {

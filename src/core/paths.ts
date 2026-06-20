@@ -50,6 +50,10 @@ export function getControlPlaneDir(): string {
   return join(getPipelineHomeDir(), "control-plane");
 }
 
+export function getHarnessEvolutionDir(): string {
+  return join(getPipelineHomeDir(), "harness-evolution");
+}
+
 export function getCacheDir(): string {
   return join(getPipelineHomeDir(), "cache");
 }

@@ -88,6 +88,7 @@ New tools: add `src/tools/<name>.ts` and register in `src/index.ts`.
 | Checkpoints / status machine | `src/core/state.ts` |
 | Traces / query | `src/observability/trace.ts`, `src/tools/query-traces.ts` |
 | Observation summaries | `src/orchestration/observation.ts`, `src/core/state.ts`, `src/core/pipeline-run-types.ts` |
+| Harness evolution | `src/orchestration/harness-evolution.ts`, `src/tools/harness-evolve.ts`, `src/pipeline/harness-evolve-cli.ts` |
 | Policy / approval / guardrails | `src/orchestration/policy.ts`, `approval.ts`, `execution-governance.ts`, `guardrails.ts`, `guardrail-scan.ts` |
 | Agent registry | `src/orchestration/agent.ts`, `registry.ts`, `agent-state.ts` |
 | A2A HTTP / federation | `src/experimental/a2a/*` (shims under `experimental/a2a/`) |
@@ -106,6 +107,7 @@ New tools: add `src/tools/<name>.ts` and register in `src/index.ts`.
 6. **Governance order:** Policy → Guardrails → Approval in `ExecutionGovernance.beforeStep` / `afterStep`. Race `awaiting_judge` must be handled **before** `orchestrator.onStepComplete` in `pipeline-runner.ts` (see smoke tests).
 7. **Guardrails:** When `runtime.governance.enabled`, extended guardrails default on (secrets, PII, injection, paths). Document new toggles in `docs/architecture/governance-config.md`.
 8. **Observation layer:** `StepResult.observation` and `PipelineResult.observation` are deterministic, schema-versioned work memory for the next host/model turn. Keep full audit material in `artifacts` / `traces`; do not replace them with summaries.
+9. **Harness evolution:** candidate manifests, held-in/held-out gates, rank decisions, and rollback records are audit artifacts under `~/.runoff/harness-evolution/`. Do not auto-apply candidate edits to user repos from TypeScript; keep repo mutation in the existing workspace/runtime paths.
 
 ## Provider integration
 

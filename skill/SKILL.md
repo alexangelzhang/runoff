@@ -35,6 +35,12 @@ What does the user want?
 │   ├─ Score a trace (human eval)                → runoff_score_trace
 │   └─ A/B experiments / eval report             → runoff_query_experiments
 │
+├─ Evolve the harness
+│   ├─ Select hard/diverse traces                → runoff_harness_evolve(action="coreset")
+│   ├─ Create change manifest + variant          → runoff_harness_evolve(action="create")
+│   ├─ Run held-in / held-out gate               → runoff_harness_evolve(action="evaluate")
+│   └─ Rank / accept / rollback                  → runoff_harness_evolve(action="rank"|"decide")
+│
 ├─ Memory & learning
 │   ├─ Backend status (+ optional remote probe)    → runoff_memory_status (probe=true)
 │   ├─ Search patterns / lessons                 → runoff_query_memory
@@ -65,6 +71,7 @@ Example configs: [examples/configs/](../examples/configs/) · scaffold: `npm run
 | `runoff_query_traces` | Find runs by status/time; `traceId` for one run; `format=postmortem` on failures |
 | `runoff_score_trace` | Record numeric quality score → `~/.runoff/traces/scores.jsonl`; read back via `runoff_query_traces traceId=<id> format=postmortem` → `humanScores` |
 | `runoff_query_experiments` | A/B variants; `format=eval-report` for winner recommendation |
+| `runoff_harness_evolve` | Harness evolution substrate: coreset selection, change manifest, isolated variant, held-in/out regression gate, pairwise rank, accept/rollback |
 | `runoff_memory_status` | Before enabling Mem0/Zep; `probe=true` checks remote reachability |
 | `runoff_query_memory` | Hybrid search (local + remote); ops/debug — **not** the hot pipeline read path |
 | `runoff_dream_run` | After several runs — offline ADD/UPDATE/FORGET on `~/.runoff/memory/` |
@@ -114,7 +121,7 @@ Governance order: Policy → Guardrails → Approval. See [docs/architecture/gov
 
 ---
 
-## All MCP tools (15)
+## All MCP tools (16)
 
 | Tool | Purpose |
 |------|---------|
@@ -126,6 +133,7 @@ Governance order: Policy → Guardrails → Approval. See [docs/architecture/gov
 | `runoff_query_traces` | Trace query, postmortem, aggregates |
 | `runoff_score_trace` | Persist trace score |
 | `runoff_query_experiments` | Local A/B log |
+| `runoff_harness_evolve` | Harness evolution control plane |
 | `runoff_memory_status` | Memory backend describe + optional probe |
 | `runoff_query_memory` | `retrieveMerged` hybrid search |
 | `runoff_dream_run` | Offline Dream worker (A/B/C tracks) |

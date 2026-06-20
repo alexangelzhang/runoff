@@ -88,6 +88,21 @@ Host agents should read observation fields in this order:
 
 Trace postmortems and experiment eval reports surface `observationSummary` so offline review can compare what the host saw with the raw artifact/trace record.
 
+## Harness evolution substrate
+
+`runoff_harness_evolve` and `npm run runoff:harness` provide the local control plane needed before automatic harness optimization is safe:
+
+| Capability | Mechanism |
+|---|---|
+| Change manifest | Candidate records under `~/.runoff/harness-evolution/candidates/<id>/manifest.json` |
+| Variant isolation | Optional source directory copied to an isolated candidate `variant/` directory |
+| Held-in / held-out regression gate | `evaluate` compares baseline/candidate trace pairs and requires both splits, zero regressions, and at least one measured improvement |
+| Coreset selection | `coreset` ranks difficult traces while preserving diversity keys |
+| Self-preference rank | `rank` performs deterministic pairwise preference over gate results |
+| Rollback / acceptance audit | `decide` records accept or rollback without mutating the user repo |
+
+This is a substrate, not a fully autonomous optimizer: future proposers can edit candidate variant directories, but promotion still goes through manifest + gate + rank + decision artifacts.
+
 **LangFuse 借鉴已落地**：`traces/scores.jsonl` 记录 `traceId` + 数值/备注；eval-report 的 `traceInsights` 带一行 postmortem 摘要。
 
 **LangSmith 值得多借的一点**：**Dataset 行 ↔ Run** 一一对应、便于离线复现——已由 `runoff-eval-v1` + `traceId` 字段覆盖。

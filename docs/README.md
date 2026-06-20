@@ -34,7 +34,7 @@
 ### Features
 
 - [race-mode.md](features/race-mode.md) — running multiple LLMs on the same step, picking or merging the best result
-- [observability.md](features/observability.md) — Observation layer + traces · [observability-eval.md](features/observability-eval.md)
+- [observability.md](features/observability.md) — Observation layer + traces + harness evolution substrate · [observability-eval.md](features/observability-eval.md)
 - [memory-production.md](features/memory-production.md) · [memory-dream-roadmap.md](features/memory-dream-roadmap.md)
 - [dream.md](features/dream.md) · [dreamify.md](features/dreamify.md)
 - [deerflow-reflect.md](features/deerflow-reflect.md)

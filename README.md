@@ -125,6 +125,7 @@ npm run setup:mcp
 | `runoff_run_pipeline` | Full DAG + retries + checkpoints + race pause |
 | `runoff_run_step` | Single step |
 | `runoff_query_runs` | Harness control plane: run status, approvals, resume hints |
+| `runoff_harness_evolve` | Harness evolution: coreset, manifest, variant gate, rank, accept/rollback |
 | `runoff_query_traces` / `runoff_query_experiments` | Local observability |
 | `runoff_race_apply` / `runoff_race_abort` | Race finalization |
 
@@ -133,6 +134,7 @@ CLI equivalent for the same control plane:
 ```bash
 npm run runoff:runs -- list --config /path/to/pipeline.config.json
 npm run runoff:runs -- show <runId> --config /path/to/pipeline.config.json
+npm run runoff:harness -- coreset --limit 10
 ```
 
 Full list + governance/memory tools: [`docs/README.md`](docs/README.md)
@@ -147,6 +149,7 @@ Full list + governance/memory tools: [`docs/README.md`](docs/README.md)
 | MCP tool surface for IDE hosts | ✅ | optional | recent | — | different |
 | Durable run control plane | ✅ | checkpointer | partial | partial | partial |
 | Observation + local trace/eval | ✅ | +LangSmith | DIY | DIY | partial |
+| Harness evolution substrate | ✅ manifest/gate/rank | DIY | DIY | DIY | partial |
 
 Full comparison: [`docs/reference/differentiation.md`](docs/reference/differentiation.md)
 

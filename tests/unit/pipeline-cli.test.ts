@@ -135,3 +135,55 @@ test("pipeline-cli runs show accepts positional run id", async () => {
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("pipeline-cli harness create and list use isolated evolution home", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "pipeline-cli-harness-"));
+  try {
+    const home = join(dir, "home");
+    const create = spawn("npx", [
+      "tsx",
+      CLI,
+      "harness",
+      "create",
+      "--candidate-id",
+      "cli-candidate",
+      "--summary",
+      "try recovery manifest",
+      "--home",
+      home,
+      "--json",
+    ], {
+      cwd: ROOT,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let createStdout = "";
+    let createStderr = "";
+    create.stdout?.on("data", (d) => { createStdout += d.toString(); });
+    create.stderr?.on("data", (d) => { createStderr += d.toString(); });
+    const createCode = await new Promise<number>((resolve, reject) => {
+      create.on("error", reject);
+      create.on("close", (x) => resolve(x ?? 1));
+    });
+    assert.equal(createCode, 0, createStderr);
+    assert.equal(JSON.parse(createStdout).candidate.candidateId, "cli-candidate");
+
+    const list = spawn("npx", ["tsx", CLI, "harness", "list", "--home", home, "--json"], {
+      cwd: ROOT,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let listStdout = "";
+    let listStderr = "";
+    list.stdout?.on("data", (d) => { listStdout += d.toString(); });
+    list.stderr?.on("data", (d) => { listStderr += d.toString(); });
+    const listCode = await new Promise<number>((resolve, reject) => {
+      list.on("error", reject);
+      list.on("close", (x) => resolve(x ?? 1));
+    });
+    assert.equal(listCode, 0, listStderr);
+    const body = JSON.parse(listStdout) as { count: number; candidates: Array<{ candidateId: string }> };
+    assert.equal(body.count, 1);
+    assert.equal(body.candidates[0]?.candidateId, "cli-candidate");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
