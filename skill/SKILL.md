@@ -72,7 +72,7 @@ Example configs: [examples/configs/](../examples/configs/) · scaffold: `npm run
 | `runoff_query_traces` | Find runs by status/time; `traceId` for one run; `format=postmortem` on failures |
 | `runoff_score_trace` | Record numeric quality score → `~/.runoff/traces/scores.jsonl`; read back via `runoff_query_traces traceId=<id> format=postmortem` → `humanScores` |
 | `runoff_query_experiments` | A/B variants; `format=eval-report` for winner recommendation |
-| `runoff_harness_evolve` | Harness evolution substrate: coreset selection, change manifest, isolated proposer, held-in/out regression gate, pairwise rank, accept/rollback |
+| `runoff_harness_evolve` | Harness evolution substrate: coreset selection, change manifest, isolated proposer with observed variant diff, held-in/out regression gate, pairwise rank, accept/rollback |
 | `runoff_memory_status` | Before enabling Mem0/Zep; `probe=true` checks remote reachability |
 | `runoff_query_memory` | Hybrid search (local + remote); ops/debug — **not** the hot pipeline read path |
 | `runoff_dream_run` | After several runs — offline ADD/UPDATE/FORGET on `~/.runoff/memory/` |

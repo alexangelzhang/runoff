@@ -7,9 +7,9 @@
  * pairwise self-preference ranking, and auditable accept/rollback records.
  */
 
-import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join, normalize, resolve } from "node:path";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import type { LLMProvider, LLMResponse } from "../providers/types.js";
 import { getHarnessEvolutionDir } from "../core/paths.js";
 import type { PipelineTrace } from "../observability/trace.js";
@@ -116,6 +116,23 @@ export interface HarnessProposalResult {
   failed?: boolean;
   error?: string;
   surfaceViolations: string[];
+  observedFilesModified: string[];
+  observedDiffStat: string;
+  unreportedFilesModified: string[];
+  reportedButUnchangedFiles: string[];
+}
+
+interface FileSnapshotEntry {
+  hash: string;
+  size: number;
+}
+
+interface VariantDiff {
+  added: string[];
+  modified: string[];
+  deleted: string[];
+  filesModified: string[];
+  diffStat: string;
 }
 
 function evolutionDir(): string {
@@ -156,6 +173,58 @@ function variantDir(candidateId: string): string {
 
 function normalizeSurfacePath(path: string): string {
   return normalize(path).replace(/\\/g, "/").replace(/^\.\//, "");
+}
+
+function snapshotVariantFiles(dir: string, prefix = ""): Map<string, FileSnapshotEntry> {
+  const out = new Map<string, FileSnapshotEntry>();
+  if (!existsSync(dir)) return out;
+  for (const name of readdirSync(dir)) {
+    const abs = join(dir, name);
+    const rel = normalizeSurfacePath(prefix ? join(prefix, name) : name);
+    const stat = statSync(abs);
+    if (stat.isDirectory()) {
+      for (const [child, entry] of snapshotVariantFiles(abs, rel)) out.set(child, entry);
+      continue;
+    }
+    if (!stat.isFile()) continue;
+    const content = readFileSync(abs);
+    out.set(rel, {
+      hash: createHash("sha256").update(content).digest("hex"),
+      size: stat.size,
+    });
+  }
+  return out;
+}
+
+function diffVariantSnapshots(before: Map<string, FileSnapshotEntry>, after: Map<string, FileSnapshotEntry>): VariantDiff {
+  const added: string[] = [];
+  const modified: string[] = [];
+  const deleted: string[] = [];
+  for (const [file, entry] of after) {
+    const previous = before.get(file);
+    if (!previous) added.push(file);
+    else if (previous.hash !== entry.hash || previous.size !== entry.size) modified.push(file);
+  }
+  for (const file of before.keys()) {
+    if (!after.has(file)) deleted.push(file);
+  }
+  const sort = (files: string[]) => files.sort((a, b) => a.localeCompare(b));
+  sort(added);
+  sort(modified);
+  sort(deleted);
+  const filesModified = [...added, ...modified, ...deleted];
+  const parts = [
+    added.length ? `${added.length} added` : "",
+    modified.length ? `${modified.length} modified` : "",
+    deleted.length ? `${deleted.length} deleted` : "",
+  ].filter(Boolean);
+  return {
+    added,
+    modified,
+    deleted,
+    filesModified,
+    diffStat: parts.length ? `${filesModified.length} files changed (${parts.join(", ")})` : "0 files changed",
+  };
 }
 
 function isAllowedByEditableSurface(file: string, surface: string[]): boolean {
@@ -299,16 +368,25 @@ export async function proposeHarnessCandidate(input: {
   });
 
   const prompt = buildProposalPrompt(candidate, input.instructions);
+  const beforeSnapshot = snapshotVariantFiles(candidate.variant.variantDir);
   const response = await input.provider.execute({
     prompt,
     workDir: candidate.variant.variantDir,
     stepName: "harness-propose",
     round: 1,
   });
+  const observedDiff = diffVariantSnapshots(beforeSnapshot, snapshotVariantFiles(candidate.variant.variantDir));
   const summary = summarizeProviderResponse(response);
-  const surfaceViolations = summary.filesModified.filter(
+  const reportedFiles = [...new Set(summary.filesModified.map(normalizeSurfacePath))].sort((a, b) => a.localeCompare(b));
+  const observedFiles = observedDiff.filesModified;
+  const changedFileSet = new Set([...reportedFiles, ...observedFiles]);
+  const surfaceViolations = [...changedFileSet].filter(
     (file) => !isAllowedByEditableSurface(file, candidate.manifest.editableSurface),
-  );
+  ).sort((a, b) => a.localeCompare(b));
+  const observedFileSet = new Set(observedFiles);
+  const reportedFileSet = new Set(reportedFiles);
+  const unreportedFilesModified = observedFiles.filter((file) => !reportedFileSet.has(file));
+  const reportedButUnchangedFiles = reportedFiles.filter((file) => !observedFileSet.has(file));
   const proposal: HarnessProposalResult = {
     schema: HARNESS_EVOLUTION_SCHEMA,
     candidateId: candidate.candidateId,
@@ -317,13 +395,17 @@ export async function proposeHarnessCandidate(input: {
     model: summary.model,
     prompt,
     summary: summary.summary,
-    filesModified: summary.filesModified,
+    filesModified: reportedFiles,
     diffStat: summary.diffStat,
     failed: summary.failed || surfaceViolations.length > 0,
     error: surfaceViolations.length
-      ? `provider modified files outside editable surface: ${surfaceViolations.join(", ")}`
+      ? `proposal modified files outside editable surface: ${surfaceViolations.join(", ")}`
       : summary.error,
     surfaceViolations,
+    observedFilesModified: observedFiles,
+    observedDiffStat: observedDiff.diffStat,
+    unreportedFilesModified,
+    reportedButUnchangedFiles,
   };
 
   const next: HarnessCandidateRecord = { ...candidate, proposal };

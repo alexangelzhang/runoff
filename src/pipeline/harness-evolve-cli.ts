@@ -134,6 +134,7 @@ export async function harnessEvolvePropose(opts: HarnessEvolveProposeOptions): P
   console.log(`  provider: ${result.proposal.provider}`);
   console.log(`  variant:  ${result.candidate.variant.variantDir}`);
   console.log(`  files:    ${result.proposal.filesModified.join(", ") || "none reported"}`);
+  console.log(`  observed: ${result.proposal.observedFilesModified.join(", ") || "none"}`);
   if (result.proposal.error) console.log(`  error:    ${result.proposal.error}`);
 }
 

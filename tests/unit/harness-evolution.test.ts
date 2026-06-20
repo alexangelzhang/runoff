@@ -41,10 +41,12 @@ class ProposalProvider implements LLMProvider {
   constructor(
     public name: string,
     private response: Omit<Extract<LLMResponse, { kind: "agent" }>, "kind" | "model">,
+    private onExecute?: (req: LLMRequest) => void,
   ) {}
 
   async execute(req: LLMRequest): Promise<LLMResponse> {
     this.lastRequest = req;
+    this.onExecute?.(req);
     return {
       kind: "agent",
       model: "proposal-model",
@@ -93,6 +95,9 @@ test("harness evolution proposer writes proposal inside isolated variant", async
       changes: "diff --git a/skill/SKILL.md b/skill/SKILL.md\n",
       filesModified: ["skill/SKILL.md"],
       diffStat: "1 file changed, 2 insertions(+)",
+    }, (req) => {
+      mkdirSync(join(req.workDir!, "skill"), { recursive: true });
+      writeFileSync(join(req.workDir!, "skill", "SKILL.md"), "updated", "utf-8");
     });
 
     const result = await proposeHarnessCandidate({
@@ -107,6 +112,10 @@ test("harness evolution proposer writes proposal inside isolated variant", async
     assert.equal(result.candidate.candidateId, "candidate-propose");
     assert.equal(result.proposal.failed, false);
     assert.deepEqual(result.proposal.filesModified, ["skill/SKILL.md"]);
+    assert.deepEqual(result.proposal.observedFilesModified, ["skill/SKILL.md"]);
+    assert.equal(result.proposal.observedDiffStat, "1 files changed (1 added)");
+    assert.deepEqual(result.proposal.unreportedFilesModified, []);
+    assert.deepEqual(result.proposal.reportedButUnchangedFiles, []);
     assert.equal(provider.lastRequest?.workDir, result.candidate.variant.variantDir);
     assert.equal(provider.lastRequest?.stepName, "harness-propose");
     assert.match(provider.lastRequest?.prompt ?? "", /Keep nextHint tool names current/);
@@ -140,6 +149,9 @@ test("harness evolution proposer flags files outside editable surface", async ()
       changes: "diff --git a/src/index.ts b/src/index.ts\n",
       filesModified: ["skill/SKILL.md", "src/index.ts"],
       diffStat: "2 files changed",
+    }, (req) => {
+      mkdirSync(join(req.workDir!, "skill"), { recursive: true });
+      writeFileSync(join(req.workDir!, "skill", "SKILL.md"), "updated", "utf-8");
     });
 
     const result = await proposeHarnessCandidate({
@@ -150,7 +162,45 @@ test("harness evolution proposer flags files outside editable surface", async ()
     assert.equal(result.proposal.failed, true);
     assert.deepEqual(result.proposal.surfaceViolations, ["src/index.ts"]);
     assert.match(result.proposal.error ?? "", /outside editable surface/);
+    assert.deepEqual(result.proposal.reportedButUnchangedFiles, ["src/index.ts"]);
     assert.equal(loadHarnessCandidate("candidate-violation")?.proposal?.failed, true);
+  } finally {
+    if (oldHome === undefined) delete process.env.RUNOFF_HOME;
+    else process.env.RUNOFF_HOME = oldHome;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("harness evolution proposer detects unreported variant edits", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "runoff-harness-propose-unreported-"));
+  const oldHome = process.env.RUNOFF_HOME;
+  try {
+    process.env.RUNOFF_HOME = join(dir, "home");
+    const provider = new ProposalProvider("agent-proposer", {
+      summary: "Changed files but forgot to report them",
+      changes: "",
+      filesModified: [],
+      diffStat: "0 files changed",
+    }, (req) => {
+      mkdirSync(join(req.workDir!, "skill"), { recursive: true });
+      writeFileSync(join(req.workDir!, "skill", "SKILL.md"), "updated", "utf-8");
+      mkdirSync(join(req.workDir!, "src"), { recursive: true });
+      writeFileSync(join(req.workDir!, "src", "index.ts"), "export const changed = true;\n", "utf-8");
+    });
+
+    const result = await proposeHarnessCandidate({
+      candidateId: "candidate-unreported",
+      provider,
+      summary: "Detect actual edits",
+      editableSurface: ["skill/"],
+    });
+
+    assert.equal(result.proposal.failed, true);
+    assert.deepEqual(result.proposal.filesModified, []);
+    assert.deepEqual(result.proposal.observedFilesModified, ["skill/SKILL.md", "src/index.ts"]);
+    assert.deepEqual(result.proposal.unreportedFilesModified, ["skill/SKILL.md", "src/index.ts"]);
+    assert.deepEqual(result.proposal.surfaceViolations, ["src/index.ts"]);
+    assert.match(result.proposal.observedDiffStat, /2 files changed/);
   } finally {
     if (oldHome === undefined) delete process.env.RUNOFF_HOME;
     else process.env.RUNOFF_HOME = oldHome;
