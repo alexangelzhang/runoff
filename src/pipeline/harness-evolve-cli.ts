@@ -12,6 +12,7 @@ import {
   evaluateHarnessCandidate,
   exportHarnessPromotionBundle,
   listHarnessCandidates,
+  mineHarnessFailureSignatures,
   proposeHarnessCandidate,
   rankHarnessCandidates,
   selectHarnessCoreset,
@@ -20,6 +21,13 @@ import {
 
 export type HarnessEvolveListOptions = {
   limit?: number;
+  json?: boolean;
+};
+
+export type HarnessEvolveMineOptions = {
+  traceIds?: string[];
+  limit?: number;
+  since?: string;
   json?: boolean;
 };
 
@@ -37,6 +45,7 @@ export type HarnessEvolveCreateOptions = {
   expectedFixes?: string[];
   possibleRegressions?: string[];
   evidenceTraceIds?: string[];
+  failureSignatureIds?: string[];
   json?: boolean;
 };
 
@@ -95,6 +104,17 @@ export function harnessEvolveCoreset(opts: HarnessEvolveCoresetOptions = {}): vo
   }
 }
 
+export function harnessEvolveMine(opts: HarnessEvolveMineOptions = {}): void {
+  const signatures = mineHarnessFailureSignatures({ traceIds: opts.traceIds, limit: opts.limit, since: opts.since });
+  if (opts.json) {
+    console.log(JSON.stringify({ signatures, count: signatures.length }, null, 2));
+    return;
+  }
+  for (const signature of signatures) {
+    console.log(`${signature.signatureId}  severity=${signature.severity}  traces=${signature.traceCount}  ${signature.title}`);
+  }
+}
+
 export function harnessEvolveCreate(opts: HarnessEvolveCreateOptions): void {
   const candidate = createHarnessCandidate({
     candidateId: opts.candidateId,
@@ -104,6 +124,7 @@ export function harnessEvolveCreate(opts: HarnessEvolveCreateOptions): void {
     expectedFixes: opts.expectedFixes,
     possibleRegressions: opts.possibleRegressions,
     evidenceTraceIds: opts.evidenceTraceIds,
+    failureSignatureIds: opts.failureSignatureIds,
     author: "runoff CLI",
   });
   if (opts.json) {
@@ -130,6 +151,7 @@ export async function harnessEvolvePropose(opts: HarnessEvolveProposeOptions): P
     expectedFixes: opts.expectedFixes,
     possibleRegressions: opts.possibleRegressions,
     evidenceTraceIds: opts.evidenceTraceIds,
+    failureSignatureIds: opts.failureSignatureIds,
     instructions: opts.instructions,
   });
   if (opts.json) {

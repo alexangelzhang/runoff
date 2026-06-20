@@ -4,7 +4,7 @@
  *
  *   pipeline run | init | doctor | config edit | config validate | mcp
  *   pipeline runs list|show
- *   pipeline harness coreset|create|propose|evaluate|rank|decide|export|list
+ *   pipeline harness coreset|mine|create|propose|evaluate|rank|decide|export|list
  *   pipeline traces list|show|tail | observability ui
  */
 
@@ -35,6 +35,7 @@ import {
   harnessEvolveEvaluate,
   harnessEvolveExport,
   harnessEvolveList,
+  harnessEvolveMine,
   harnessEvolvePropose,
   harnessEvolveRank,
 } from "../../../src/pipeline/harness-evolve-cli.js";
@@ -62,6 +63,7 @@ Usage:
   pipeline runs list [--status <status>] [--session-id <id>] [--limit <n>] [--json]
   pipeline runs show <runId> [--json]
   pipeline harness coreset [--limit <n>] [--since <iso>] [--json]
+  pipeline harness mine [--trace-ids-json <json>] [--limit <n>] [--since <iso>] [--json]
   pipeline harness create --summary <text> [--candidate-id <id>] [--source-dir <dir>] [--json]
   pipeline harness propose --summary <text> [--candidate-id <id>] [--provider <name>] [--source-dir <dir>] [--instructions <text>] [--json]
   pipeline harness evaluate <candidateId> --pairs-json <json> [--json]
@@ -107,8 +109,10 @@ type CliArgs = {
   expectedFixesJson?: string;
   possibleRegressionsJson?: string;
   evidenceTraceIdsJson?: string;
+  failureSignatureIdsJson?: string;
   pairsJson?: string;
   candidateIdsJson?: string;
+  traceIdsJson?: string;
   decision?: "accept" | "rollback";
   since?: string;
   cleanupOrphans?: boolean;
@@ -171,9 +175,11 @@ function parseArgs(argv: string[]): CliArgs {
     else if (a === "--expected-fixes-json") out.expectedFixesJson = next();
     else if (a === "--possible-regressions-json") out.possibleRegressionsJson = next();
     else if (a === "--evidence-trace-ids-json") out.evidenceTraceIdsJson = next();
+    else if (a === "--failure-signature-ids-json") out.failureSignatureIdsJson = next();
     else if (a === "--summary") out.summary = next();
     else if (a === "--pairs-json") out.pairsJson = next();
     else if (a === "--candidate-ids-json") out.candidateIdsJson = next();
+    else if (a === "--trace-ids-json") out.traceIdsJson = next();
     else if (a === "--since") out.since = next();
     else if (a === "--decision") {
       const decision = next();
@@ -352,6 +358,15 @@ async function cmdHarness(args: CliArgs): Promise<void> {
     harnessEvolveCoreset({ limit: args.limit, since: args.since, json: args.json });
     return;
   }
+  if (args.sub === "mine") {
+    harnessEvolveMine({
+      traceIds: parseJsonArray(args.traceIdsJson, "--trace-ids-json"),
+      limit: args.limit,
+      since: args.since,
+      json: args.json,
+    });
+    return;
+  }
   if (args.sub === "create") {
     if (!args.summary?.trim()) throw new Error("--summary is required");
     harnessEvolveCreate({
@@ -362,6 +377,7 @@ async function cmdHarness(args: CliArgs): Promise<void> {
       expectedFixes: parseJsonArray(args.expectedFixesJson, "--expected-fixes-json"),
       possibleRegressions: parseJsonArray(args.possibleRegressionsJson, "--possible-regressions-json"),
       evidenceTraceIds: parseJsonArray(args.evidenceTraceIdsJson, "--evidence-trace-ids-json"),
+      failureSignatureIds: parseJsonArray(args.failureSignatureIdsJson, "--failure-signature-ids-json"),
       json: args.json,
     });
     return;
@@ -381,6 +397,7 @@ async function cmdHarness(args: CliArgs): Promise<void> {
       expectedFixes: parseJsonArray(args.expectedFixesJson, "--expected-fixes-json"),
       possibleRegressions: parseJsonArray(args.possibleRegressionsJson, "--possible-regressions-json"),
       evidenceTraceIds: parseJsonArray(args.evidenceTraceIdsJson, "--evidence-trace-ids-json"),
+      failureSignatureIds: parseJsonArray(args.failureSignatureIdsJson, "--failure-signature-ids-json"),
       json: args.json,
     });
     return;
@@ -423,7 +440,7 @@ async function cmdHarness(args: CliArgs): Promise<void> {
     harnessEvolveList({ limit: args.limit, json: args.json });
     return;
   }
-  throw new Error("Usage: pipeline harness coreset|create|propose|evaluate|rank|decide|export|list");
+  throw new Error("Usage: pipeline harness coreset|mine|create|propose|evaluate|rank|decide|export|list");
 }
 
 async function cmdObservabilityUi(args: CliArgs): Promise<void> {

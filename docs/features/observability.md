@@ -96,7 +96,8 @@ Trace postmortems and experiment eval reports surface `observationSummary` so of
 |---|---|
 | Change manifest | Candidate records under `~/.runoff/harness-evolution/candidates/<id>/manifest.json` |
 | Variant isolation | Optional source directory copied to an isolated candidate `variant/` directory |
-| Automatic proposer | `propose` invokes a configured provider with `workDir` set to the isolated `variant/`, records `proposal.json`, and flags files outside `editableSurface` |
+| Failure signature mining | `mine` clusters failed traces into `failure-signatures/<id>.json` with evidence traces, suspected harness surface, and suggested editable surface |
+| Automatic proposer | `propose` invokes a configured provider with `workDir` set to the isolated `variant/`, includes mined signatures plus `history-context.json`, records `proposal.json`, and flags files outside `editableSurface` |
 | Observed variant diff | `propose` snapshots the candidate `variant/` before/after provider execution and records `observedFilesModified`, `observedDiffStat`, `unreportedFilesModified`, and `reportedButUnchangedFiles` |
 | Held-in / held-out regression gate | `evaluate` compares baseline/candidate trace pairs and requires both splits, zero regressions, and at least one measured improvement |
 | Coreset selection | `coreset` ranks difficult traces while preserving diversity keys |

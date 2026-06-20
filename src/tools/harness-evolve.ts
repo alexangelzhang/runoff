@@ -11,6 +11,7 @@ import {
   evaluateHarnessCandidate,
   exportHarnessPromotionBundle,
   listHarnessCandidates,
+  mineHarnessFailureSignatures,
   proposeHarnessCandidate,
   rankHarnessCandidates,
   selectHarnessCoreset,
@@ -18,7 +19,7 @@ import {
 } from "../orchestration/harness-evolution.js";
 import { mcpError, mcpErrorFrom, mcpJson } from "./mcp-response.js";
 
-const ACTIONS = ["coreset", "create", "propose", "evaluate", "rank", "decide", "export", "list"] as const;
+const ACTIONS = ["coreset", "mine", "create", "propose", "evaluate", "rank", "decide", "export", "list"] as const;
 
 function parseJsonArray<T>(raw: string | undefined, name: string): T[] {
   if (!raw?.trim()) return [];
@@ -32,7 +33,7 @@ export function register(server: McpServer) {
     "runoff_harness_evolve",
     "Manage local harness evolution: coreset selection, change manifests, isolated variants, regression gates, self-preference ranking, and accept/rollback records.",
     {
-      action: z.enum(ACTIONS).describe("coreset | create | propose | evaluate | rank | decide | export | list"),
+      action: z.enum(ACTIONS).describe("coreset | mine | create | propose | evaluate | rank | decide | export | list"),
       candidateId: z.string().optional().describe("Harness candidate id"),
       summary: z.string().optional().describe("Candidate manifest summary for action=create"),
       provider: z.string().optional().describe("Provider name for action=propose"),
@@ -42,6 +43,7 @@ export function register(server: McpServer) {
       expectedFixesJson: z.string().optional().describe("JSON array of expected fixes"),
       possibleRegressionsJson: z.string().optional().describe("JSON array of possible regressions"),
       evidenceTraceIdsJson: z.string().optional().describe("JSON array of evidence trace ids"),
+      failureSignatureIdsJson: z.string().optional().describe("JSON array of mined failure signature ids"),
       evalPairsJson: z.string().optional().describe("JSON array of {baselineTraceId,candidateTraceId,split:'held-in'|'held-out'}"),
       candidateIdsJson: z.string().optional().describe("JSON array of candidate ids for ranking"),
       traceIdsJson: z.string().optional().describe("JSON array of trace ids for coreset selection"),
@@ -62,6 +64,15 @@ export function register(server: McpServer) {
                 traceIds: parseJsonArray<string>(args.traceIdsJson, "traceIdsJson"),
               }),
             });
+          case "mine":
+            return mcpJson({
+              action: args.action,
+              signatures: mineHarnessFailureSignatures({
+                limit: args.limit,
+                since: args.since,
+                traceIds: parseJsonArray<string>(args.traceIdsJson, "traceIdsJson"),
+              }),
+            });
           case "create": {
             if (!args.summary?.trim()) return mcpError("Harness evolve error", "summary is required for action=create");
             return mcpJson({
@@ -74,6 +85,7 @@ export function register(server: McpServer) {
                 expectedFixes: parseJsonArray<string>(args.expectedFixesJson, "expectedFixesJson"),
                 possibleRegressions: parseJsonArray<string>(args.possibleRegressionsJson, "possibleRegressionsJson"),
                 evidenceTraceIds: parseJsonArray<string>(args.evidenceTraceIdsJson, "evidenceTraceIdsJson"),
+                failureSignatureIds: parseJsonArray<string>(args.failureSignatureIdsJson, "failureSignatureIdsJson"),
                 author: "runoff_harness_evolve",
               }),
             });
@@ -97,6 +109,7 @@ export function register(server: McpServer) {
                 expectedFixes: parseJsonArray<string>(args.expectedFixesJson, "expectedFixesJson"),
                 possibleRegressions: parseJsonArray<string>(args.possibleRegressionsJson, "possibleRegressionsJson"),
                 evidenceTraceIds: parseJsonArray<string>(args.evidenceTraceIdsJson, "evidenceTraceIdsJson"),
+                failureSignatureIds: parseJsonArray<string>(args.failureSignatureIdsJson, "failureSignatureIdsJson"),
                 instructions: args.instructions,
               })),
             });

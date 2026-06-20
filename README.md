@@ -125,7 +125,7 @@ npm run setup:mcp
 | `runoff_run_pipeline` | Full DAG + retries + checkpoints + race pause |
 | `runoff_run_step` | Single step |
 | `runoff_query_runs` | Harness control plane: run status, approvals, resume hints |
-| `runoff_harness_evolve` | Harness evolution: coreset, manifest, isolated proposer + observed variant diff, acceptance guard, promotion bundle |
+| `runoff_harness_evolve` | Harness evolution: coreset, failure mining, isolated proposer + observed variant diff, acceptance guard, promotion bundle |
 | `runoff_query_traces` / `runoff_query_experiments` | Local observability |
 | `runoff_race_apply` / `runoff_race_abort` | Race finalization |
 
@@ -135,6 +135,7 @@ CLI equivalent for the same control plane:
 npm run runoff:runs -- list --config /path/to/pipeline.config.json
 npm run runoff:runs -- show <runId> --config /path/to/pipeline.config.json
 npm run runoff:harness -- coreset --limit 10
+npm run runoff:harness -- mine --trace-ids-json '["failed-trace"]'
 npm run runoff:harness -- propose --summary "tighten recovery hints" --provider codex
 npm run runoff:harness -- export <candidateId>
 ```

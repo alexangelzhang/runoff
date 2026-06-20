@@ -13,6 +13,7 @@ import {
   exportHarnessPromotionBundle,
   loadHarnessCandidate,
   listHarnessCandidates,
+  mineHarnessFailureSignatures,
   proposeHarnessCandidate,
   rankHarnessCandidates,
   selectHarnessCoreset,
@@ -128,6 +129,58 @@ test("harness evolution proposer writes proposal inside isolated variant", async
     assert.equal(existsSync(proposalPath), true);
     const proposal = JSON.parse(readFileSync(proposalPath, "utf-8")) as { surfaceViolations: string[] };
     assert.deepEqual(proposal.surfaceViolations, []);
+  } finally {
+    if (oldHome === undefined) delete process.env.RUNOFF_HOME;
+    else process.env.RUNOFF_HOME = oldHome;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("harness evolution mines failure signatures and proposer receives history context", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "runoff-harness-mine-"));
+  const oldHome = process.env.RUNOFF_HOME;
+  try {
+    process.env.RUNOFF_HOME = join(dir, "home");
+    recordTrace(trace("mine-a", {
+      finalStatus: "failed",
+      steps: [{ name: "implement", provider: "mock", durationMs: 10, round: 1, error: "missing verification command" }],
+      hasVerifyResults: false,
+    }));
+    recordTrace(trace("mine-b", {
+      finalStatus: "failed",
+      steps: [{ name: "implement", provider: "mock", durationMs: 12, round: 1, error: "missing verification command" }],
+      hasVerifyResults: false,
+    }));
+
+    const signatures = mineHarnessFailureSignatures({ traceIds: ["mine-a", "mine-b"] });
+
+    assert.equal(signatures.length, 1);
+    assert.equal(signatures[0]?.category, "step_error");
+    assert.deepEqual(signatures[0]?.evidenceTraceIds, ["mine-a", "mine-b"]);
+    assert.equal(existsSync(join(process.env.RUNOFF_HOME, "harness-evolution", "failure-signatures", `${signatures[0]!.signatureId}.json`)), true);
+
+    const provider = new ProposalProvider("agent-proposer", {
+      summary: "Uses mined failure signature",
+      changes: "diff --git a/skill/SKILL.md b/skill/SKILL.md\n",
+      filesModified: ["skill/SKILL.md"],
+      diffStat: "1 file changed",
+    }, (req) => {
+      mkdirSync(join(req.workDir!, "skill"), { recursive: true });
+      writeFileSync(join(req.workDir!, "skill", "SKILL.md"), "updated", "utf-8");
+    });
+    const result = await proposeHarnessCandidate({
+      candidateId: "candidate-mined",
+      provider,
+      summary: "Address mined failure",
+      editableSurface: ["skill/"],
+      failureSignatureIds: [signatures[0]!.signatureId],
+    });
+
+    assert.deepEqual(result.proposal.failureSignatureIds, [signatures[0]!.signatureId]);
+    assert.ok(result.proposal.historyContextPath);
+    assert.equal(existsSync(result.proposal.historyContextPath!), true);
+    assert.match(provider.lastRequest?.prompt ?? "", /Failure signatures/);
+    assert.match(provider.lastRequest?.prompt ?? "", new RegExp(signatures[0]!.signatureId));
   } finally {
     if (oldHome === undefined) delete process.env.RUNOFF_HOME;
     else process.env.RUNOFF_HOME = oldHome;

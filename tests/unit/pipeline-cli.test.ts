@@ -211,6 +211,46 @@ test("pipeline-cli harness create and list use isolated evolution home", async (
   }
 });
 
+test("pipeline-cli harness mine emits failure signatures", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "pipeline-cli-harness-mine-"));
+  try {
+    const home = join(dir, "home");
+    const oldHome = process.env.RUNOFF_HOME;
+    process.env.RUNOFF_HOME = home;
+    try {
+      recordTrace(trace("cli-mine", {
+        finalStatus: "failed",
+        steps: [{ name: "implement", provider: "mock", durationMs: 10, round: 1, error: "verify failed" }],
+        hasVerifyResults: false,
+      }));
+    } finally {
+      if (oldHome !== undefined) process.env.RUNOFF_HOME = oldHome;
+      else delete process.env.RUNOFF_HOME;
+    }
+
+    const child = spawn("npx", ["tsx", CLI, "harness", "mine", "--trace-ids-json", "[\"cli-mine\"]", "--home", home, "--json"], {
+      cwd: ROOT,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let stdout = "";
+    let stderr = "";
+    child.stdout?.on("data", (d) => { stdout += d.toString(); });
+    child.stderr?.on("data", (d) => { stderr += d.toString(); });
+    const code = await new Promise<number>((resolve, reject) => {
+      child.on("error", reject);
+      child.on("close", (x) => resolve(x ?? 1));
+    });
+
+    assert.equal(code, 0, stderr);
+    const body = JSON.parse(stdout) as { count: number; signatures: Array<{ category: string; evidenceTraceIds: string[] }> };
+    assert.equal(body.count, 1);
+    assert.equal(body.signatures[0]?.category, "step_error");
+    assert.deepEqual(body.signatures[0]?.evidenceTraceIds, ["cli-mine"]);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("pipeline-cli harness propose writes proposal with configured provider", async () => {
   const dir = mkdtempSync(join(tmpdir(), "pipeline-cli-harness-propose-"));
   try {
@@ -297,6 +337,7 @@ test("pipeline-cli harness export writes accepted promotion bundle", async () =>
         observedDiffStat: "1 files changed",
         unreportedFilesModified: [],
         reportedButUnchangedFiles: [],
+        failureSignatureIds: [],
       };
       writeFileSync(
         join(home, "harness-evolution", "candidates", "cli-export", "candidate.json"),

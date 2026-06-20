@@ -28,6 +28,7 @@ export interface HarnessChangeManifest {
   expectedFixes: string[];
   possibleRegressions: string[];
   evidenceTraceIds: string[];
+  failureSignatureIds: string[];
   author?: string;
 }
 
@@ -86,6 +87,32 @@ export interface HarnessCoresetItem {
   promptPreview: string;
 }
 
+export type HarnessFailureCategory =
+  | "step_error"
+  | "race_failure"
+  | "approval_rejected"
+  | "max_rounds"
+  | "aborted"
+  | "missing_verification"
+  | "terminal_failure";
+
+export interface HarnessFailureSignature {
+  schema: typeof HARNESS_EVOLUTION_SCHEMA;
+  signatureId: string;
+  createdAt: string;
+  category: HarnessFailureCategory;
+  title: string;
+  triggeringContext: string;
+  agentActionPattern: string;
+  suspectedHarnessSurface: string[];
+  evidenceTraceIds: string[];
+  suggestedEditableSurface: string[];
+  suggestedExpectedFixes: string[];
+  suggestedPossibleRegressions: string[];
+  severity: number;
+  traceCount: number;
+}
+
 export interface HarnessCandidateRank {
   candidateId: string;
   score: number;
@@ -133,6 +160,8 @@ export interface HarnessProposalResult {
   observedDiffStat: string;
   unreportedFilesModified: string[];
   reportedButUnchangedFiles: string[];
+  failureSignatureIds: string[];
+  historyContextPath?: string;
 }
 
 export interface HarnessPromotionBundle {
@@ -175,12 +204,20 @@ function candidatesDir(): string {
   return join(evolutionDir(), "candidates");
 }
 
+function signaturesDir(): string {
+  return join(evolutionDir(), "failure-signatures");
+}
+
 function candidateDir(candidateId: string): string {
   return join(candidatesDir(), safePathSegment(candidateId));
 }
 
 function candidatePath(candidateId: string): string {
   return join(candidateDir(candidateId), "candidate.json");
+}
+
+function signaturePath(signatureId: string): string {
+  return join(signaturesDir(), `${safePathSegment(signatureId)}.json`);
 }
 
 function gatePath(candidateId: string): string {
@@ -329,6 +366,7 @@ export function createHarnessCandidate(input: {
   expectedFixes?: string[];
   possibleRegressions?: string[];
   evidenceTraceIds?: string[];
+  failureSignatureIds?: string[];
   sourceDir?: string;
   author?: string;
 }): HarnessCandidateRecord {
@@ -353,6 +391,7 @@ export function createHarnessCandidate(input: {
     expectedFixes: input.expectedFixes ?? [],
     possibleRegressions: input.possibleRegressions ?? [],
     evidenceTraceIds: input.evidenceTraceIds ?? [],
+    failureSignatureIds: input.failureSignatureIds ?? [],
     author: input.author,
   };
 
@@ -387,15 +426,55 @@ export function listHarnessCandidates(): HarnessCandidateRecord[] {
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 }
 
-function buildProposalPrompt(record: HarnessCandidateRecord, extraInstructions?: string): string {
+function buildHarnessHistoryContext(record: HarnessCandidateRecord): string | undefined {
+  const signatures = record.manifest.failureSignatureIds.flatMap((id) => {
+    const signature = loadHarnessFailureSignature(id);
+    return signature ? [signature] : [];
+  });
+  const priorCandidates = listHarnessCandidates()
+    .filter((candidate) => candidate.candidateId !== record.candidateId)
+    .slice(0, 5)
+    .map((candidate) => ({
+      candidateId: candidate.candidateId,
+      status: candidate.status,
+      summary: candidate.manifest.summary,
+      proposalFailed: candidate.proposal?.failed,
+      gateAccepted: candidate.gate?.accepted,
+      decision: candidate.decision?.decision,
+      observedFilesModified: candidate.proposal?.observedFilesModified ?? [],
+    }));
+  const context = {
+    schema: HARNESS_EVOLUTION_SCHEMA,
+    candidateId: record.candidateId,
+    generatedAt: new Date().toISOString(),
+    failureSignatures: signatures,
+    priorCandidates,
+  };
+  const path = join(candidateDir(record.candidateId), "history-context.json");
+  atomicWriteJson(path, context);
+  return path;
+}
+
+function buildProposalPrompt(record: HarnessCandidateRecord, historyContextPath: string | undefined, extraInstructions?: string): string {
+  const signatures = record.manifest.failureSignatureIds.flatMap((id) => {
+    const signature = loadHarnessFailureSignature(id);
+    return signature ? [signature] : [];
+  });
   return [
     "You are proposing a harness candidate for runoff.",
     "Edit only inside the current isolated variant directory.",
     "Do not mutate the source repository or files outside the current working directory.",
     "Keep changes limited to the editable surface declared below.",
+    "Before editing, inspect the harness history context if available.",
     "",
     "Manifest:",
     JSON.stringify(record.manifest, null, 2),
+    "",
+    "Failure signatures:",
+    signatures.length ? JSON.stringify(signatures, null, 2) : "[]",
+    "",
+    "History context path:",
+    historyContextPath ?? "(none)",
     "",
     "Additional instructions:",
     extraInstructions?.trim() || "Make the smallest harness change that satisfies the manifest.",
@@ -411,6 +490,7 @@ export async function proposeHarnessCandidate(input: {
   expectedFixes?: string[];
   possibleRegressions?: string[];
   evidenceTraceIds?: string[];
+  failureSignatureIds?: string[];
   instructions?: string;
 }): Promise<{ candidate: HarnessCandidateRecord; proposal: HarnessProposalResult }> {
   const existing = input.candidateId ? loadHarnessCandidate(input.candidateId) : undefined;
@@ -422,10 +502,12 @@ export async function proposeHarnessCandidate(input: {
     expectedFixes: input.expectedFixes,
     possibleRegressions: input.possibleRegressions,
     evidenceTraceIds: input.evidenceTraceIds,
+    failureSignatureIds: input.failureSignatureIds,
     author: "harness-proposer",
   });
 
-  const prompt = buildProposalPrompt(candidate, input.instructions);
+  const historyContextPath = buildHarnessHistoryContext(candidate);
+  const prompt = buildProposalPrompt(candidate, historyContextPath, input.instructions);
   const beforeSnapshot = snapshotVariantFiles(candidate.variant.variantDir);
   const response = await input.provider.execute({
     prompt,
@@ -464,6 +546,8 @@ export async function proposeHarnessCandidate(input: {
     observedDiffStat: observedDiff.diffStat,
     unreportedFilesModified,
     reportedButUnchangedFiles,
+    failureSignatureIds: candidate.manifest.failureSignatureIds,
+    historyContextPath,
   };
 
   const next: HarnessCandidateRecord = { ...candidate, proposal };
@@ -486,6 +570,117 @@ function diversityKey(trace: PipelineTrace): string {
   const providers = [...new Set(trace.steps.map((s) => s.provider))].sort().join("+") || "none";
   const words = trace.prompt.toLowerCase().match(/[a-z0-9_-]{4,}/g) ?? [];
   return `${trace.finalStatus}:${providers}:${words.slice(0, 3).join("-")}`;
+}
+
+function firstFailureStep(trace: PipelineTrace) {
+  return trace.steps.find((step) => step.error || step.verdict === "needs_revision") ?? trace.steps.at(-1);
+}
+
+function failureCategory(trace: PipelineTrace): HarnessFailureCategory | undefined {
+  if (trace.steps.some((step) => step.error)) return "step_error";
+  if (trace.candidates?.some((candidate) => candidate.failed || candidate.error)) return "race_failure";
+  if (trace.steps.some((step) => step.verdict === "needs_revision")) return "approval_rejected";
+  if (trace.finalStatus === "max_rounds") return "max_rounds";
+  if (trace.finalStatus === "aborted") return "aborted";
+  if (!trace.hasVerifyResults && trace.finalStatus !== "approved") return "missing_verification";
+  if (trace.finalStatus === "failed") return "terminal_failure";
+  return undefined;
+}
+
+function suggestedSurfaceForCategory(category: HarnessFailureCategory): string[] {
+  switch (category) {
+    case "step_error":
+    case "terminal_failure":
+      return ["skill/", "docs/features/observability.md"];
+    case "race_failure":
+      return ["src/runtime/", "src/orchestration/"];
+    case "approval_rejected":
+      return ["skill/", "src/orchestration/observation.ts"];
+    case "max_rounds":
+      return ["skill/", "src/orchestration/pipeline-runner.ts"];
+    case "aborted":
+      return ["src/orchestration/", "src/runtime/"];
+    case "missing_verification":
+      return ["tests/", "skill/"];
+  }
+}
+
+function signatureTitle(category: HarnessFailureCategory, trace: PipelineTrace): string {
+  const step = firstFailureStep(trace);
+  return `${category} in ${step?.name ?? trace.mode}`;
+}
+
+function signatureKey(category: HarnessFailureCategory, trace: PipelineTrace): string {
+  const step = firstFailureStep(trace);
+  const providers = [...new Set(trace.steps.map((s) => s.provider))].sort().join("+") || "none";
+  return `${category}:${step?.name ?? "run"}:${providers}`;
+}
+
+function buildFailureSignature(key: string, traces: PipelineTrace[]): HarnessFailureSignature {
+  const first = traces[0]!;
+  const category = failureCategory(first) ?? "terminal_failure";
+  const step = firstFailureStep(first);
+  const errors = traces
+    .flatMap((trace) => trace.steps.flatMap((s) => s.error ? [s.error] : []))
+    .slice(0, 3);
+  const signatureId = `sig-${createHash("sha256").update(key).digest("hex").slice(0, 10)}`;
+  const surface = suggestedSurfaceForCategory(category);
+  return {
+    schema: HARNESS_EVOLUTION_SCHEMA,
+    signatureId,
+    createdAt: new Date().toISOString(),
+    category,
+    title: signatureTitle(category, first),
+    triggeringContext: [
+      `status=${first.finalStatus}`,
+      `mode=${first.mode}`,
+      `rounds=${first.totalRounds}`,
+      `step=${step?.name ?? "unknown"}`,
+      errors.length ? `errors=${errors.join(" | ")}` : "",
+    ].filter(Boolean).join("; "),
+    agentActionPattern: `providers=${[...new Set(traces.flatMap((trace) => trace.steps.map((s) => s.provider)))].sort().join("+") || "none"}`,
+    suspectedHarnessSurface: surface,
+    evidenceTraceIds: traces.map((trace) => trace.id),
+    suggestedEditableSurface: surface,
+    suggestedExpectedFixes: [`Reduce ${category} recurrence for ${step?.name ?? first.mode}`],
+    suggestedPossibleRegressions: ["overfitting to mined failure traces", "extra prompt or runtime overhead"],
+    severity: Math.min(10, Math.max(...traces.map(traceDifficulty)) + traces.length),
+    traceCount: traces.length,
+  };
+}
+
+export function mineHarnessFailureSignatures(input: {
+  traceIds?: string[];
+  limit?: number;
+  since?: string;
+} = {}): HarnessFailureSignature[] {
+  const limit = Math.max(1, input.limit ?? 10);
+  const traces = input.traceIds?.length
+    ? input.traceIds.flatMap((id) => {
+        const trace = loadTraceById(id);
+        return trace ? [trace] : [];
+      })
+    : queryTraces({ since: input.since });
+  const grouped = new Map<string, PipelineTrace[]>();
+  for (const trace of traces) {
+    const category = failureCategory(trace);
+    if (!category) continue;
+    const key = signatureKey(category, trace);
+    const list = grouped.get(key) ?? [];
+    list.push(trace);
+    grouped.set(key, list);
+  }
+  const signatures = [...grouped.entries()]
+    .map(([key, group]) => buildFailureSignature(key, group))
+    .sort((a, b) => b.severity - a.severity || b.traceCount - a.traceCount)
+    .slice(0, limit);
+  mkdirSync(signaturesDir(), { recursive: true });
+  for (const signature of signatures) atomicWriteJson(signaturePath(signature.signatureId), signature);
+  return signatures;
+}
+
+export function loadHarnessFailureSignature(signatureId: string): HarnessFailureSignature | undefined {
+  return readJsonFile<HarnessFailureSignature>(signaturePath(signatureId));
 }
 
 export function selectHarnessCoreset(input: {
