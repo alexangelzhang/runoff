@@ -101,6 +101,19 @@ export interface HarnessDecisionRecord {
   decidedAt: string;
   reason: string;
   previousStatus: HarnessCandidateRecord["status"];
+  acceptanceChecks: HarnessAcceptanceChecks;
+}
+
+export interface HarnessAcceptanceChecks {
+  gateAccepted: boolean;
+  proposalPresent: boolean;
+  proposalClean: boolean;
+  observedDiffPresent: boolean;
+  noSurfaceViolations: boolean;
+  noUnreportedFiles: boolean;
+  noReportedButUnchangedFiles: boolean;
+  accepted: boolean;
+  reasons: string[];
 }
 
 export interface HarnessProposalResult {
@@ -628,6 +641,45 @@ export function rankHarnessCandidates(candidateIds?: string[]): HarnessCandidate
   return ranks;
 }
 
+function acceptanceChecks(record: HarnessCandidateRecord): HarnessAcceptanceChecks {
+  const proposal = record.proposal;
+  const gateAccepted = record.gate?.accepted === true;
+  const proposalPresent = proposal !== undefined;
+  const proposalClean = proposalPresent && proposal.failed !== true;
+  const observedDiffPresent = (proposal?.observedFilesModified.length ?? 0) > 0;
+  const noSurfaceViolations = (proposal?.surfaceViolations.length ?? 0) === 0;
+  const noUnreportedFiles = (proposal?.unreportedFilesModified.length ?? 0) === 0;
+  const noReportedButUnchangedFiles = (proposal?.reportedButUnchangedFiles.length ?? 0) === 0;
+  const reasons: string[] = [];
+  if (!gateAccepted) reasons.push(record.gate ? `gate rejected: ${record.gate.reason}` : "missing held-in/held-out gate");
+  if (!proposalPresent) reasons.push("missing proposal");
+  if (proposalPresent && !proposalClean) reasons.push(proposal?.error ? `proposal failed: ${proposal.error}` : "proposal failed");
+  if (proposalPresent && !observedDiffPresent) reasons.push("proposal has no observed variant diff");
+  if (proposalPresent && !noSurfaceViolations) reasons.push(`surface violations: ${proposal.surfaceViolations.join(", ")}`);
+  if (proposalPresent && !noUnreportedFiles) reasons.push(`unreported files: ${proposal.unreportedFilesModified.join(", ")}`);
+  if (proposalPresent && !noReportedButUnchangedFiles) reasons.push(`reported but unchanged files: ${proposal.reportedButUnchangedFiles.join(", ")}`);
+  const accepted =
+    gateAccepted &&
+    proposalPresent &&
+    proposalClean &&
+    observedDiffPresent &&
+    noSurfaceViolations &&
+    noUnreportedFiles &&
+    noReportedButUnchangedFiles;
+  if (accepted) reasons.push("proposal, observed diff, and held-in/held-out gate accepted");
+  return {
+    gateAccepted,
+    proposalPresent,
+    proposalClean,
+    observedDiffPresent,
+    noSurfaceViolations,
+    noUnreportedFiles,
+    noReportedButUnchangedFiles,
+    accepted,
+    reasons,
+  };
+}
+
 export function decideHarnessCandidate(input: {
   candidateId: string;
   decision?: "accept" | "rollback";
@@ -635,15 +687,20 @@ export function decideHarnessCandidate(input: {
 }): HarnessDecisionRecord {
   const record = loadHarnessCandidate(input.candidateId);
   if (!record) throw new Error(`Harness candidate not found: ${input.candidateId}`);
-  const autoDecision = record.gate?.accepted ? "accept" : "rollback";
+  const checks = acceptanceChecks(record);
+  const autoDecision = checks.accepted ? "accept" : "rollback";
   const decision = input.decision ?? autoDecision;
+  if (decision === "accept" && !checks.accepted) {
+    throw new Error(`Harness candidate cannot be accepted: ${checks.reasons.join("; ")}`);
+  }
   const nextStatus = decision === "accept" ? "accepted" : "rolled_back";
   const decisionRecord: HarnessDecisionRecord = {
     candidateId: input.candidateId,
     decision,
     decidedAt: new Date().toISOString(),
-    reason: input.reason ?? (decision === "accept" ? "accepted by regression gate" : record.gate?.reason ?? "rolled back without passing gate"),
+    reason: input.reason ?? (decision === "accept" ? "accepted by proposal, observed diff, and regression gate" : checks.reasons.join("; ") || "rolled back without passing gate"),
     previousStatus: record.status,
+    acceptanceChecks: checks,
   };
   atomicWriteJson(candidatePath(input.candidateId), {
     ...record,

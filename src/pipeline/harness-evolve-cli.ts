@@ -167,4 +167,5 @@ export function harnessEvolveDecide(opts: HarnessEvolveDecideOptions): void {
     return;
   }
   console.log(`${decision.decision.toUpperCase()} ${decision.candidateId}: ${decision.reason}`);
+  console.log(`  acceptance: ${decision.acceptanceChecks.accepted ? "pass" : "blocked"}`);
 }

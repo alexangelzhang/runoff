@@ -299,3 +299,96 @@ test("harness evolution ranks candidates and records rollback decision", () => {
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("harness evolution accepts only clean proposal with observed diff and passing gate", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "runoff-harness-accept-"));
+  const oldHome = process.env.RUNOFF_HOME;
+  try {
+    process.env.RUNOFF_HOME = join(dir, "home");
+    const provider = new ProposalProvider("agent-proposer", {
+      summary: "Clean harness proposal",
+      changes: "diff --git a/skill/SKILL.md b/skill/SKILL.md\n",
+      filesModified: ["skill/SKILL.md"],
+      diffStat: "1 file changed",
+    }, (req) => {
+      mkdirSync(join(req.workDir!, "skill"), { recursive: true });
+      writeFileSync(join(req.workDir!, "skill", "SKILL.md"), "updated", "utf-8");
+    });
+    await proposeHarnessCandidate({
+      candidateId: "candidate-accept",
+      provider,
+      summary: "Accept clean proposal",
+      editableSurface: ["skill/"],
+    });
+    recordTrace(trace("accept-base-in", { finalStatus: "failed" }));
+    recordTrace(trace("accept-cand-in", { finalStatus: "approved" }));
+    recordTrace(trace("accept-base-out", { totalDurationMs: 2000 }));
+    recordTrace(trace("accept-cand-out", { totalDurationMs: 1000 }));
+    evaluateHarnessCandidate({
+      candidateId: "candidate-accept",
+      pairs: [
+        { split: "held-in", baselineTraceId: "accept-base-in", candidateTraceId: "accept-cand-in" },
+        { split: "held-out", baselineTraceId: "accept-base-out", candidateTraceId: "accept-cand-out" },
+      ],
+    });
+
+    const decision = decideHarnessCandidate({ candidateId: "candidate-accept" });
+
+    assert.equal(decision.decision, "accept");
+    assert.equal(decision.acceptanceChecks.accepted, true);
+    assert.equal(decision.acceptanceChecks.observedDiffPresent, true);
+    assert.equal(loadHarnessCandidate("candidate-accept")?.status, "accepted");
+  } finally {
+    if (oldHome === undefined) delete process.env.RUNOFF_HOME;
+    else process.env.RUNOFF_HOME = oldHome;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("harness evolution blocks forced accept when proposal audit is not clean", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "runoff-harness-accept-blocked-"));
+  const oldHome = process.env.RUNOFF_HOME;
+  try {
+    process.env.RUNOFF_HOME = join(dir, "home");
+    const provider = new ProposalProvider("agent-proposer", {
+      summary: "Unreported outside edit",
+      changes: "",
+      filesModified: [],
+      diffStat: "0 files changed",
+    }, (req) => {
+      mkdirSync(join(req.workDir!, "src"), { recursive: true });
+      writeFileSync(join(req.workDir!, "src", "index.ts"), "export const changed = true;\n", "utf-8");
+    });
+    await proposeHarnessCandidate({
+      candidateId: "candidate-blocked",
+      provider,
+      summary: "Block unsafe proposal",
+      editableSurface: ["skill/"],
+    });
+    recordTrace(trace("blocked-base-in", { finalStatus: "failed" }));
+    recordTrace(trace("blocked-cand-in", { finalStatus: "approved" }));
+    recordTrace(trace("blocked-base-out", { totalDurationMs: 2000 }));
+    recordTrace(trace("blocked-cand-out", { totalDurationMs: 1000 }));
+    evaluateHarnessCandidate({
+      candidateId: "candidate-blocked",
+      pairs: [
+        { split: "held-in", baselineTraceId: "blocked-base-in", candidateTraceId: "blocked-cand-in" },
+        { split: "held-out", baselineTraceId: "blocked-base-out", candidateTraceId: "blocked-cand-out" },
+      ],
+    });
+
+    assert.throws(
+      () => decideHarnessCandidate({ candidateId: "candidate-blocked", decision: "accept" }),
+      /cannot be accepted/,
+    );
+    const rollback = decideHarnessCandidate({ candidateId: "candidate-blocked" });
+    assert.equal(rollback.decision, "rollback");
+    assert.equal(rollback.acceptanceChecks.accepted, false);
+    assert.equal(rollback.acceptanceChecks.noSurfaceViolations, false);
+    assert.equal(loadHarnessCandidate("candidate-blocked")?.status, "rolled_back");
+  } finally {
+    if (oldHome === undefined) delete process.env.RUNOFF_HOME;
+    else process.env.RUNOFF_HOME = oldHome;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
