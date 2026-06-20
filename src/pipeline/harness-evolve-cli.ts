@@ -7,15 +7,19 @@ import {
   loadConfigFromPath,
 } from "../core/config.js";
 import {
+  auditHarnessCandidate,
   createHarnessCandidate,
+  createHarnessDataset,
   decideHarnessCandidate,
   evaluateHarnessCandidate,
+  evaluateHarnessDataset,
   exportHarnessPromotionBundle,
   listHarnessCandidates,
   mineHarnessFailureSignatures,
   proposeHarnessCandidate,
   rankHarnessCandidates,
   selectHarnessCoreset,
+  updateHarnessFrontier,
   type HarnessEvalPair,
 } from "../orchestration/harness-evolution.js";
 
@@ -46,6 +50,8 @@ export type HarnessEvolveCreateOptions = {
   possibleRegressions?: string[];
   evidenceTraceIds?: string[];
   failureSignatureIds?: string[];
+  parentCandidateIds?: string[];
+  datasetIds?: string[];
   json?: boolean;
 };
 
@@ -58,6 +64,37 @@ export type HarnessEvolveProposeOptions = HarnessEvolveCreateOptions & {
 export type HarnessEvolveEvaluateOptions = {
   candidateId: string;
   pairs: HarnessEvalPair[];
+  json?: boolean;
+};
+
+export type HarnessEvolveDatasetOptions = {
+  datasetId?: string;
+  name: string;
+  description?: string;
+  traceIds?: string[];
+  failureSignatureIds?: string[];
+  heldInRatio?: number;
+  leakageTerms?: string[];
+  json?: boolean;
+};
+
+export type HarnessEvolveEvaluateDatasetOptions = {
+  candidateId: string;
+  datasetId: string;
+  candidateTraceMap: Record<string, string>;
+  json?: boolean;
+};
+
+export type HarnessEvolveAuditOptions = {
+  candidateId: string;
+  datasetId?: string;
+  leakageTerms?: string[];
+  json?: boolean;
+};
+
+export type HarnessEvolveFrontierOptions = {
+  frontierId?: string;
+  candidateIds?: string[];
   json?: boolean;
 };
 
@@ -125,6 +162,8 @@ export function harnessEvolveCreate(opts: HarnessEvolveCreateOptions): void {
     possibleRegressions: opts.possibleRegressions,
     evidenceTraceIds: opts.evidenceTraceIds,
     failureSignatureIds: opts.failureSignatureIds,
+    parentCandidateIds: opts.parentCandidateIds,
+    datasetIds: opts.datasetIds,
     author: "runoff CLI",
   });
   if (opts.json) {
@@ -152,6 +191,8 @@ export async function harnessEvolvePropose(opts: HarnessEvolveProposeOptions): P
     possibleRegressions: opts.possibleRegressions,
     evidenceTraceIds: opts.evidenceTraceIds,
     failureSignatureIds: opts.failureSignatureIds,
+    parentCandidateIds: opts.parentCandidateIds,
+    datasetIds: opts.datasetIds,
     instructions: opts.instructions,
   });
   if (opts.json) {
@@ -164,6 +205,67 @@ export async function harnessEvolvePropose(opts: HarnessEvolveProposeOptions): P
   console.log(`  files:    ${result.proposal.filesModified.join(", ") || "none reported"}`);
   console.log(`  observed: ${result.proposal.observedFilesModified.join(", ") || "none"}`);
   if (result.proposal.error) console.log(`  error:    ${result.proposal.error}`);
+}
+
+export function harnessEvolveDataset(opts: HarnessEvolveDatasetOptions): void {
+  const dataset = createHarnessDataset({
+    datasetId: opts.datasetId,
+    name: opts.name,
+    description: opts.description,
+    traceIds: opts.traceIds,
+    failureSignatureIds: opts.failureSignatureIds,
+    heldInRatio: opts.heldInRatio,
+    leakageTerms: opts.leakageTerms,
+  });
+  if (opts.json) {
+    console.log(JSON.stringify({ dataset }, null, 2));
+    return;
+  }
+  console.log(`DATASET ${dataset.datasetId}`);
+  console.log(`  held-in:  ${dataset.heldIn.length}`);
+  console.log(`  held-out: ${dataset.heldOut.length}`);
+}
+
+export function harnessEvolveEvaluateDataset(opts: HarnessEvolveEvaluateDatasetOptions): void {
+  const evaluation = evaluateHarnessDataset({
+    candidateId: opts.candidateId,
+    datasetId: opts.datasetId,
+    candidateTraceIdsByBaseline: opts.candidateTraceMap,
+  });
+  if (opts.json) {
+    console.log(JSON.stringify({ evaluation }, null, 2));
+    return;
+  }
+  console.log(`${evaluation.gate.accepted ? "ACCEPTABLE" : "REJECTED"} ${evaluation.candidateId} on ${evaluation.datasetId}: ${evaluation.gate.reason}`);
+}
+
+export function harnessEvolveAudit(opts: HarnessEvolveAuditOptions): void {
+  const audit = auditHarnessCandidate({
+    candidateId: opts.candidateId,
+    datasetId: opts.datasetId,
+    leakageTerms: opts.leakageTerms,
+  });
+  if (opts.json) {
+    console.log(JSON.stringify({ audit }, null, 2));
+    return;
+  }
+  console.log(`${audit.passed ? "AUDIT PASSED" : "AUDIT BLOCKED"} ${audit.candidateId}`);
+  for (const finding of audit.findings) console.log(`  ${finding.severity} ${finding.rule}: ${finding.message}`);
+}
+
+export function harnessEvolveFrontier(opts: HarnessEvolveFrontierOptions = {}): void {
+  const frontier = updateHarnessFrontier({
+    frontierId: opts.frontierId,
+    candidateIds: opts.candidateIds,
+  });
+  if (opts.json) {
+    console.log(JSON.stringify({ frontier }, null, 2));
+    return;
+  }
+  console.log(`FRONTIER ${frontier.frontierId}`);
+  for (const entry of frontier.entries) {
+    console.log(`  ${entry.candidateId} score=${entry.score} accepted=${entry.accepted} audit=${entry.auditPassed}`);
+  }
 }
 
 export function harnessEvolveEvaluate(opts: HarnessEvolveEvaluateOptions): void {

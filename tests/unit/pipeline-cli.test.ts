@@ -9,7 +9,9 @@ import { createControlPlane } from "../../src/orchestration/control-plane.ts";
 import { syncRunStoreFromPipeline } from "../../src/orchestration/run-control.ts";
 import type { PipelineConfig } from "../../src/core/config.ts";
 import {
+  auditHarnessCandidate,
   createHarnessCandidate,
+  createHarnessDataset,
   decideHarnessCandidate,
   evaluateHarnessCandidate,
   loadHarnessCandidate,
@@ -251,6 +253,119 @@ test("pipeline-cli harness mine emits failure signatures", async () => {
   }
 });
 
+test("pipeline-cli harness dataset creates persisted held-in and held-out split", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "pipeline-cli-harness-dataset-"));
+  try {
+    const home = join(dir, "home");
+    const oldHome = process.env.RUNOFF_HOME;
+    process.env.RUNOFF_HOME = home;
+    try {
+      recordTrace(trace("cli-dataset-a", { finalStatus: "failed", timestamp: "2026-06-20T00:00:01.000Z" }));
+      recordTrace(trace("cli-dataset-b", { totalDurationMs: 2000, timestamp: "2026-06-20T00:00:02.000Z" }));
+    } finally {
+      if (oldHome !== undefined) process.env.RUNOFF_HOME = oldHome;
+      else delete process.env.RUNOFF_HOME;
+    }
+
+    const child = spawn("npx", [
+      "tsx",
+      CLI,
+      "harness",
+      "dataset",
+      "--dataset-id",
+      "cli-dataset",
+      "--summary",
+      "cli regression split",
+      "--trace-ids-json",
+      "[\"cli-dataset-a\",\"cli-dataset-b\"]",
+      "--held-in-ratio",
+      "0.5",
+      "--home",
+      home,
+      "--json",
+    ], {
+      cwd: ROOT,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let stdout = "";
+    let stderr = "";
+    child.stdout?.on("data", (d) => { stdout += d.toString(); });
+    child.stderr?.on("data", (d) => { stderr += d.toString(); });
+    const code = await new Promise<number>((resolve, reject) => {
+      child.on("error", reject);
+      child.on("close", (x) => resolve(x ?? 1));
+    });
+
+    assert.equal(code, 0, stderr);
+    const body = JSON.parse(stdout) as { dataset: { datasetId: string; heldIn: unknown[]; heldOut: unknown[] } };
+    assert.equal(body.dataset.datasetId, "cli-dataset");
+    assert.equal(body.dataset.heldIn.length, 1);
+    assert.equal(body.dataset.heldOut.length, 1);
+    assert.equal(existsSync(join(home, "harness-evolution", "datasets", "cli-dataset.json")), true);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("pipeline-cli harness evaluate-dataset emits dataset evaluation gate", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "pipeline-cli-harness-evaluate-dataset-"));
+  try {
+    const home = join(dir, "home");
+    const oldHome = process.env.RUNOFF_HOME;
+    process.env.RUNOFF_HOME = home;
+    try {
+      recordTrace(trace("cli-eval-base-a", { finalStatus: "failed", timestamp: "2026-06-20T00:00:01.000Z" }));
+      recordTrace(trace("cli-eval-base-b", { totalDurationMs: 2000, timestamp: "2026-06-20T00:00:02.000Z" }));
+      recordTrace(trace("cli-eval-cand-a", { finalStatus: "approved", timestamp: "2026-06-20T00:00:03.000Z" }));
+      recordTrace(trace("cli-eval-cand-b", { totalDurationMs: 1000, timestamp: "2026-06-20T00:00:04.000Z" }));
+      createHarnessCandidate({ candidateId: "cli-eval-candidate", summary: "dataset evaluation candidate" });
+      createHarnessDataset({
+        datasetId: "cli-eval-dataset",
+        name: "cli dataset",
+        traceIds: ["cli-eval-base-a", "cli-eval-base-b"],
+        heldInRatio: 0.5,
+      });
+    } finally {
+      if (oldHome !== undefined) process.env.RUNOFF_HOME = oldHome;
+      else delete process.env.RUNOFF_HOME;
+    }
+
+    const child = spawn("npx", [
+      "tsx",
+      CLI,
+      "harness",
+      "evaluate-dataset",
+      "cli-eval-candidate",
+      "--dataset-id",
+      "cli-eval-dataset",
+      "--candidate-trace-map-json",
+      "{\"cli-eval-base-a\":\"cli-eval-cand-a\",\"cli-eval-base-b\":\"cli-eval-cand-b\"}",
+      "--home",
+      home,
+      "--json",
+    ], {
+      cwd: ROOT,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let stdout = "";
+    let stderr = "";
+    child.stdout?.on("data", (d) => { stdout += d.toString(); });
+    child.stderr?.on("data", (d) => { stderr += d.toString(); });
+    const code = await new Promise<number>((resolve, reject) => {
+      child.on("error", reject);
+      child.on("close", (x) => resolve(x ?? 1));
+    });
+
+    assert.equal(code, 0, stderr);
+    const body = JSON.parse(stdout) as { evaluation: { datasetId: string; gate: { accepted: boolean } } };
+    assert.equal(body.evaluation.datasetId, "cli-eval-dataset");
+    assert.equal(body.evaluation.gate.accepted, true);
+    assert.equal(existsSync(join(home, "harness-evolution", "datasets", "cli-eval-dataset", "evaluations", "cli-eval-candidate.json")), true);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("pipeline-cli harness propose writes proposal with configured provider", async () => {
   const dir = mkdtempSync(join(tmpdir(), "pipeline-cli-harness-propose-"));
   try {
@@ -306,6 +421,88 @@ test("pipeline-cli harness propose writes proposal with configured provider", as
   }
 });
 
+test("pipeline-cli harness audit and frontier expose acceptance artifacts", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "pipeline-cli-harness-audit-frontier-"));
+  try {
+    const home = join(dir, "home");
+    const oldHome = process.env.RUNOFF_HOME;
+    process.env.RUNOFF_HOME = home;
+    try {
+      const candidate = createHarnessCandidate({
+        candidateId: "cli-audit",
+        summary: "audit candidate",
+        editableSurface: ["skill/"],
+      });
+      mkdirSync(join(candidate.variant.variantDir, "skill"), { recursive: true });
+      writeFileSync(join(candidate.variant.variantDir, "skill", "SKILL.md"), "updated", "utf-8");
+      const record = loadHarnessCandidate("cli-audit")!;
+      const proposal = {
+        schema: record.schema,
+        candidateId: "cli-audit",
+        proposedAt: "2026-06-20T00:00:00.000Z",
+        provider: "test",
+        model: "test-model",
+        prompt: "test",
+        summary: "clean",
+        filesModified: ["skill/SKILL.md"],
+        diffStat: "1 file changed",
+        failed: false,
+        surfaceViolations: [],
+        observedFilesModified: ["skill/SKILL.md"],
+        observedDiffStat: "1 files changed",
+        unreportedFilesModified: [],
+        reportedButUnchangedFiles: [],
+        failureSignatureIds: [],
+      };
+      writeFileSync(
+        join(home, "harness-evolution", "candidates", "cli-audit", "candidate.json"),
+        JSON.stringify({ ...record, proposal }, null, 2),
+        "utf-8",
+      );
+    } finally {
+      if (oldHome !== undefined) process.env.RUNOFF_HOME = oldHome;
+      else delete process.env.RUNOFF_HOME;
+    }
+
+    const audit = spawn("npx", ["tsx", CLI, "harness", "audit", "cli-audit", "--home", home, "--json"], {
+      cwd: ROOT,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let auditStdout = "";
+    let auditStderr = "";
+    audit.stdout?.on("data", (d) => { auditStdout += d.toString(); });
+    audit.stderr?.on("data", (d) => { auditStderr += d.toString(); });
+    const auditCode = await new Promise<number>((resolve, reject) => {
+      audit.on("error", reject);
+      audit.on("close", (x) => resolve(x ?? 1));
+    });
+    assert.equal(auditCode, 0, auditStderr);
+    const auditBody = JSON.parse(auditStdout) as { audit: { passed: boolean; checkedFiles: string[] } };
+    assert.equal(auditBody.audit.passed, true);
+    assert.deepEqual(auditBody.audit.checkedFiles, ["skill/SKILL.md"]);
+
+    const frontier = spawn("npx", ["tsx", CLI, "harness", "frontier", "--frontier-id", "cli-frontier", "--home", home, "--json"], {
+      cwd: ROOT,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let frontierStdout = "";
+    let frontierStderr = "";
+    frontier.stdout?.on("data", (d) => { frontierStdout += d.toString(); });
+    frontier.stderr?.on("data", (d) => { frontierStderr += d.toString(); });
+    const frontierCode = await new Promise<number>((resolve, reject) => {
+      frontier.on("error", reject);
+      frontier.on("close", (x) => resolve(x ?? 1));
+    });
+    assert.equal(frontierCode, 0, frontierStderr);
+    const frontierBody = JSON.parse(frontierStdout) as { frontier: { frontierId: string; entries: Array<{ candidateId: string; auditPassed: boolean }> } };
+    assert.equal(frontierBody.frontier.frontierId, "cli-frontier");
+    assert.equal(frontierBody.frontier.entries[0]?.candidateId, "cli-audit");
+    assert.equal(frontierBody.frontier.entries[0]?.auditPassed, true);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("pipeline-cli harness export writes accepted promotion bundle", async () => {
   const dir = mkdtempSync(join(tmpdir(), "pipeline-cli-harness-export-"));
   try {
@@ -355,6 +552,7 @@ test("pipeline-cli harness export writes accepted promotion bundle", async () =>
           { split: "held-out", baselineTraceId: "cli-export-base-out", candidateTraceId: "cli-export-cand-out" },
         ],
       });
+      auditHarnessCandidate({ candidateId: "cli-export" });
       decideHarnessCandidate({ candidateId: "cli-export" });
     } finally {
       if (oldHome !== undefined) process.env.RUNOFF_HOME = oldHome;

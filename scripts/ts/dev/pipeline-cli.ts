@@ -4,7 +4,7 @@
  *
  *   pipeline run | init | doctor | config edit | config validate | mcp
  *   pipeline runs list|show
- *   pipeline harness coreset|mine|create|propose|evaluate|rank|decide|export|list
+ *   pipeline harness coreset|mine|dataset|create|propose|evaluate|evaluate-dataset|audit|rank|frontier|decide|export|list
  *   pipeline traces list|show|tail | observability ui
  */
 
@@ -29,11 +29,15 @@ import {
 } from "../../../src/runtime/race-finalize.js";
 import { startObservabilityUiServer } from "../../../src/pipeline/observability-ui-server.js";
 import {
+  harnessEvolveAudit,
   harnessEvolveCoreset,
   harnessEvolveCreate,
+  harnessEvolveDataset,
   harnessEvolveDecide,
   harnessEvolveEvaluate,
+  harnessEvolveEvaluateDataset,
   harnessEvolveExport,
+  harnessEvolveFrontier,
   harnessEvolveList,
   harnessEvolveMine,
   harnessEvolvePropose,
@@ -64,10 +68,14 @@ Usage:
   pipeline runs show <runId> [--json]
   pipeline harness coreset [--limit <n>] [--since <iso>] [--json]
   pipeline harness mine [--trace-ids-json <json>] [--limit <n>] [--since <iso>] [--json]
-  pipeline harness create --summary <text> [--candidate-id <id>] [--source-dir <dir>] [--json]
-  pipeline harness propose --summary <text> [--candidate-id <id>] [--provider <name>] [--source-dir <dir>] [--instructions <text>] [--json]
+  pipeline harness dataset --summary <name> [--dataset-id <id>] [--trace-ids-json <json>] [--failure-signature-ids-json <json>] [--held-in-ratio <n>] [--leakage-terms-json <json>] [--json]
+  pipeline harness create --summary <text> [--candidate-id <id>] [--source-dir <dir>] [--parent-candidate-ids-json <json>] [--dataset-ids-json <json>] [--json]
+  pipeline harness propose --summary <text> [--candidate-id <id>] [--provider <name>] [--source-dir <dir>] [--instructions <text>] [--parent-candidate-ids-json <json>] [--dataset-ids-json <json>] [--json]
   pipeline harness evaluate <candidateId> --pairs-json <json> [--json]
+  pipeline harness evaluate-dataset <candidateId> --dataset-id <id> --candidate-trace-map-json <json> [--json]
+  pipeline harness audit <candidateId> [--dataset-id <id>] [--leakage-terms-json <json>] [--json]
   pipeline harness rank [--candidate-ids-json <json>] [--json]
+  pipeline harness frontier [--frontier-id <id>] [--candidate-ids-json <json>] [--json]
   pipeline harness decide <candidateId> [--decision accept|rollback] [--reason <text>] [--json]
   pipeline harness export <candidateId> [--json]
   pipeline harness list [--limit <n>] [--json]
@@ -102,6 +110,8 @@ type CliArgs = {
   winner?: number;
   reason?: string;
   summary?: string;
+  datasetId?: string;
+  frontierId?: string;
   sourceDir?: string;
   provider?: string;
   instructions?: string;
@@ -110,6 +120,10 @@ type CliArgs = {
   possibleRegressionsJson?: string;
   evidenceTraceIdsJson?: string;
   failureSignatureIdsJson?: string;
+  parentCandidateIdsJson?: string;
+  datasetIdsJson?: string;
+  leakageTermsJson?: string;
+  candidateTraceMapJson?: string;
   pairsJson?: string;
   candidateIdsJson?: string;
   traceIdsJson?: string;
@@ -123,6 +137,7 @@ type CliArgs = {
   runStatus?: RunStatus;
   sessionFilter?: string;
   limit?: number;
+  heldInRatio?: number;
 };
 
 function parseArgs(argv: string[]): CliArgs {
@@ -138,7 +153,12 @@ function parseArgs(argv: string[]): CliArgs {
     out.traceId = argv[2];
     positionalConsumed = 1;
   }
-  if (out.command === "harness" && (out.sub === "evaluate" || out.sub === "decide" || out.sub === "export") && argv[2] && !argv[2].startsWith("-")) {
+  if (
+    out.command === "harness" &&
+    (out.sub === "evaluate" || out.sub === "evaluate-dataset" || out.sub === "audit" || out.sub === "decide" || out.sub === "export") &&
+    argv[2] &&
+    !argv[2].startsWith("-")
+  ) {
     out.traceId = argv[2];
     positionalConsumed = 1;
   }
@@ -168,6 +188,8 @@ function parseArgs(argv: string[]): CliArgs {
     else if (a === "--no-open") out.noOpen = true;
     else if (a === "--trace-id") out.traceId = next();
     else if (a === "--candidate-id") out.traceId = next();
+    else if (a === "--dataset-id") out.datasetId = next();
+    else if (a === "--frontier-id") out.frontierId = next();
     else if (a === "--source-dir") out.sourceDir = next();
     else if (a === "--provider") out.provider = next();
     else if (a === "--instructions") out.instructions = next();
@@ -176,10 +198,15 @@ function parseArgs(argv: string[]): CliArgs {
     else if (a === "--possible-regressions-json") out.possibleRegressionsJson = next();
     else if (a === "--evidence-trace-ids-json") out.evidenceTraceIdsJson = next();
     else if (a === "--failure-signature-ids-json") out.failureSignatureIdsJson = next();
+    else if (a === "--parent-candidate-ids-json") out.parentCandidateIdsJson = next();
+    else if (a === "--dataset-ids-json") out.datasetIdsJson = next();
+    else if (a === "--leakage-terms-json") out.leakageTermsJson = next();
+    else if (a === "--candidate-trace-map-json") out.candidateTraceMapJson = next();
     else if (a === "--summary") out.summary = next();
     else if (a === "--pairs-json") out.pairsJson = next();
     else if (a === "--candidate-ids-json") out.candidateIdsJson = next();
     else if (a === "--trace-ids-json") out.traceIdsJson = next();
+    else if (a === "--held-in-ratio") out.heldInRatio = Number(next());
     else if (a === "--since") out.since = next();
     else if (a === "--decision") {
       const decision = next();
@@ -367,6 +394,19 @@ async function cmdHarness(args: CliArgs): Promise<void> {
     });
     return;
   }
+  if (args.sub === "dataset") {
+    if (!args.summary?.trim()) throw new Error("--summary is required");
+    harnessEvolveDataset({
+      datasetId: args.datasetId,
+      name: args.summary,
+      traceIds: parseJsonArray(args.traceIdsJson, "--trace-ids-json"),
+      failureSignatureIds: parseJsonArray(args.failureSignatureIdsJson, "--failure-signature-ids-json"),
+      heldInRatio: args.heldInRatio,
+      leakageTerms: parseJsonArray(args.leakageTermsJson, "--leakage-terms-json"),
+      json: args.json,
+    });
+    return;
+  }
   if (args.sub === "create") {
     if (!args.summary?.trim()) throw new Error("--summary is required");
     harnessEvolveCreate({
@@ -378,6 +418,8 @@ async function cmdHarness(args: CliArgs): Promise<void> {
       possibleRegressions: parseJsonArray(args.possibleRegressionsJson, "--possible-regressions-json"),
       evidenceTraceIds: parseJsonArray(args.evidenceTraceIdsJson, "--evidence-trace-ids-json"),
       failureSignatureIds: parseJsonArray(args.failureSignatureIdsJson, "--failure-signature-ids-json"),
+      parentCandidateIds: parseJsonArray(args.parentCandidateIdsJson, "--parent-candidate-ids-json"),
+      datasetIds: parseJsonArray(args.datasetIdsJson, "--dataset-ids-json"),
       json: args.json,
     });
     return;
@@ -398,6 +440,8 @@ async function cmdHarness(args: CliArgs): Promise<void> {
       possibleRegressions: parseJsonArray(args.possibleRegressionsJson, "--possible-regressions-json"),
       evidenceTraceIds: parseJsonArray(args.evidenceTraceIdsJson, "--evidence-trace-ids-json"),
       failureSignatureIds: parseJsonArray(args.failureSignatureIdsJson, "--failure-signature-ids-json"),
+      parentCandidateIds: parseJsonArray(args.parentCandidateIdsJson, "--parent-candidate-ids-json"),
+      datasetIds: parseJsonArray(args.datasetIdsJson, "--dataset-ids-json"),
       json: args.json,
     });
     return;
@@ -411,8 +455,38 @@ async function cmdHarness(args: CliArgs): Promise<void> {
     });
     return;
   }
+  if (args.sub === "evaluate-dataset") {
+    if (!args.traceId) throw new Error("candidate id required: pipeline harness evaluate-dataset <candidateId>");
+    if (!args.datasetId) throw new Error("--dataset-id is required");
+    const candidateTraceMap = args.candidateTraceMapJson ? JSON.parse(args.candidateTraceMapJson) as Record<string, string> : {};
+    harnessEvolveEvaluateDataset({
+      candidateId: args.traceId,
+      datasetId: args.datasetId,
+      candidateTraceMap,
+      json: args.json,
+    });
+    return;
+  }
+  if (args.sub === "audit") {
+    if (!args.traceId) throw new Error("candidate id required: pipeline harness audit <candidateId>");
+    harnessEvolveAudit({
+      candidateId: args.traceId,
+      datasetId: args.datasetId,
+      leakageTerms: parseJsonArray(args.leakageTermsJson, "--leakage-terms-json"),
+      json: args.json,
+    });
+    return;
+  }
   if (args.sub === "rank") {
     harnessEvolveRank({
+      candidateIds: parseJsonArray(args.candidateIdsJson, "--candidate-ids-json"),
+      json: args.json,
+    });
+    return;
+  }
+  if (args.sub === "frontier") {
+    harnessEvolveFrontier({
+      frontierId: args.frontierId,
       candidateIds: parseJsonArray(args.candidateIdsJson, "--candidate-ids-json"),
       json: args.json,
     });
@@ -440,7 +514,7 @@ async function cmdHarness(args: CliArgs): Promise<void> {
     harnessEvolveList({ limit: args.limit, json: args.json });
     return;
   }
-  throw new Error("Usage: pipeline harness coreset|mine|create|propose|evaluate|rank|decide|export|list");
+  throw new Error("Usage: pipeline harness coreset|mine|dataset|create|propose|evaluate|evaluate-dataset|audit|rank|frontier|decide|export|list");
 }
 
 async function cmdObservabilityUi(args: CliArgs): Promise<void> {

@@ -47,6 +47,8 @@ export interface HarnessCandidateRecord {
   gate?: HarnessGateResult;
   ranking?: HarnessCandidateRank;
   decision?: HarnessDecisionRecord;
+  lineage?: HarnessCandidateLineage;
+  audit?: HarnessAuditReport;
 }
 
 export interface HarnessEvalPair {
@@ -59,6 +61,38 @@ export interface HarnessEvalInput {
   candidateId: string;
   pairs: HarnessEvalPair[];
   tolerance?: RegressionTolerance;
+}
+
+export interface HarnessDatasetItem {
+  itemId: string;
+  split: "held-in" | "held-out";
+  baselineTraceId: string;
+  failureSignatureIds: string[];
+  promptPreview: string;
+  finalStatus: PipelineTrace["finalStatus"];
+}
+
+export interface HarnessDataset {
+  schema: typeof HARNESS_EVOLUTION_SCHEMA;
+  datasetId: string;
+  createdAt: string;
+  name: string;
+  description?: string;
+  sourceTraceIds: string[];
+  sourceFailureSignatureIds: string[];
+  heldIn: HarnessDatasetItem[];
+  heldOut: HarnessDatasetItem[];
+  leakageTerms: string[];
+}
+
+export interface HarnessDatasetEvaluation {
+  schema: typeof HARNESS_EVOLUTION_SCHEMA;
+  datasetId: string;
+  candidateId: string;
+  evaluatedAt: string;
+  pairs: HarnessEvalPair[];
+  missingBaselineTraceIds: string[];
+  gate: HarnessGateResult;
 }
 
 export interface HarnessSplitGate {
@@ -122,6 +156,39 @@ export interface HarnessCandidateRank {
   reasons: string[];
 }
 
+export interface HarnessCandidateLineage {
+  candidateId: string;
+  createdAt: string;
+  parentCandidateIds: string[];
+  failureSignatureIds: string[];
+  datasetIds: string[];
+  source: "manual" | "mined-signature" | "derived-candidate";
+}
+
+export interface HarnessFrontierEntry {
+  candidateId: string;
+  status: HarnessCandidateRecord["status"];
+  rank?: number;
+  score: number;
+  accepted: boolean;
+  gateAccepted: boolean;
+  auditPassed: boolean;
+  regressionCount: number;
+  improvementCount: number;
+  observedFileCount: number;
+  parentCandidateIds: string[];
+  reasons: string[];
+}
+
+export interface HarnessFrontier {
+  schema: typeof HARNESS_EVOLUTION_SCHEMA;
+  frontierId: string;
+  updatedAt: string;
+  candidateIds: string[];
+  entries: HarnessFrontierEntry[];
+  rejectedCandidateIds: string[];
+}
+
 export interface HarnessDecisionRecord {
   candidateId: string;
   decision: "accept" | "rollback";
@@ -139,8 +206,29 @@ export interface HarnessAcceptanceChecks {
   noSurfaceViolations: boolean;
   noUnreportedFiles: boolean;
   noReportedButUnchangedFiles: boolean;
+  auditPassed: boolean;
   accepted: boolean;
   reasons: string[];
+}
+
+export type HarnessAuditSeverity = "info" | "warning" | "blocker";
+
+export interface HarnessAuditFinding {
+  severity: HarnessAuditSeverity;
+  rule: string;
+  message: string;
+  evidence: string[];
+}
+
+export interface HarnessAuditReport {
+  schema: typeof HARNESS_EVOLUTION_SCHEMA;
+  auditId: string;
+  candidateId: string;
+  datasetId?: string;
+  createdAt: string;
+  passed: boolean;
+  findings: HarnessAuditFinding[];
+  checkedFiles: string[];
 }
 
 export interface HarnessProposalResult {
@@ -208,6 +296,14 @@ function signaturesDir(): string {
   return join(evolutionDir(), "failure-signatures");
 }
 
+function datasetsDir(): string {
+  return join(evolutionDir(), "datasets");
+}
+
+function frontiersDir(): string {
+  return join(evolutionDir(), "frontiers");
+}
+
 function candidateDir(candidateId: string): string {
   return join(candidatesDir(), safePathSegment(candidateId));
 }
@@ -218,6 +314,18 @@ function candidatePath(candidateId: string): string {
 
 function signaturePath(signatureId: string): string {
   return join(signaturesDir(), `${safePathSegment(signatureId)}.json`);
+}
+
+function datasetPath(datasetId: string): string {
+  return join(datasetsDir(), `${safePathSegment(datasetId)}.json`);
+}
+
+function datasetEvaluationPath(datasetId: string, candidateId: string): string {
+  return join(datasetsDir(), safePathSegment(datasetId), "evaluations", `${safePathSegment(candidateId)}.json`);
+}
+
+function frontierPath(frontierId = "default"): string {
+  return join(frontiersDir(), `${safePathSegment(frontierId)}.json`);
 }
 
 function gatePath(candidateId: string): string {
@@ -238,6 +346,10 @@ function proposalPath(candidateId: string): string {
 
 function promotionDir(candidateId: string): string {
   return join(candidateDir(candidateId), "promotion");
+}
+
+function auditPath(candidateId: string): string {
+  return join(candidateDir(candidateId), "audit.json");
 }
 
 function variantDir(candidateId: string): string {
@@ -367,6 +479,8 @@ export function createHarnessCandidate(input: {
   possibleRegressions?: string[];
   evidenceTraceIds?: string[];
   failureSignatureIds?: string[];
+  parentCandidateIds?: string[];
+  datasetIds?: string[];
   sourceDir?: string;
   author?: string;
 }): HarnessCandidateRecord {
@@ -406,10 +520,29 @@ export function createHarnessCandidate(input: {
       sourceDir,
       variantDir: vDir,
     },
+    lineage: {
+      candidateId,
+      createdAt: now,
+      parentCandidateIds: input.parentCandidateIds ?? [],
+      failureSignatureIds: manifest.failureSignatureIds,
+      datasetIds: input.datasetIds ?? [],
+      source: manifest.failureSignatureIds.length ? "mined-signature" : input.parentCandidateIds?.length ? "derived-candidate" : "manual",
+    },
   };
   atomicWriteJson(candidatePath(candidateId), record);
   atomicWriteJson(join(dir, "manifest.json"), manifest);
   return record;
+}
+
+function buildCandidateLineage(record: HarnessCandidateRecord, parentCandidateIds: string[] = [], datasetIds: string[] = []): HarnessCandidateLineage {
+  return {
+    candidateId: record.candidateId,
+    createdAt: record.createdAt,
+    parentCandidateIds,
+    failureSignatureIds: record.manifest.failureSignatureIds,
+    datasetIds,
+    source: record.manifest.failureSignatureIds.length ? "mined-signature" : parentCandidateIds.length ? "derived-candidate" : "manual",
+  };
 }
 
 export function loadHarnessCandidate(candidateId: string): HarnessCandidateRecord | undefined {
@@ -491,6 +624,8 @@ export async function proposeHarnessCandidate(input: {
   possibleRegressions?: string[];
   evidenceTraceIds?: string[];
   failureSignatureIds?: string[];
+  parentCandidateIds?: string[];
+  datasetIds?: string[];
   instructions?: string;
 }): Promise<{ candidate: HarnessCandidateRecord; proposal: HarnessProposalResult }> {
   const existing = input.candidateId ? loadHarnessCandidate(input.candidateId) : undefined;
@@ -503,6 +638,8 @@ export async function proposeHarnessCandidate(input: {
     possibleRegressions: input.possibleRegressions,
     evidenceTraceIds: input.evidenceTraceIds,
     failureSignatureIds: input.failureSignatureIds,
+    parentCandidateIds: input.parentCandidateIds,
+    datasetIds: input.datasetIds,
     author: "harness-proposer",
   });
 
@@ -683,6 +820,117 @@ export function loadHarnessFailureSignature(signatureId: string): HarnessFailure
   return readJsonFile<HarnessFailureSignature>(signaturePath(signatureId));
 }
 
+function datasetItem(trace: PipelineTrace, split: "held-in" | "held-out", signatures: HarnessFailureSignature[]): HarnessDatasetItem {
+  const matching = signatures.filter((signature) => signature.evidenceTraceIds.includes(trace.id));
+  return {
+    itemId: `${split}-${trace.id}`,
+    split,
+    baselineTraceId: trace.id,
+    failureSignatureIds: matching.map((signature) => signature.signatureId),
+    promptPreview: trace.prompt.slice(0, 160),
+    finalStatus: trace.finalStatus,
+  };
+}
+
+export function createHarnessDataset(input: {
+  datasetId?: string;
+  name: string;
+  description?: string;
+  traceIds?: string[];
+  failureSignatureIds?: string[];
+  heldInRatio?: number;
+  leakageTerms?: string[];
+}): HarnessDataset {
+  const traces = input.traceIds?.length
+    ? input.traceIds.flatMap((id) => {
+        const trace = loadTraceById(id);
+        return trace ? [trace] : [];
+      })
+    : queryTraces({});
+  const signatures = (input.failureSignatureIds ?? []).flatMap((id) => {
+    const signature = loadHarnessFailureSignature(id);
+    return signature ? [signature] : [];
+  });
+  const signatureTraceIds = signatures.flatMap((signature) => signature.evidenceTraceIds);
+  const allTraceIds = [...new Set([...(input.traceIds ?? []), ...signatureTraceIds])];
+  const selected = allTraceIds.length
+    ? allTraceIds.flatMap((id) => {
+        const trace = loadTraceById(id);
+        return trace ? [trace] : [];
+      })
+    : traces;
+  const sorted = selected.sort((a, b) => a.timestamp.localeCompare(b.timestamp));
+  const heldInRatio = Math.min(0.8, Math.max(0.2, input.heldInRatio ?? 0.6));
+  const heldInCount = Math.max(1, Math.min(sorted.length - 1, Math.ceil(sorted.length * heldInRatio)));
+  const heldInTraces = sorted.slice(0, heldInCount);
+  const heldOutTraces = sorted.slice(heldInCount);
+  const datasetId = input.datasetId?.trim() || `dataset-${randomUUID().slice(0, 8)}`;
+  const dataset: HarnessDataset = {
+    schema: HARNESS_EVOLUTION_SCHEMA,
+    datasetId,
+    createdAt: new Date().toISOString(),
+    name: input.name,
+    description: input.description,
+    sourceTraceIds: sorted.map((trace) => trace.id),
+    sourceFailureSignatureIds: signatures.map((signature) => signature.signatureId),
+    heldIn: heldInTraces.map((trace) => datasetItem(trace, "held-in", signatures)),
+    heldOut: heldOutTraces.map((trace) => datasetItem(trace, "held-out", signatures)),
+    leakageTerms: input.leakageTerms ?? [],
+  };
+  if (dataset.heldIn.length === 0 || dataset.heldOut.length === 0) {
+    throw new Error("Harness dataset requires at least one held-in and one held-out trace");
+  }
+  mkdirSync(datasetsDir(), { recursive: true });
+  atomicWriteJson(datasetPath(datasetId), dataset);
+  return dataset;
+}
+
+export function loadHarnessDataset(datasetId: string): HarnessDataset | undefined {
+  return readJsonFile<HarnessDataset>(datasetPath(datasetId));
+}
+
+export function evaluateHarnessDataset(input: {
+  candidateId: string;
+  datasetId: string;
+  candidateTraceIdsByBaseline: Record<string, string>;
+  tolerance?: RegressionTolerance;
+}): HarnessDatasetEvaluation {
+  const dataset = loadHarnessDataset(input.datasetId);
+  if (!dataset) throw new Error(`Harness dataset not found: ${input.datasetId}`);
+  const items = [...dataset.heldIn, ...dataset.heldOut];
+  const missingBaselineTraceIds = items
+    .filter((item) => !input.candidateTraceIdsByBaseline[item.baselineTraceId])
+    .map((item) => item.baselineTraceId);
+  if (missingBaselineTraceIds.length) {
+    throw new Error(`Missing candidate traces for dataset baselines: ${missingBaselineTraceIds.join(", ")}`);
+  }
+  const pairs: HarnessEvalPair[] = items.map((item) => ({
+    baselineTraceId: item.baselineTraceId,
+    candidateTraceId: input.candidateTraceIdsByBaseline[item.baselineTraceId]!,
+    split: item.split,
+  }));
+  const gate = evaluateHarnessCandidate({ candidateId: input.candidateId, pairs, tolerance: input.tolerance });
+  const result: HarnessDatasetEvaluation = {
+    schema: HARNESS_EVOLUTION_SCHEMA,
+    datasetId: input.datasetId,
+    candidateId: input.candidateId,
+    evaluatedAt: new Date().toISOString(),
+    pairs,
+    missingBaselineTraceIds,
+    gate,
+  };
+  atomicWriteJson(datasetEvaluationPath(input.datasetId, input.candidateId), result);
+  const record = loadHarnessCandidate(input.candidateId);
+  if (record) {
+    const lineage = record.lineage ?? buildCandidateLineage(record, [], [input.datasetId]);
+    atomicWriteJson(candidatePath(input.candidateId), {
+      ...record,
+      lineage: { ...lineage, datasetIds: [...new Set([...lineage.datasetIds, input.datasetId])] },
+    } satisfies HarnessCandidateRecord);
+  }
+  return result;
+}
+
 export function selectHarnessCoreset(input: {
   limit?: number;
   since?: string;
@@ -840,6 +1088,78 @@ function rankScore(record: HarnessCandidateRecord): { score: number; reasons: st
   return { score, reasons };
 }
 
+function readVariantTextFiles(record: HarnessCandidateRecord, files: string[]): Array<{ path: string; text: string }> {
+  const out: Array<{ path: string; text: string }> = [];
+  for (const file of files) {
+    const normalized = normalizeSurfacePath(file);
+    const abs = resolve(record.variant.variantDir, normalized);
+    const root = resolve(record.variant.variantDir);
+    if (!abs.startsWith(`${root}/`) && abs !== root) continue;
+    if (!existsSync(abs)) continue;
+    const stat = statSync(abs);
+    if (!stat.isFile() || stat.size > 1_000_000) continue;
+    const text = readFileSync(abs, "utf-8");
+    out.push({ path: normalized, text });
+  }
+  return out;
+}
+
+function addFinding(findings: HarnessAuditFinding[], severity: HarnessAuditSeverity, rule: string, message: string, evidence: string[]): void {
+  findings.push({ severity, rule, message, evidence });
+}
+
+export function auditHarnessCandidate(input: {
+  candidateId: string;
+  datasetId?: string;
+  leakageTerms?: string[];
+}): HarnessAuditReport {
+  const record = loadHarnessCandidate(input.candidateId);
+  if (!record) throw new Error(`Harness candidate not found: ${input.candidateId}`);
+  const dataset = input.datasetId ? loadHarnessDataset(input.datasetId) : undefined;
+  if (input.datasetId && !dataset) throw new Error(`Harness dataset not found: ${input.datasetId}`);
+  const findings: HarnessAuditFinding[] = [];
+  const proposal = record.proposal;
+  if (!proposal) addFinding(findings, "blocker", "proposal-required", "candidate has no proposal", [record.candidateId]);
+  if (proposal?.failed) addFinding(findings, "blocker", "proposal-failed", "proposal is marked failed", [proposal.error ?? "failed"]);
+  if (proposal?.surfaceViolations.length) addFinding(findings, "blocker", "surface-violation", "proposal modified files outside editable surface", proposal.surfaceViolations);
+  if (proposal?.unreportedFilesModified.length) addFinding(findings, "blocker", "unreported-files", "observed variant files were not reported by provider", proposal.unreportedFilesModified);
+  if (proposal?.reportedButUnchangedFiles.length) addFinding(findings, "warning", "reported-unchanged-files", "provider reported files that did not change", proposal.reportedButUnchangedFiles);
+
+  const changedFiles = proposal?.observedFilesModified ?? [];
+  const texts = readVariantTextFiles(record, changedFiles);
+  const terms = [
+    ...(input.leakageTerms ?? []),
+    ...(dataset?.leakageTerms ?? []),
+    ...(dataset?.heldOut.flatMap((item) => [item.baselineTraceId, ...item.failureSignatureIds]) ?? []),
+  ].filter((term) => term.length >= 4);
+  for (const term of [...new Set(terms)]) {
+    const matches = texts.filter((file) => file.text.includes(term)).map((file) => file.path);
+    if (matches.length) {
+      addFinding(findings, "blocker", "leakage-term", `candidate variant contains leakage term: ${term}`, matches);
+    }
+  }
+  for (const file of changedFiles) {
+    if (!isAllowedByEditableSurface(file, record.manifest.editableSurface)) {
+      addFinding(findings, "blocker", "editable-surface", `changed file is outside editable surface: ${file}`, [file]);
+    }
+  }
+  if (!changedFiles.length) addFinding(findings, "blocker", "empty-diff", "candidate has no observed variant diff", [record.candidateId]);
+
+  const report: HarnessAuditReport = {
+    schema: HARNESS_EVOLUTION_SCHEMA,
+    auditId: `audit-${record.candidateId}-${Date.now()}`,
+    candidateId: record.candidateId,
+    datasetId: input.datasetId,
+    createdAt: new Date().toISOString(),
+    passed: !findings.some((finding) => finding.severity === "blocker"),
+    findings,
+    checkedFiles: changedFiles,
+  };
+  atomicWriteJson(auditPath(record.candidateId), report);
+  atomicWriteJson(candidatePath(record.candidateId), { ...record, audit: report } satisfies HarnessCandidateRecord);
+  return report;
+}
+
 export function rankHarnessCandidates(candidateIds?: string[]): HarnessCandidateRank[] {
   const records = (candidateIds?.length ? candidateIds.flatMap((id) => {
     const record = loadHarnessCandidate(id);
@@ -881,8 +1201,65 @@ export function rankHarnessCandidates(candidateIds?: string[]): HarnessCandidate
   return ranks;
 }
 
+function frontierEntry(record: HarnessCandidateRecord): HarnessFrontierEntry {
+  const gate = record.gate;
+  const audit = record.audit;
+  const score = rankScore(record);
+  const regressionCount = gate ? gate.heldIn.regressions.length + gate.heldOut.regressions.length : 0;
+  const improvementCount = gate ? gate.heldIn.improvements.length + gate.heldOut.improvements.length : 0;
+  return {
+    candidateId: record.candidateId,
+    status: record.status,
+    rank: record.ranking?.rank,
+    score: score.score,
+    accepted: record.status === "accepted",
+    gateAccepted: gate?.accepted === true,
+    auditPassed: audit?.passed === true,
+    regressionCount,
+    improvementCount,
+    observedFileCount: record.proposal?.observedFilesModified.length ?? 0,
+    parentCandidateIds: record.lineage?.parentCandidateIds ?? [],
+    reasons: [
+      ...score.reasons,
+      audit ? (audit.passed ? "audit passed" : `audit blocked: ${audit.findings.filter((f) => f.severity === "blocker").length} blocker(s)`) : "no audit",
+      record.status === "accepted" ? "accepted" : `status=${record.status}`,
+    ],
+  };
+}
+
+export function updateHarnessFrontier(input: {
+  frontierId?: string;
+  candidateIds?: string[];
+} = {}): HarnessFrontier {
+  const records = (input.candidateIds?.length ? input.candidateIds.flatMap((id) => {
+    const record = loadHarnessCandidate(id);
+    return record ? [record] : [];
+  }) : listHarnessCandidates());
+  const candidateIds = records.map((record) => record.candidateId);
+  if (candidateIds.length) rankHarnessCandidates(candidateIds);
+  const refreshed = candidateIds.flatMap((id) => {
+    const record = loadHarnessCandidate(id);
+    return record ? [record] : [];
+  });
+  const entries = refreshed
+    .map(frontierEntry)
+    .sort((a, b) => Number(b.accepted) - Number(a.accepted) || Number(b.auditPassed) - Number(a.auditPassed) || b.score - a.score);
+  const frontier: HarnessFrontier = {
+    schema: HARNESS_EVOLUTION_SCHEMA,
+    frontierId: input.frontierId ?? "default",
+    updatedAt: new Date().toISOString(),
+    candidateIds,
+    entries,
+    rejectedCandidateIds: entries.filter((entry) => !entry.accepted || !entry.auditPassed || !entry.gateAccepted).map((entry) => entry.candidateId),
+  };
+  mkdirSync(frontiersDir(), { recursive: true });
+  atomicWriteJson(frontierPath(frontier.frontierId), frontier);
+  return frontier;
+}
+
 function acceptanceChecks(record: HarnessCandidateRecord): HarnessAcceptanceChecks {
   const proposal = record.proposal;
+  const audit = record.audit;
   const gateAccepted = record.gate?.accepted === true;
   const proposalPresent = proposal !== undefined;
   const proposalClean = proposalPresent && proposal.failed !== true;
@@ -890,6 +1267,7 @@ function acceptanceChecks(record: HarnessCandidateRecord): HarnessAcceptanceChec
   const noSurfaceViolations = (proposal?.surfaceViolations.length ?? 0) === 0;
   const noUnreportedFiles = (proposal?.unreportedFilesModified.length ?? 0) === 0;
   const noReportedButUnchangedFiles = (proposal?.reportedButUnchangedFiles.length ?? 0) === 0;
+  const auditPassed = audit?.passed === true;
   const reasons: string[] = [];
   if (!gateAccepted) reasons.push(record.gate ? `gate rejected: ${record.gate.reason}` : "missing held-in/held-out gate");
   if (!proposalPresent) reasons.push("missing proposal");
@@ -898,6 +1276,7 @@ function acceptanceChecks(record: HarnessCandidateRecord): HarnessAcceptanceChec
   if (proposalPresent && !noSurfaceViolations) reasons.push(`surface violations: ${proposal.surfaceViolations.join(", ")}`);
   if (proposalPresent && !noUnreportedFiles) reasons.push(`unreported files: ${proposal.unreportedFilesModified.join(", ")}`);
   if (proposalPresent && !noReportedButUnchangedFiles) reasons.push(`reported but unchanged files: ${proposal.reportedButUnchangedFiles.join(", ")}`);
+  if (!auditPassed) reasons.push(audit ? `audit blocked: ${audit.findings.filter((finding) => finding.severity === "blocker").length} blocker(s)` : "missing audit report");
   const accepted =
     gateAccepted &&
     proposalPresent &&
@@ -905,8 +1284,9 @@ function acceptanceChecks(record: HarnessCandidateRecord): HarnessAcceptanceChec
     observedDiffPresent &&
     noSurfaceViolations &&
     noUnreportedFiles &&
-    noReportedButUnchangedFiles;
-  if (accepted) reasons.push("proposal, observed diff, and held-in/held-out gate accepted");
+    noReportedButUnchangedFiles &&
+    auditPassed;
+  if (accepted) reasons.push("proposal, audit, observed diff, and held-in/held-out gate accepted");
   return {
     gateAccepted,
     proposalPresent,
@@ -915,6 +1295,7 @@ function acceptanceChecks(record: HarnessCandidateRecord): HarnessAcceptanceChec
     noSurfaceViolations,
     noUnreportedFiles,
     noReportedButUnchangedFiles,
+    auditPassed,
     accepted,
     reasons,
   };
@@ -938,7 +1319,7 @@ export function decideHarnessCandidate(input: {
     candidateId: input.candidateId,
     decision,
     decidedAt: new Date().toISOString(),
-    reason: input.reason ?? (decision === "accept" ? "accepted by proposal, observed diff, and regression gate" : checks.reasons.join("; ") || "rolled back without passing gate"),
+    reason: input.reason ?? (decision === "accept" ? "accepted by proposal, audit, observed diff, and regression gate" : checks.reasons.join("; ") || "rolled back without passing gate"),
     previousStatus: record.status,
     acceptanceChecks: checks,
   };

@@ -125,7 +125,7 @@ npm run setup:mcp
 | `runoff_run_pipeline` | Full DAG + retries + checkpoints + race pause |
 | `runoff_run_step` | Single step |
 | `runoff_query_runs` | Harness control plane: run status, approvals, resume hints |
-| `runoff_harness_evolve` | Harness evolution: coreset, failure mining, isolated proposer + observed variant diff, acceptance guard, promotion bundle |
+| `runoff_harness_evolve` | Harness evolution: coreset, failure mining, dataset splits, isolated proposer + observed variant diff, leakage audit, frontier, acceptance guard, promotion bundle |
 | `runoff_query_traces` / `runoff_query_experiments` | Local observability |
 | `runoff_race_apply` / `runoff_race_abort` | Race finalization |
 
@@ -136,7 +136,11 @@ npm run runoff:runs -- list --config /path/to/pipeline.config.json
 npm run runoff:runs -- show <runId> --config /path/to/pipeline.config.json
 npm run runoff:harness -- coreset --limit 10
 npm run runoff:harness -- mine --trace-ids-json '["failed-trace"]'
+npm run runoff:harness -- dataset --summary "main regression split" --trace-ids-json '["base-a","base-b"]'
 npm run runoff:harness -- propose --summary "tighten recovery hints" --provider codex
+npm run runoff:harness -- evaluate-dataset <candidateId> --dataset-id <datasetId> --candidate-trace-map-json '{"base-a":"cand-a","base-b":"cand-b"}'
+npm run runoff:harness -- audit <candidateId> --dataset-id <datasetId>
+npm run runoff:harness -- frontier --frontier-id main
 npm run runoff:harness -- export <candidateId>
 ```
 
@@ -152,7 +156,7 @@ Full list + governance/memory tools: [`docs/README.md`](docs/README.md)
 | MCP tool surface for IDE hosts | ✅ | optional | recent | — | different |
 | Durable run control plane | ✅ | checkpointer | partial | partial | partial |
 | Observation + local trace/eval | ✅ | +LangSmith | DIY | DIY | partial |
-| Harness evolution substrate | ✅ manifest/propose/diff/gate/export | DIY | DIY | DIY | partial |
+| Harness evolution substrate | ✅ manifest/dataset/audit/frontier/export | DIY | DIY | DIY | partial |
 
 Full comparison: [`docs/reference/differentiation.md`](docs/reference/differentiation.md)
 

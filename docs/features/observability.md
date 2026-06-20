@@ -88,24 +88,28 @@ Host agents should read observation fields in this order:
 
 Trace postmortems and experiment eval reports surface `observationSummary` so offline review can compare what the host saw with the raw artifact/trace record.
 
-## Harness evolution substrate
+## Harness evolution control plane
 
-`runoff_harness_evolve` and `npm run runoff:harness` provide the local control plane needed before automatic harness optimization is safe:
+`runoff_harness_evolve` and `npm run runoff:harness` provide the local control plane for improving the harness itself. Dataset splits, candidate lineage, leakage audit, frontier state, and promotion bundles are persisted as first-class artifacts under `~/.runoff/harness-evolution/`.
 
 | Capability | Mechanism |
 |---|---|
-| Change manifest | Candidate records under `~/.runoff/harness-evolution/candidates/<id>/manifest.json` |
-| Variant isolation | Optional source directory copied to an isolated candidate `variant/` directory |
 | Failure signature mining | `mine` clusters failed traces into `failure-signatures/<id>.json` with evidence traces, suspected harness surface, and suggested editable surface |
+| Dataset / split object | `dataset` writes `datasets/<datasetId>.json` with held-in and held-out trace items, source signatures, and leakage terms |
+| Dataset evaluation | `evaluate_dataset` maps every dataset baseline trace to a candidate trace, runs the held-in/held-out gate, and writes `datasets/<datasetId>/evaluations/<candidateId>.json` |
+| Change manifest + lineage | Candidate records under `candidates/<id>/manifest.json` and `candidate.json` track editable surface, expected fixes, parent candidates, mined signatures, and dataset IDs |
+| Variant isolation | Optional source directory copied to an isolated candidate `variant/` directory |
 | Automatic proposer | `propose` invokes a configured provider with `workDir` set to the isolated `variant/`, includes mined signatures plus `history-context.json`, records `proposal.json`, and flags files outside `editableSurface` |
 | Observed variant diff | `propose` snapshots the candidate `variant/` before/after provider execution and records `observedFilesModified`, `observedDiffStat`, `unreportedFilesModified`, and `reportedButUnchangedFiles` |
+| Leakage / overfit audit | `audit` writes `candidates/<id>/audit.json`; it blocks missing/failed proposals, surface violations, unreported edits, empty diffs, and leakage terms from explicit inputs or held-out dataset IDs/signatures |
 | Held-in / held-out regression gate | `evaluate` compares baseline/candidate trace pairs and requires both splits, zero regressions, and at least one measured improvement |
 | Coreset selection | `coreset` ranks difficult traces while preserving diversity keys |
 | Self-preference rank | `rank` performs deterministic pairwise preference over gate results |
-| Acceptance guard / rollback audit | `decide` accepts only when proposal audit is clean, observed diff exists, and held-in/held-out gate passed; otherwise it rolls back or blocks forced accept without mutating the user repo |
+| Frontier | `frontier` writes `frontiers/<frontierId>.json` with rank, gate, audit, lineage, accepted, and rejected candidate state |
+| Acceptance guard / rollback audit | `decide` accepts only when proposal is clean, observed diff exists, audit passed, and held-in/held-out gate passed; otherwise it rolls back or blocks forced accept without mutating the user repo |
 | Promotion bundle | `export` writes `promotion/bundle.json` plus copied observed variant files for accepted candidates only |
 
-This is a substrate, not a fully autonomous optimizer: proposers edit only candidate variant directories, and promotion still goes through manifest + proposal audit + gate + rank + decision + export artifacts.
+Proposers edit only candidate variant directories, and promotion still goes through manifest + proposal audit + regression gate + frontier/rank + decision + export artifacts before any human applies it elsewhere.
 
 **LangFuse 借鉴已落地**：`traces/scores.jsonl` 记录 `traceId` + 数值/备注；eval-report 的 `traceInsights` 带一行 postmortem 摘要。
 
