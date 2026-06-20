@@ -3,10 +3,15 @@
  */
 
 import {
+  createProvider,
+  loadConfigFromPath,
+} from "../core/config.js";
+import {
   createHarnessCandidate,
   decideHarnessCandidate,
   evaluateHarnessCandidate,
   listHarnessCandidates,
+  proposeHarnessCandidate,
   rankHarnessCandidates,
   selectHarnessCoreset,
   type HarnessEvalPair,
@@ -32,6 +37,12 @@ export type HarnessEvolveCreateOptions = {
   possibleRegressions?: string[];
   evidenceTraceIds?: string[];
   json?: boolean;
+};
+
+export type HarnessEvolveProposeOptions = HarnessEvolveCreateOptions & {
+  configPath: string;
+  provider?: string;
+  instructions?: string;
 };
 
 export type HarnessEvolveEvaluateOptions = {
@@ -96,6 +107,34 @@ export function harnessEvolveCreate(opts: HarnessEvolveCreateOptions): void {
   console.log(`Created ${candidate.candidateId}`);
   console.log(`  variant: ${candidate.variant.variantDir}`);
   console.log(`  manifest: ${candidate.manifest.summary}`);
+}
+
+export async function harnessEvolvePropose(opts: HarnessEvolveProposeOptions): Promise<void> {
+  const config = loadConfigFromPath(opts.configPath);
+  const providerName = opts.provider ?? config.orchestration?.plannerProvider ?? Object.keys(config.providers)[0];
+  if (!providerName || !config.providers[providerName]) throw new Error("provider is required");
+  const provider = createProvider(providerName, config.providers[providerName]!);
+  if (!provider) throw new Error(`provider "${providerName}" cannot execute proposals`);
+  const result = await proposeHarnessCandidate({
+    candidateId: opts.candidateId,
+    provider,
+    summary: opts.summary,
+    sourceDir: opts.sourceDir,
+    editableSurface: opts.editableSurface,
+    expectedFixes: opts.expectedFixes,
+    possibleRegressions: opts.possibleRegressions,
+    evidenceTraceIds: opts.evidenceTraceIds,
+    instructions: opts.instructions,
+  });
+  if (opts.json) {
+    console.log(JSON.stringify(result, null, 2));
+    return;
+  }
+  console.log(`${result.proposal.failed ? "FAILED" : "PROPOSED"} ${result.candidate.candidateId}`);
+  console.log(`  provider: ${result.proposal.provider}`);
+  console.log(`  variant:  ${result.candidate.variant.variantDir}`);
+  console.log(`  files:    ${result.proposal.filesModified.join(", ") || "none reported"}`);
+  if (result.proposal.error) console.log(`  error:    ${result.proposal.error}`);
 }
 
 export function harnessEvolveEvaluate(opts: HarnessEvolveEvaluateOptions): void {

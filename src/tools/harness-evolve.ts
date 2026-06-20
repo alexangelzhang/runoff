@@ -4,18 +4,20 @@
 
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
+import { createProvider, loadConfig } from "../core/config.js";
 import {
   createHarnessCandidate,
   decideHarnessCandidate,
   evaluateHarnessCandidate,
   listHarnessCandidates,
+  proposeHarnessCandidate,
   rankHarnessCandidates,
   selectHarnessCoreset,
   type HarnessEvalPair,
 } from "../orchestration/harness-evolution.js";
 import { mcpError, mcpErrorFrom, mcpJson } from "./mcp-response.js";
 
-const ACTIONS = ["coreset", "create", "evaluate", "rank", "decide", "list"] as const;
+const ACTIONS = ["coreset", "create", "propose", "evaluate", "rank", "decide", "list"] as const;
 
 function parseJsonArray<T>(raw: string | undefined, name: string): T[] {
   if (!raw?.trim()) return [];
@@ -29,9 +31,11 @@ export function register(server: McpServer) {
     "runoff_harness_evolve",
     "Manage local harness evolution: coreset selection, change manifests, isolated variants, regression gates, self-preference ranking, and accept/rollback records.",
     {
-      action: z.enum(ACTIONS).describe("coreset | create | evaluate | rank | decide | list"),
+      action: z.enum(ACTIONS).describe("coreset | create | propose | evaluate | rank | decide | list"),
       candidateId: z.string().optional().describe("Harness candidate id"),
       summary: z.string().optional().describe("Candidate manifest summary for action=create"),
+      provider: z.string().optional().describe("Provider name for action=propose"),
+      instructions: z.string().optional().describe("Additional proposer instructions for action=propose"),
       sourceDir: z.string().optional().describe("Optional harness/source directory copied into an isolated variant directory"),
       editableSurfaceJson: z.string().optional().describe("JSON array of editable files/components"),
       expectedFixesJson: z.string().optional().describe("JSON array of expected fixes"),
@@ -71,6 +75,29 @@ export function register(server: McpServer) {
                 evidenceTraceIds: parseJsonArray<string>(args.evidenceTraceIdsJson, "evidenceTraceIdsJson"),
                 author: "runoff_harness_evolve",
               }),
+            });
+          }
+          case "propose": {
+            const config = loadConfig();
+            const providerName = args.provider ?? config.orchestration?.plannerProvider ?? Object.keys(config.providers)[0];
+            if (!providerName || !config.providers[providerName]) {
+              return mcpError("Harness evolve error", "provider is required for action=propose");
+            }
+            const provider = createProvider(providerName, config.providers[providerName]!);
+            if (!provider) return mcpError("Harness evolve error", `provider "${providerName}" cannot execute proposals`);
+            return mcpJson({
+              action: args.action,
+              ...(await proposeHarnessCandidate({
+                candidateId: args.candidateId,
+                provider,
+                summary: args.summary,
+                sourceDir: args.sourceDir,
+                editableSurface: parseJsonArray<string>(args.editableSurfaceJson, "editableSurfaceJson"),
+                expectedFixes: parseJsonArray<string>(args.expectedFixesJson, "expectedFixesJson"),
+                possibleRegressions: parseJsonArray<string>(args.possibleRegressionsJson, "possibleRegressionsJson"),
+                evidenceTraceIds: parseJsonArray<string>(args.evidenceTraceIdsJson, "evidenceTraceIdsJson"),
+                instructions: args.instructions,
+              })),
             });
           }
           case "evaluate": {

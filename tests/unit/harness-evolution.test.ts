@@ -1,15 +1,18 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import type { PipelineTrace } from "../../src/observability/trace.ts";
 import { recordTrace } from "../../src/observability/trace.ts";
+import type { LLMProvider, LLMRequest, LLMResponse, ProviderMode } from "../../src/providers/types.ts";
 import {
   createHarnessCandidate,
   decideHarnessCandidate,
   evaluateHarnessCandidate,
+  loadHarnessCandidate,
   listHarnessCandidates,
+  proposeHarnessCandidate,
   rankHarnessCandidates,
   selectHarnessCoreset,
 } from "../../src/orchestration/harness-evolution.ts";
@@ -29,6 +32,25 @@ function trace(id: string, overrides: Partial<PipelineTrace> = {}): PipelineTrac
     totalUsage: { promptTokens: 100, completionTokens: 50 },
     ...overrides,
   };
+}
+
+class ProposalProvider implements LLMProvider {
+  mode: ProviderMode = "agent-write";
+  lastRequest?: LLMRequest;
+
+  constructor(
+    public name: string,
+    private response: Omit<Extract<LLMResponse, { kind: "agent" }>, "kind" | "model">,
+  ) {}
+
+  async execute(req: LLMRequest): Promise<LLMResponse> {
+    this.lastRequest = req;
+    return {
+      kind: "agent",
+      model: "proposal-model",
+      ...this.response,
+    };
+  }
 }
 
 test("harness evolution creates isolated candidate manifest and lists it", () => {
@@ -54,6 +76,81 @@ test("harness evolution creates isolated candidate manifest and lists it", () =>
     assert.equal(candidate.variant.isolated, true);
     assert.match(candidate.variant.variantDir, /candidate-a/);
     assert.equal(listHarnessCandidates()[0]?.candidateId, "candidate-a");
+  } finally {
+    if (oldHome === undefined) delete process.env.RUNOFF_HOME;
+    else process.env.RUNOFF_HOME = oldHome;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("harness evolution proposer writes proposal inside isolated variant", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "runoff-harness-propose-"));
+  const oldHome = process.env.RUNOFF_HOME;
+  try {
+    process.env.RUNOFF_HOME = join(dir, "home");
+    const provider = new ProposalProvider("agent-proposer", {
+      summary: "Added a stricter observation hint check",
+      changes: "diff --git a/skill/SKILL.md b/skill/SKILL.md\n",
+      filesModified: ["skill/SKILL.md"],
+      diffStat: "1 file changed, 2 insertions(+)",
+    });
+
+    const result = await proposeHarnessCandidate({
+      candidateId: "candidate-propose",
+      provider,
+      summary: "Keep nextHint tool names current",
+      editableSurface: ["skill/"],
+      expectedFixes: ["observation hints use runoff_*"],
+      instructions: "Update the skill guidance only.",
+    });
+
+    assert.equal(result.candidate.candidateId, "candidate-propose");
+    assert.equal(result.proposal.failed, false);
+    assert.deepEqual(result.proposal.filesModified, ["skill/SKILL.md"]);
+    assert.equal(provider.lastRequest?.workDir, result.candidate.variant.variantDir);
+    assert.equal(provider.lastRequest?.stepName, "harness-propose");
+    assert.match(provider.lastRequest?.prompt ?? "", /Keep nextHint tool names current/);
+    assert.match(provider.lastRequest?.prompt ?? "", /Update the skill guidance only/);
+
+    const persisted = loadHarnessCandidate("candidate-propose");
+    assert.equal(persisted?.proposal?.provider, "agent-proposer");
+    const proposalPath = join(process.env.RUNOFF_HOME, "harness-evolution", "candidates", "candidate-propose", "proposal.json");
+    assert.equal(existsSync(proposalPath), true);
+    const proposal = JSON.parse(readFileSync(proposalPath, "utf-8")) as { surfaceViolations: string[] };
+    assert.deepEqual(proposal.surfaceViolations, []);
+  } finally {
+    if (oldHome === undefined) delete process.env.RUNOFF_HOME;
+    else process.env.RUNOFF_HOME = oldHome;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("harness evolution proposer flags files outside editable surface", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "runoff-harness-propose-violation-"));
+  const oldHome = process.env.RUNOFF_HOME;
+  try {
+    process.env.RUNOFF_HOME = join(dir, "home");
+    createHarnessCandidate({
+      candidateId: "candidate-violation",
+      summary: "Restrict proposer edits",
+      editableSurface: ["skill/SKILL.md"],
+    });
+    const provider = new ProposalProvider("agent-proposer", {
+      summary: "Changed skill plus source registration",
+      changes: "diff --git a/src/index.ts b/src/index.ts\n",
+      filesModified: ["skill/SKILL.md", "src/index.ts"],
+      diffStat: "2 files changed",
+    });
+
+    const result = await proposeHarnessCandidate({
+      candidateId: "candidate-violation",
+      provider,
+    });
+
+    assert.equal(result.proposal.failed, true);
+    assert.deepEqual(result.proposal.surfaceViolations, ["src/index.ts"]);
+    assert.match(result.proposal.error ?? "", /outside editable surface/);
+    assert.equal(loadHarnessCandidate("candidate-violation")?.proposal?.failed, true);
   } finally {
     if (oldHome === undefined) delete process.env.RUNOFF_HOME;
     else process.env.RUNOFF_HOME = oldHome;

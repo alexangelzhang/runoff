@@ -4,7 +4,7 @@
  *
  *   pipeline run | init | doctor | config edit | config validate | mcp
  *   pipeline runs list|show
- *   pipeline harness coreset|create|evaluate|rank|decide|list
+ *   pipeline harness coreset|create|propose|evaluate|rank|decide|list
  *   pipeline traces list|show|tail | observability ui
  */
 
@@ -34,6 +34,7 @@ import {
   harnessEvolveDecide,
   harnessEvolveEvaluate,
   harnessEvolveList,
+  harnessEvolvePropose,
   harnessEvolveRank,
 } from "../../../src/pipeline/harness-evolve-cli.js";
 import { runsList, runsShow } from "../../../src/pipeline/run-control-cli.js";
@@ -61,6 +62,7 @@ Usage:
   pipeline runs show <runId> [--json]
   pipeline harness coreset [--limit <n>] [--since <iso>] [--json]
   pipeline harness create --summary <text> [--candidate-id <id>] [--source-dir <dir>] [--json]
+  pipeline harness propose --summary <text> [--candidate-id <id>] [--provider <name>] [--source-dir <dir>] [--instructions <text>] [--json]
   pipeline harness evaluate <candidateId> --pairs-json <json> [--json]
   pipeline harness rank [--candidate-ids-json <json>] [--json]
   pipeline harness decide <candidateId> [--decision accept|rollback] [--reason <text>] [--json]
@@ -97,6 +99,12 @@ type CliArgs = {
   reason?: string;
   summary?: string;
   sourceDir?: string;
+  provider?: string;
+  instructions?: string;
+  editableSurfaceJson?: string;
+  expectedFixesJson?: string;
+  possibleRegressionsJson?: string;
+  evidenceTraceIdsJson?: string;
   pairsJson?: string;
   candidateIdsJson?: string;
   decision?: "accept" | "rollback";
@@ -155,6 +163,12 @@ function parseArgs(argv: string[]): CliArgs {
     else if (a === "--trace-id") out.traceId = next();
     else if (a === "--candidate-id") out.traceId = next();
     else if (a === "--source-dir") out.sourceDir = next();
+    else if (a === "--provider") out.provider = next();
+    else if (a === "--instructions") out.instructions = next();
+    else if (a === "--editable-surface-json") out.editableSurfaceJson = next();
+    else if (a === "--expected-fixes-json") out.expectedFixesJson = next();
+    else if (a === "--possible-regressions-json") out.possibleRegressionsJson = next();
+    else if (a === "--evidence-trace-ids-json") out.evidenceTraceIdsJson = next();
     else if (a === "--summary") out.summary = next();
     else if (a === "--pairs-json") out.pairsJson = next();
     else if (a === "--candidate-ids-json") out.candidateIdsJson = next();
@@ -330,7 +344,7 @@ function parseJsonArray<T>(raw: string | undefined, name: string): T[] {
   return parsed as T[];
 }
 
-function cmdHarness(args: CliArgs): void {
+async function cmdHarness(args: CliArgs): Promise<void> {
   if (args.home) process.env.RUNOFF_HOME = resolve(args.home);
   if (args.sub === "coreset") {
     harnessEvolveCoreset({ limit: args.limit, since: args.since, json: args.json });
@@ -342,6 +356,29 @@ function cmdHarness(args: CliArgs): void {
       candidateId: args.traceId,
       summary: args.summary,
       sourceDir: args.sourceDir,
+      editableSurface: parseJsonArray(args.editableSurfaceJson, "--editable-surface-json"),
+      expectedFixes: parseJsonArray(args.expectedFixesJson, "--expected-fixes-json"),
+      possibleRegressions: parseJsonArray(args.possibleRegressionsJson, "--possible-regressions-json"),
+      evidenceTraceIds: parseJsonArray(args.evidenceTraceIdsJson, "--evidence-trace-ids-json"),
+      json: args.json,
+    });
+    return;
+  }
+  if (args.sub === "propose") {
+    if (!args.summary?.trim() && !args.traceId) throw new Error("--summary is required unless --candidate-id targets an existing candidate");
+    const configPath = resolve(args.config ?? join(process.cwd(), "pipeline.config.json"));
+    if (!existsSync(configPath)) throw new Error(`Config not found: ${configPath}`);
+    await harnessEvolvePropose({
+      configPath,
+      candidateId: args.traceId,
+      summary: args.summary ?? "Harness proposer candidate",
+      sourceDir: args.sourceDir,
+      provider: args.provider,
+      instructions: args.instructions,
+      editableSurface: parseJsonArray(args.editableSurfaceJson, "--editable-surface-json"),
+      expectedFixes: parseJsonArray(args.expectedFixesJson, "--expected-fixes-json"),
+      possibleRegressions: parseJsonArray(args.possibleRegressionsJson, "--possible-regressions-json"),
+      evidenceTraceIds: parseJsonArray(args.evidenceTraceIdsJson, "--evidence-trace-ids-json"),
       json: args.json,
     });
     return;
@@ -376,7 +413,7 @@ function cmdHarness(args: CliArgs): void {
     harnessEvolveList({ limit: args.limit, json: args.json });
     return;
   }
-  throw new Error("Usage: pipeline harness coreset|create|evaluate|rank|decide|list");
+  throw new Error("Usage: pipeline harness coreset|create|propose|evaluate|rank|decide|list");
 }
 
 async function cmdObservabilityUi(args: CliArgs): Promise<void> {
@@ -456,7 +493,7 @@ async function main(): Promise<void> {
     return;
   }
   if (args.command === "harness") {
-    cmdHarness(args);
+    await cmdHarness(args);
     return;
   }
   if (args.command === "traces") {

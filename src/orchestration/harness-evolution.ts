@@ -8,8 +8,9 @@
  */
 
 import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { join, normalize, resolve } from "node:path";
 import { randomUUID } from "node:crypto";
+import type { LLMProvider, LLMResponse } from "../providers/types.js";
 import { getHarnessEvolutionDir } from "../core/paths.js";
 import type { PipelineTrace } from "../observability/trace.js";
 import { loadTraceById, queryTraces } from "../observability/trace.js";
@@ -41,6 +42,7 @@ export interface HarnessCandidateRecord {
     sourceDir?: string;
     variantDir: string;
   };
+  proposal?: HarnessProposalResult;
   gate?: HarnessGateResult;
   ranking?: HarnessCandidateRank;
   decision?: HarnessDecisionRecord;
@@ -101,6 +103,21 @@ export interface HarnessDecisionRecord {
   previousStatus: HarnessCandidateRecord["status"];
 }
 
+export interface HarnessProposalResult {
+  schema: typeof HARNESS_EVOLUTION_SCHEMA;
+  candidateId: string;
+  proposedAt: string;
+  provider: string;
+  model: string;
+  prompt: string;
+  summary: string;
+  filesModified: string[];
+  diffStat?: string;
+  failed?: boolean;
+  error?: string;
+  surfaceViolations: string[];
+}
+
 function evolutionDir(): string {
   return getHarnessEvolutionDir();
 }
@@ -129,8 +146,53 @@ function decisionPath(candidateId: string): string {
   return join(candidateDir(candidateId), "decision.json");
 }
 
+function proposalPath(candidateId: string): string {
+  return join(candidateDir(candidateId), "proposal.json");
+}
+
 function variantDir(candidateId: string): string {
   return join(candidateDir(candidateId), "variant");
+}
+
+function normalizeSurfacePath(path: string): string {
+  return normalize(path).replace(/\\/g, "/").replace(/^\.\//, "");
+}
+
+function isAllowedByEditableSurface(file: string, surface: string[]): boolean {
+  if (!surface.length) return true;
+  const normalizedFile = normalizeSurfacePath(file);
+  return surface.some((entry) => {
+    const normalizedEntry = normalizeSurfacePath(entry);
+    if (normalizedEntry.endsWith("/")) return normalizedFile.startsWith(normalizedEntry);
+    return normalizedFile === normalizedEntry || normalizedFile.startsWith(`${normalizedEntry}/`);
+  });
+}
+
+function summarizeProviderResponse(response: LLMResponse): {
+  model: string;
+  summary: string;
+  filesModified: string[];
+  diffStat?: string;
+  failed?: boolean;
+  error?: string;
+} {
+  if (response.kind === "agent") {
+    return {
+      model: response.model,
+      summary: response.summary,
+      filesModified: response.filesModified,
+      diffStat: response.diffStat,
+      failed: response.failed,
+      error: response.error,
+    };
+  }
+  return {
+    model: response.model,
+    summary: response.explanation || response.content.slice(0, 500),
+    filesModified: [],
+    failed: response.failed,
+    error: response.error,
+  };
 }
 
 export function createHarnessCandidate(input: {
@@ -196,6 +258,78 @@ export function listHarnessCandidates(): HarnessCandidateRecord[] {
       return record ? [record] : [];
     })
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+}
+
+function buildProposalPrompt(record: HarnessCandidateRecord, extraInstructions?: string): string {
+  return [
+    "You are proposing a harness candidate for runoff.",
+    "Edit only inside the current isolated variant directory.",
+    "Do not mutate the source repository or files outside the current working directory.",
+    "Keep changes limited to the editable surface declared below.",
+    "",
+    "Manifest:",
+    JSON.stringify(record.manifest, null, 2),
+    "",
+    "Additional instructions:",
+    extraInstructions?.trim() || "Make the smallest harness change that satisfies the manifest.",
+  ].join("\n");
+}
+
+export async function proposeHarnessCandidate(input: {
+  candidateId?: string;
+  provider: LLMProvider;
+  summary?: string;
+  sourceDir?: string;
+  editableSurface?: string[];
+  expectedFixes?: string[];
+  possibleRegressions?: string[];
+  evidenceTraceIds?: string[];
+  instructions?: string;
+}): Promise<{ candidate: HarnessCandidateRecord; proposal: HarnessProposalResult }> {
+  const existing = input.candidateId ? loadHarnessCandidate(input.candidateId) : undefined;
+  const candidate = existing ?? createHarnessCandidate({
+    candidateId: input.candidateId,
+    summary: input.summary ?? "Harness proposer candidate",
+    sourceDir: input.sourceDir,
+    editableSurface: input.editableSurface,
+    expectedFixes: input.expectedFixes,
+    possibleRegressions: input.possibleRegressions,
+    evidenceTraceIds: input.evidenceTraceIds,
+    author: "harness-proposer",
+  });
+
+  const prompt = buildProposalPrompt(candidate, input.instructions);
+  const response = await input.provider.execute({
+    prompt,
+    workDir: candidate.variant.variantDir,
+    stepName: "harness-propose",
+    round: 1,
+  });
+  const summary = summarizeProviderResponse(response);
+  const surfaceViolations = summary.filesModified.filter(
+    (file) => !isAllowedByEditableSurface(file, candidate.manifest.editableSurface),
+  );
+  const proposal: HarnessProposalResult = {
+    schema: HARNESS_EVOLUTION_SCHEMA,
+    candidateId: candidate.candidateId,
+    proposedAt: new Date().toISOString(),
+    provider: input.provider.name,
+    model: summary.model,
+    prompt,
+    summary: summary.summary,
+    filesModified: summary.filesModified,
+    diffStat: summary.diffStat,
+    failed: summary.failed || surfaceViolations.length > 0,
+    error: surfaceViolations.length
+      ? `provider modified files outside editable surface: ${surfaceViolations.join(", ")}`
+      : summary.error,
+    surfaceViolations,
+  };
+
+  const next: HarnessCandidateRecord = { ...candidate, proposal };
+  atomicWriteJson(candidatePath(candidate.candidateId), next);
+  atomicWriteJson(proposalPath(candidate.candidateId), proposal);
+  return { candidate: next, proposal };
 }
 
 function traceDifficulty(trace: PipelineTrace): number {
