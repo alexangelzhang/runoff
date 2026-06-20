@@ -56,7 +56,7 @@ async function main(): Promise<void> {
   }
   console.log(`\nTraces:      ${join(getPipelineHomeDir(), "traces")}`);
   console.log(`Experiments: ${join(getPipelineHomeDir(), "experiments.jsonl")}`);
-  console.log("\nNext: npm run dev  → connect MCP  →  llm_run_pipeline / llm_query_traces");
+  console.log("\nNext: npm run dev  → connect MCP  →  runoff_run_pipeline / runoff_query_traces");
 }
 
 main().catch((err) => {

@@ -34,7 +34,7 @@
 ### Features
 
 - [race-mode.md](features/race-mode.md) — running multiple LLMs on the same step, picking or merging the best result
-- [observability.md](features/observability.md) · [observability-eval.md](features/observability-eval.md)
+- [observability.md](features/observability.md) — Observation layer + traces · [observability-eval.md](features/observability-eval.md)
 - [memory-production.md](features/memory-production.md) · [memory-dream-roadmap.md](features/memory-dream-roadmap.md)
 - [dream.md](features/dream.md) · [dreamify.md](features/dreamify.md)
 - [deerflow-reflect.md](features/deerflow-reflect.md)
@@ -70,7 +70,7 @@
 
 ## Examples & issues
 
-- [../examples/README.md](../examples/README.md) — `configs/*.config.json`, optional `workshop/`
+- [../examples/README.md](../examples/README.md) — `configs/*.config.json`, observation response example, optional `workshop/`
 - [../issues/README.md](../issues/README.md) — open backlog + `archive/` close-outs
 
 ## Product roadmap

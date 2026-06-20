@@ -2,7 +2,7 @@
 
 Pipeline and provider layers use several independent timeout knobs. They are **not** unified into one global setting.
 
-## Pipeline run (MCP / `llm_run_pipeline`)
+## Pipeline run (MCP / `runoff_run_pipeline`)
 
 | Layer | Default | Location |
 |-------|---------|----------|

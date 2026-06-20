@@ -6,22 +6,22 @@ Local disk (`~/.runoff/memory/`) remains the **source of truth** for pipeline ho
 
 | Tool | Purpose |
 |------|---------|
-| `llm_memory_status` | Resolved backend type, credentials presence, read path; optional `probe=true` |
-| `llm_query_memory` | `retrieveMerged` — local + remote search for ops/debug |
-| `llm_show_config` | Includes `memoryBackend` summary |
+| `runoff_memory_status` | Resolved backend type, credentials presence, read path; optional `probe=true` |
+| `runoff_query_memory` | `retrieveMerged` — local + remote search for ops/debug |
+| `runoff_show_config` | Includes `memoryBackend` summary |
 
 ## Configure
 
 See [`external-memory.md`](features/external-memory.md) for JSON examples.
 
-**Zep session**: set `orchestration.memoryBackend.sessionId`, or pass `sessionId` to `llm_memory_status` / `llm_query_memory` (falls back to pipeline run `sessionId` when probing/querying).
+**Zep session**: set `orchestration.memoryBackend.sessionId`, or pass `sessionId` to `runoff_memory_status` / `runoff_query_memory` (falls back to pipeline run `sessionId` when probing/querying).
 
 ## Read vs write paths
 
 | Path | Behavior |
 |------|----------|
 | Pipeline hooks / `PatternCache` | Start: async semantic match via `retrieveMerged` when layered (M1); exact hash still sync local |
-| `llm_query_memory` | Async `retrieveMerged()` — local + remote |
+| `runoff_query_memory` | Async `retrieveMerged()` — local + remote |
 | `store()` | Always local first; remote `push` is best-effort async |
 
 ### M1 config
@@ -58,8 +58,8 @@ Tests: `await flushPipelineMemoryFormationQueue()` after `onPipelineEnd` when as
 ## Production checklist
 
 1. Set `memoryBackend.type` and env fallbacks (`RUNOFF_MEMORY_API_KEY`, etc.).
-2. Run `llm_memory_status` with `probe=true` before enabling in CI agents.
-3. Use `llm_query_memory` to verify remote search returns expected entries.
+2. Run `runoff_memory_status` with `probe=true` before enabling in CI agents.
+3. Use `runoff_query_memory` to verify remote search returns expected entries.
 4. Do not rely on remote-only reads during hot pipeline path until hooks adopt async enrichment (future).
 
 ## Code
@@ -73,4 +73,4 @@ Tests: `await flushPipelineMemoryFormationQueue()` after `onPipelineEnd` when as
 
 ## Dreamify (M3)
 
-检索调参：[`dreamify.md`](features/dreamify.md) · MCP `llm_dreamify_tune`。
+检索调参：[`dreamify.md`](features/dreamify.md) · MCP `runoff_dreamify_tune`。

@@ -9,7 +9,7 @@
 
 ## 写入（自动）
 
-每次 `llm_run_pipeline` 结束（含失败），`PipelineHooks` 会：
+每次 `runoff_run_pipeline` 结束（含失败），`PipelineHooks` 会：
 
 1. 用 prompt 哈希作为 `experimentId`
 2. 用 prompt+config 哈希作为 `variant`
@@ -17,7 +17,7 @@
 
 日志路径：`~/.runoff/experiments.jsonl`
 
-## MCP：`llm_query_experiments`
+## MCP：`runoff_query_experiments`
 
 | `format` | 需要 `experimentId` | 输出 |
 |----------|---------------------|------|

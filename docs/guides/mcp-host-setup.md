@@ -33,7 +33,7 @@ Entry point uses `npx tsx <repo>/src/index.ts` so you do not need `npm run build
 
 ```bash
 npm run dev
-# In host: call llm_show_config or llm_run_pipeline (mock config)
+# In host: call runoff_show_config or runoff_run_pipeline (mock config)
 ```
 
 See [getting-started-30min.md](guides/getting-started-30min.md).

@@ -34,7 +34,7 @@ Smoke tests use real git worktrees (~10s). Orchestration smoke: `npx tsx --test 
 ```
 Host MCP client
     → src/index.ts (register tools only)
-    → src/tools/run-pipeline.ts (MCP llm_run_pipeline registration)
+    → src/tools/run-pipeline.ts (MCP runoff_run_pipeline registration)
     → src/orchestration/pipeline-mcp-run.ts (MCP session / approval resume)
     → src/orchestration/pipeline-execution.ts (plan gate, AgentGraph compile)
     → src/orchestration/pipeline-runner.ts (DAG loop, step-runner, governance hooks)
@@ -53,19 +53,19 @@ Host MCP client
 
 | Tool | Module |
 |------|--------|
-| `llm_run_pipeline` | `src/tools/run-pipeline.ts` |
-| `llm_run_step` | `src/tools/run-step.ts` |
-| `llm_show_config` | `src/tools/show-config.ts` |
-| `llm_show_agent_graph` | `src/tools/show-agent-graph.ts` |
-| `llm_query_traces` | `src/tools/query-traces.ts` |
-| `llm_score_trace` | `src/tools/score-trace.ts` |
-| `llm_query_experiments` | `src/tools/query-experiments.ts` |
-| `llm_memory_status` | `src/tools/memory-status.ts` |
-| `llm_query_memory` | `src/tools/query-memory.ts` |
-| `llm_dream_run` | `src/tools/dream-run.ts` |
-| `llm_dreamify_tune` | `src/tools/dreamify-tune.ts` |
-| `llm_dream_export` | `src/tools/dream-export.ts` |
-| `llm_race_apply` / `llm_race_abort` | `src/tools/race.ts` |
+| `runoff_run_pipeline` | `src/tools/run-pipeline.ts` |
+| `runoff_run_step` | `src/tools/run-step.ts` |
+| `runoff_show_config` | `src/tools/show-config.ts` |
+| `runoff_show_agent_graph` | `src/tools/show-agent-graph.ts` |
+| `runoff_query_traces` | `src/tools/query-traces.ts` |
+| `runoff_score_trace` | `src/tools/score-trace.ts` |
+| `runoff_query_experiments` | `src/tools/query-experiments.ts` |
+| `runoff_memory_status` | `src/tools/memory-status.ts` |
+| `runoff_query_memory` | `src/tools/query-memory.ts` |
+| `runoff_dream_run` | `src/tools/dream-run.ts` |
+| `runoff_dreamify_tune` | `src/tools/dreamify-tune.ts` |
+| `runoff_dream_export` | `src/tools/dream-export.ts` |
+| `runoff_race_apply` / `runoff_race_abort` | `src/tools/race.ts` |
 
 **MCP response contract:** success and error bodies are JSON in `content[0].text`. Errors use `{ "error", "prefix" }` with `isError: true`. Pipeline/race/step semantics live in JSON fields (`status`, `reason`, `cleanupErrors`) — do not rely on `isError` alone. See `skill/SKILL.md` §MCP response contract.
 
@@ -87,6 +87,7 @@ New tools: add `src/tools/<name>.ts` and register in `src/index.ts`.
 | Workspace / worktree | `src/runtime/workspace.ts`, `scripts/python/workspace_manager.py` |
 | Checkpoints / status machine | `src/core/state.ts` |
 | Traces / query | `src/observability/trace.ts`, `src/tools/query-traces.ts` |
+| Observation summaries | `src/orchestration/observation.ts`, `src/core/state.ts`, `src/core/pipeline-run-types.ts` |
 | Policy / approval / guardrails | `src/orchestration/policy.ts`, `approval.ts`, `execution-governance.ts`, `guardrails.ts`, `guardrail-scan.ts` |
 | Agent registry | `src/orchestration/agent.ts`, `registry.ts`, `agent-state.ts` |
 | A2A HTTP / federation | `src/experimental/a2a/*` (shims under `experimental/a2a/`) |
@@ -104,6 +105,7 @@ New tools: add `src/tools/<name>.ts` and register in `src/index.ts`.
 5. **`typescript` is a runtime dependency** — `src/ast_utils.ts` uses the compiler API for `isSyntaxValid`; keep it in `dependencies`, not only devDependencies.
 6. **Governance order:** Policy → Guardrails → Approval in `ExecutionGovernance.beforeStep` / `afterStep`. Race `awaiting_judge` must be handled **before** `orchestrator.onStepComplete` in `pipeline-runner.ts` (see smoke tests).
 7. **Guardrails:** When `runtime.governance.enabled`, extended guardrails default on (secrets, PII, injection, paths). Document new toggles in `docs/architecture/governance-config.md`.
+8. **Observation layer:** `StepResult.observation` and `PipelineResult.observation` are deterministic, schema-versioned work memory for the next host/model turn. Keep full audit material in `artifacts` / `traces`; do not replace them with summaries.
 
 ## Provider integration
 

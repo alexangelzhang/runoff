@@ -101,7 +101,7 @@ flowchart TB
 | Path | API | When |
 |------|-----|------|
 | **Sync local** | `AgentMemory.retrieve()` | Pipeline hooks, PatternCache |
-| **Async hybrid** | `LayeredAgentMemory.retrieveMerged()` | `llm_query_memory`, optional async pattern match |
+| **Async hybrid** | `LayeredAgentMemory.retrieveMerged()` | `runoff_query_memory`, optional async pattern match |
 | **Write** | `store()` | Always local first; remote `push` best-effort async |
 
 Configured via `orchestration.memoryBackend`. Hot-path hybrid read requires **`memoryHybridRetrieve: true`** (default **false**, G5). Timeout: `memoryHybridRetrieveTimeoutMs` (default 800ms).
@@ -116,8 +116,8 @@ Configured via `orchestration.memoryBackend`. Hot-path hybrid read requires **`m
 
 | System | F/E/R role | Trigger |
 |--------|------------|---------|
-| **Dream** | Evolution (ADD/UPDATE/CONTRADICT/FORGET) | `llm_dream_run`, offline |
-| **Dreamify** | Retrieval tuning | `llm_dreamify_tune`, offline |
+| **Dream** | Evolution (ADD/UPDATE/CONTRADICT/FORGET) | `runoff_dream_run`, offline |
+| **Dreamify** | Retrieval tuning | `runoff_dreamify_tune`, offline |
 
 Does not block MCP pipeline. Artifacts: `dream-state.json`, `dream-audit.jsonl`, `dreamify/best-params.json`.
 
@@ -151,12 +151,12 @@ Two factories → inconsistent layered instances.
 
 | Tool | Memory layer touched |
 |------|----------------------|
-| `llm_memory_status` | Backend config + probe (no mutation) |
-| `llm_query_memory` | `retrieveMerged` (local + remote) |
-| `llm_dream_run` | Cold Evolution → local SoT |
-| `llm_dreamify_tune` | Retrieval params (not store) |
-| `llm_dream_export` | Read-only export jsonl |
-| `llm_run_pipeline` | Hot Formation + pattern inject via hooks |
+| `runoff_memory_status` | Backend config + probe (no mutation) |
+| `runoff_query_memory` | `retrieveMerged` (local + remote) |
+| `runoff_dream_run` | Cold Evolution → local SoT |
+| `runoff_dreamify_tune` | Retrieval params (not store) |
+| `runoff_dream_export` | Read-only export jsonl |
+| `runoff_run_pipeline` | Hot Formation + pattern inject via hooks |
 
 Host skill: [skill/SKILL.md](../../skill/SKILL.md)
 
@@ -190,8 +190,8 @@ Host skill: [skill/SKILL.md](../../skill/SKILL.md)
 ```bash
 npm run test:ci   # memory-factory, memory-backend-status, pipeline-hooks, dream*
 # MCP smoke:
-# llm_memory_status — effective backend
-# llm_query_memory  — hybrid search
+# runoff_memory_status — effective backend
+# runoff_query_memory  — hybrid search
 ```
 
 ---

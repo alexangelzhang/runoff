@@ -42,7 +42,8 @@ All Phase 0–8 checklist items and B2–B8 are **DONE**. Per-phase notes, depen
 
 | Capability | Doc |
 |------------|-----|
-| Local observability | [docs/features/observability.md](docs/features/observability.md) · `src/observability/trace.ts` |
+| Harness control plane | `runoff_query_runs` · `src/orchestration/run-query.ts` · durable RunStore/EventLog status, pending approvals, resume hints, event cursors |
+| Local observability | [docs/features/observability.md](docs/features/observability.md) · `src/observability/trace.ts` · `StepResult.observation` / `PipelineResult.observation` work-memory layer |
 | Memory / Dream / Dreamify | [docs/features/memory-production.md](docs/features/memory-production.md), [dream.md](docs/features/dream.md), [dreamify.md](docs/features/dreamify.md) · hot-path formation queue + B6 forget: **shipped**; graph query/export: **Future** in [ROADMAP.md](../ROADMAP.md) |
 | Reflect re-plan (MVP) | [docs/features/deerflow-reflect.md](docs/features/deerflow-reflect.md) |
 | Open source pack | [docs/reference/OPEN_SOURCE.md](docs/reference/OPEN_SOURCE.md), [differentiation.md](docs/reference/differentiation.md) |

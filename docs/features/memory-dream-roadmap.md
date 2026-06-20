@@ -106,7 +106,7 @@ flowchart LR
 | `src/dream/dream-structured.ts` | 轨 A |
 | `src/dream/dream-rules.ts` | 轨 B + `dream-audit.jsonl` |
 | `src/dream/dream-llm.ts` | 轨 C |
-| `llm_dream_run` MCP | `src/tools/dream-run.ts` |
+| `runoff_dream_run` MCP | `src/tools/dream-run.ts` |
 | [`docs/features/dream.md`](features/dream.md) | 运维与配置 |
 
 **不含**：vault / Cognee API。
@@ -116,14 +116,14 @@ flowchart LR
 - 网格搜索（54 组合默认）+ `best-params.json` / history 回滚
 - 评分：`buildExperimentEvalReport` + trace 检索命中率
 - 热路径：`resolveDreamifyRetrieval()` → `PatternCache` / semantic rank
-- MCP：`llm_dreamify_tune` · [`docs/features/dreamify.md`](features/dreamify.md)
+- MCP：`runoff_dreamify_tune` · [`docs/features/dreamify.md`](features/dreamify.md)
 
 ### M4 — 可选增强 `DONE`
 
 - 多策略检索：`dreamify-multi-retrieve.ts`（`orchestration.dreamify.multiStrategy`）
 - 双时间戳实体边：`validAt` / `recordedAt` / `invalidatedAt` on entity triples
-- `dream-export.jsonl` + `llm_dream_export` + `exportOnDreamRun`
-- `llm_show_config` → `dreamify` 状态块
+- `dream-export.jsonl` + `runoff_dream_export` + `exportOnDreamRun`
+- `runoff_show_config` → `dreamify` 状态块
 
 ## 7. 配置草案（`orchestration.dream`）
 

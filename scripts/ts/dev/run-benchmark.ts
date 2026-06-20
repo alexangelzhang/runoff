@@ -7,7 +7,7 @@
  *   - variant "race":   mock-a + mock-b (full + lite) in parallel
  *
  * The experiment system groups runs by prompt hash (experimentId),
- * so results are queryable via llm_query_experiments or experiments.jsonl.
+ * so results are queryable via runoff_query_experiments or experiments.jsonl.
  *
  * Usage: npm run benchmark
  * Output: benchmark results table + docs/reference/benchmarks-data.md

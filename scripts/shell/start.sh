@@ -32,7 +32,7 @@ echo -e "  ${GREEN}Pane 1 (Claude):${RESET}  ${DIM}claude  # your normal Claude 
 echo -e "  ${GREEN}Pane 2 (Codex):${RESET}   ${YELLOW}$WATCHER codex${RESET}"
 echo -e "  ${GREEN}Pane 3 (Gemini):${RESET}  ${YELLOW}$WATCHER gemini${RESET}"
 echo ""
-echo -e "${BOLD}Step 3:${RESET} In Claude Code, use ${CYAN}/dev-pipeline${RESET} or call ${CYAN}llm_run_step${RESET}"
+echo -e "${BOLD}Step 3:${RESET} In Claude Code, use ${CYAN}/dev-pipeline${RESET} or call ${CYAN}runoff_run_step${RESET}"
 echo -e "  Tasks will flow visually between the panes!"
 echo ""
 echo -e "${DIM}Config: $PROJECT_DIR/pipeline.config.json${RESET}"

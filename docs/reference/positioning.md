@@ -65,7 +65,7 @@ Every marketing surface should lead with this.
 > A model that wrote subtly broken code is statistically the worst model to catch the bug in it — they share the same blind spots. The only fix is competition: same task, different models, you decide.
 > (Cadence has a version of this insight for role-split; runoff's version is for output quality comparison.)
 
-**Where it lives in code:** `src/tools/race.ts`, `llm_race_apply` / `llm_race_abort` MCP tools.
+**Where it lives in code:** `src/tools/race.ts`, `runoff_race_apply` / `runoff_race_abort` MCP tools.
 
 ### 2. Learn from your picks (the retention hook)
 This is what makes runoff a compounding tool, not a one-shot script.

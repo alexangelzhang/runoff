@@ -23,7 +23,7 @@
 
 | `runtime.raceFinalize` | Behavior |
 |------------------------|----------|
-| `defer` (default) | Pipeline pauses at `awaiting_judge`; finalize with `npm run runoff:race:apply` or MCP `llm_race_apply` |
+| `defer` (default) | Pipeline pauses at `awaiting_judge`; finalize with `npm run runoff:race:apply` or MCP `runoff_race_apply` |
 | `auto-pick` | Applies `resolveProviderRaceWinner` choice immediately (CI / experiments) |
 
 ```bash

@@ -9,6 +9,8 @@
 
 `PipelineHooks` uses the same `EventLog` instance as `createControlPlane()` when passed from `pipeline-mcp-run.ts`, so orchestration events survive restarts in **file** mode.
 
+Use `runoff_query_runs` from MCP hosts, or `npm run runoff:runs -- list|show`, to read the control plane. In **memory** mode it only sees runs in the current server process; in **file** mode it can recover active, paused, failed, and approval-waiting runs from `~/.runoff/control-plane/` after restart.
+
 ## External listeners (P2)
 
 ```typescript

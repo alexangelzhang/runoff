@@ -47,7 +47,7 @@ Template config: [`examples/configs/cli.config.json`](../examples/configs/cli.co
 3. Run:
 
    ```bash
-   # MCP: point host cwd at repo with pipeline.config.json, then llm_run_pipeline
+   # MCP: point host cwd at repo with pipeline.config.json, then runoff_run_pipeline
 
    # Or CLI (no IDE):
    cd /path/to/your/repo
@@ -106,7 +106,7 @@ Use the **`claude`** binary your installation provides (non-interactive flags va
 }
 ```
 
-**MCP path:** Claude Code / Claude Desktop can also host runoff as an MCP server (`npm run dev`, `cwd` = target repo) — then the **host** calls `llm_run_pipeline`, and pipeline steps still use `cli` providers above for implement/review agents.
+**MCP path:** Claude Code / Claude Desktop can also host runoff as an MCP server (`npm run dev`, `cwd` = target repo) — then the **host** calls `runoff_run_pipeline`, and pipeline steps still use `cli` providers above for implement/review agents.
 
 ### OpenCode
 
@@ -165,7 +165,7 @@ Swap `"codex"` for `"gemini"` / `"claude-code"` / `"opencode"` in both `provider
 
 | Host | Role |
 |------|------|
-| **Cursor** | MCP client → `llm_run_pipeline` |
+| **Cursor** | MCP client → `runoff_run_pipeline` |
 | **Claude Desktop / Claude Code** | Same MCP registration pattern |
 | **Any MCP-capable client** | `command` + `args` → `tsx …/src/index.ts`, `cwd` = target repo |
 

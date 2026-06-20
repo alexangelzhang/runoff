@@ -40,7 +40,7 @@ Does not run during pipeline execution. Results are persisted and read on the ne
 ## MCP
 
 ```text
-llm_dreamify_tune { "experimentId": "abc123...", "dryRun": false }
+runoff_dreamify_tune { "experimentId": "abc123...", "dryRun": false }
 ```
 
 `dryRun: true` — score grid only, no file write.
@@ -63,11 +63,11 @@ After a successful tune, `PatternCache` and semantic memory ranking use `best-pa
 ```
 
 - `multiStrategy` — fuse semantic + BM25-lite + entity graph hop (`dreamify-multi-retrieve.ts`)
-- `exportOnDreamRun` — after `llm_dream_run`, write `dream-export.jsonl`
+- `exportOnDreamRun` — after `runoff_dream_run`, write `dream-export.jsonl`
 
-Manual export: `llm_dream_export`.
+Manual export: `runoff_dream_export`.
 
-`llm_show_config` includes a `dreamify` block with **active** params and persisted tune file.
+`runoff_show_config` includes a `dreamify` block with **active** params and persisted tune file.
 
 ## Related
 

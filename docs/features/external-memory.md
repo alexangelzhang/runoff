@@ -107,8 +107,8 @@ CI optional gate: `CI_SDK_MEMORY=1 npm run ci:gates`
 
 ## MCP (TOP2)
 
-- `llm_memory_status` — resolved backend + optional `probe=true`
-- `llm_query_memory` — hybrid `retrieveMerged` search
+- `runoff_memory_status` — resolved backend + optional `probe=true`
+- `runoff_query_memory` — hybrid `retrieveMerged` search
 - See [`memory-production.md`](features/memory-production.md)
 
 ## Code

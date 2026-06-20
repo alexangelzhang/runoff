@@ -31,7 +31,7 @@ sequenceDiagram
 ## Other APIs
 
 - **`updateTrace(traceId, patch)`** — patch an on-disk trace in place (same filename suffix `_<id>.json`).
-- **`loadTraceById` / `queryTraces` / `listTraces`** — read path for MCP `llm_query_traces` and analytics.
+- **`loadTraceById` / `queryTraces` / `listTraces`** — read path for MCP `runoff_query_traces` and analytics.
 - **Hooks** — `PipelineHooks` may attach `costSummary`, OTel export, experiment metadata on end/fail.
 
 ## Race mode

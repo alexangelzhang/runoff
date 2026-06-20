@@ -22,6 +22,12 @@ npm run pipeline:config:edit -- --config /path/to/your-repo/pipeline.config.json
 
 CI checks all `examples/configs/*.config.json` for experimental flags (`npm run check:examples-experimental`).
 
+## Observation result example
+
+| File | Purpose |
+|------|---------|
+| [observation-result.json](observation-result.json) | Example `PipelineResult` showing `observation`, step observation, artifact refs, trace refs, and the next host action |
+
 ## Workshop (`workshop/`)
 
 Optional local exercise (not used by `npm run demo`):
@@ -36,3 +42,4 @@ Optional local exercise (not used by `npm run demo`):
 - [getting-started-30min.md](../docs/guides/getting-started-30min.md)
 - [mock-to-real-cli.md](../docs/guides/mock-to-real-cli.md)
 - [coding-agent-backends.md](../docs/guides/coding-agent-backends.md)
+- [observability.md](../docs/features/observability.md)

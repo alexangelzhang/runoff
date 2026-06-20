@@ -6,7 +6,7 @@ runoff is a **local orchestrator**. It does not host multi-tenant SaaS. Threat m
 
 | Boundary | What runs | Trust assumption |
 |----------|-----------|------------------|
-| MCP host (IDE) | Invokes `llm_run_pipeline` | User trusts the IDE |
+| MCP host (IDE) | Invokes `runoff_run_pipeline` | User trusts the IDE |
 | runoff (Node) | DAG, governance, trace | Same user/CI as host |
 | `task_runner.py` | Spawns **your** coding-agent CLI | **Executes arbitrary provider command** from config |
 | Target git repo | Worktree + patch apply | Repo is the asset to protect |

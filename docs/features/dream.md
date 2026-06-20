@@ -4,7 +4,7 @@
 
 Offline memory **Evolution** pass: structure traces (A) → rule updates (B) → optional LLM enrich (C).
 
-Not run on the hot pipeline path. Trigger via MCP `llm_dream_run` or import `runDreamWorker`.
+Not run on the hot pipeline path. Trigger via MCP `runoff_dream_run` or import `runDreamWorker`.
 
 ## Tracks
 
@@ -50,7 +50,7 @@ Not run on the hot pipeline path. Trigger via MCP `llm_dream_run` or import `run
 ## MCP
 
 ```text
-llm_dream_run
+runoff_dream_run
   dryRun?: boolean
   llmEnabled?: boolean
   sinceLastRun?: boolean

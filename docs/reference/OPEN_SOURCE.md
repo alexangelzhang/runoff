@@ -4,7 +4,7 @@
 
 ## 定位（对外一句话）
 
-**Multi-step code-change pipelines for coding agents** — repo worktrees, races, local traces.  
+**Local harness for observable, recoverable coding-agent pipelines** — repo worktrees, durable run control, races, schema-versioned observations, local traces.
 详见 [`differentiation.md`](reference/differentiation.md)（含 **AutoGen** 对比）。
 
 ## 5 分钟体验（零 API Key）
@@ -45,8 +45,10 @@ npm run demo
 
 | 数据 | 路径 | MCP |
 |------|------|-----|
-| Trace | `~/.runoff/traces/` | `llm_query_traces` |
-| Experiment | `~/.runoff/experiments.jsonl` | `llm_query_experiments` |
+| Observation | `PipelineResult.observation` / `StepResult.observation` | `runoff_run_pipeline` JSON body |
+| Run control | `~/.runoff/control-plane/` | `runoff_query_runs` / `npm run runoff:runs -- list` |
+| Trace | `~/.runoff/traces/` | `runoff_query_traces` |
+| Experiment | `~/.runoff/experiments.jsonl` | `runoff_query_experiments` |
 
 详见 [`observability.md`](features/observability.md)。
 
@@ -66,9 +68,11 @@ npm run demo
 - [x] `docs/guides/getting-started-30min.md` + `docs/advanced/README.md`
 - [x] `docs/architecture/security-model.md` + `npm run check-prereqs`
 - [x] `examples/configs/{feature,bugfix,refactor}.config.json` + `examples/README.md`
+- [x] `examples/observation-result.json` + Observation layer docs
 - [x] `.github/pull_request_template.md`
 - [x] `npm run setup:mcp` + `docs/guides/mcp-host-setup.md`
 - [x] `pipeline init` / `doctor` / `config validate` + `docs/guides/mock-to-real-cli.md`
+- [x] `pipeline runs list|show` CLI + `runoff_query_runs` MCP control-plane query
 - [x] Full config graphical editor (providers + DAG + retry + runtime) via `pipeline:config:edit`
 - [x] `pipeline race apply|abort` CLI + `runtime.raceFinalize: auto-pick`
 - [x] Optional `.devcontainer` — [devcontainer.md](operations/devcontainer.md)

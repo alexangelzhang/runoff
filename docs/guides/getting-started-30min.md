@@ -20,6 +20,7 @@ You should see an **approved** mock run. Data lands under a temp `RUNOFF_HOME` (
 | `pipeline.config.json` | Declares steps, providers, deps |
 | MCP / `pipeline run` | Starts the DAG |
 | `scripts/python/task_runner.py` | Runs CLI providers in worktrees |
+| `~/.runoff/control-plane/` | Durable run status, approvals, resume tokens |
 | `~/.runoff/traces/` | Local execution history |
 
 Read: [`differentiation.md`](reference/differentiation.md) (why not LangGraph/CrewAI chat loops).
@@ -60,6 +61,8 @@ npm run runoff:run -- \
 
 ```bash
 npm run dev   # MCP — register in IDE per README
+# then query active/paused runs with runoff_query_runs
+npm run runoff:runs -- list --config /path/to/your-repo/pipeline.config.json
 # or inspect files under ~/.runoff/traces/
 ```
 

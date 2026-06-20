@@ -112,7 +112,7 @@ Task: <original task description>
 
 After the race step completes, the pipeline can do one of two things:
 
-**`raceFinalize: "defer"`** (default) — the pipeline pauses and surfaces both candidates to you via `llm_race_apply`. You look at them, pick the one you want (or abort), and the pipeline continues. The losing candidates' worktrees are cleaned up.
+**`raceFinalize: "defer"`** (default) — the pipeline pauses and surfaces both candidates to you via `runoff_race_apply`. You look at them, pick the one you want (or abort), and the pipeline continues. The losing candidates' worktrees are cleaned up.
 
 **`raceFinalize: "auto-pick"`** — the pipeline applies the winner automatically (using `raceWinnerIndex` from the resolution step) and continues without interruption. Useful for CI pipelines where human review isn't part of the flow.
 
@@ -138,7 +138,7 @@ Each provider in a race runs in its own git worktree — a separate directory po
 
 The worktrees are created at race start and cleaned up after the winner is applied (or the race is aborted). The winner's worktree has its changes applied to the main repo via `git apply --3way`. The losers' worktrees are deleted.
 
-If you're using defer mode and inspect the candidates before picking, both worktrees exist during that window. The `llm_race_apply` response includes the working paths, so you can examine them directly if needed.
+If you're using defer mode and inspect the candidates before picking, both worktrees exist during that window. The `runoff_race_apply` response includes the working paths, so you can examine them directly if needed.
 
 ---
 
@@ -212,7 +212,7 @@ This is the practical value of race mode: not that one model is always better, b
     "raceResolution": "pick-winner"
   },
   "runtime": {
-    // "defer"     — pause and surface candidates via llm_race_apply (default)
+    // "defer"     — pause and surface candidates via runoff_race_apply (default)
     // "auto-pick" — apply winner immediately without pausing
     "raceFinalize": "defer"
   }

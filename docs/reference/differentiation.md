@@ -1,6 +1,6 @@
 # Why runoff?
 
-> **One line:** Multi-step **code-change pipelines** for coding agents — git worktree isolation, provider races, local traces — not another chat-loop framework.
+> **One line:** A local **coding-agent harness/runtime** — config DAG, git worktree isolation, durable run control, provider races, schema-versioned observations, local traces — not another chat-loop framework.
 
 ## Who this is for
 
@@ -8,10 +8,12 @@ Teams that already use **Claude Code, Codex CLI, Gemini CLI, OpenCode**, or any 
 
 - A **declarative DAG** (implement → review → retry) instead of a single agent turn
 - **Real-repo** edits with worktree isolation and locks
+- **Observation-shaped results** so MCP hosts continue from a clean work-memory summary instead of raw logs
+- A **queryable control plane** for active runs, pending approvals, resume tokens, and event cursors
 - **Local** trace + A/B experiment logs without LangSmith SaaS
 - Optional **multi-provider race** on the same step
 
-## Five differentiators
+## Six differentiators
 
 ### 1. Repo-native delivery (not message-native)
 
@@ -19,7 +21,7 @@ Teams that already use **Claude Code, Codex CLI, Gemini CLI, OpenCode**, or any 
 |--------------|-------------------------|
 | `agent-write` / `agent-read` on a git worktree | State / messages as primary artifact |
 | `workspace_manager.py` — worktree + cross-process lock | Sandboxes vary; rarely this IPC contract |
-| `llm_race_apply` / `llm_race_abort` — judge then merge winner | Provider race + pause is **uncommon** |
+| `runoff_race_apply` / `runoff_race_abort` — judge then merge winner | Provider race + pause is **uncommon** |
 
 **Evidence:** `scripts/python/workspace_manager.py`, `src/tools/race.ts`, `industry-benchmark.md` §1.2.
 
@@ -50,19 +52,27 @@ Swapping the coding agent = change **`providers`** in config. The pipeline layer
 
 See [`coding-agent-backends.md`](guides/coding-agent-backends.md).
 
-### 4. Observability on the main path (no observability SaaS required)
+### 4. Observation-shaped results (not raw tool dumps)
+
+- `PipelineResult.observation` gives hosts a stable run-level summary: status, evidence, coverage gaps, next action, trace/checkpoint refs.
+- `StepResult.observation` gives step-local evidence and artifact refs without inlining full diffs or logs.
+- `artifacts` and `traces` remain the audit trail; observations are work memory for the next agent turn.
+
+**Evidence:** `src/orchestration/observation.ts`, `docs/features/observability.md` §Observation layer.
+
+### 5. Observability on the main path (no observability SaaS required)
 
 - `PipelineHooks` → traces + `experiments.jsonl` (`experimentId` = `hashPrompt(prompt)`).
-- MCP: `llm_query_traces`, `llm_query_experiments`, eval export.
+- MCP: `runoff_query_traces`, `runoff_query_experiments`, eval export.
 - Optional OTLP (`runtime.otelExport`) — off by default.
 
 **Evidence:** `docs/features/observability.md`, `src/pipeline-hooks.ts`.
 
-### 5. Production-shaped control (not demo loops)
+### 6. Production-shaped control (not demo loops)
 
 - Governance: Policy → Guardrails → Approval.
 - Checkpoint / resume; `awaiting_judge`; plan approval gate.
-- Durable RunStore / EventLog (`runtime.controlPlane: "file"`).
+- Durable RunStore / EventLog (`runtime.controlPlane: "file"`) plus `runoff_query_runs` for run status, pending approvals, resume hints, and event cursors.
 - Narrow **reflect → re-plan** on review failure / step failure (`docs/features/deerflow-reflect.md`).
 
 ---
@@ -79,6 +89,7 @@ Verified 2026-06 via AnySearch + page extract.
 | Git worktree isolation | ✅ | ✅ | ✅ | ✅ (v7.11+) |
 | Parallel agents | ✅ | ✅ | ✅ up to 20 | ✅ multi-PR |
 | **Same-task provider race** | ✅ **core** | — (diff tasks) | — (review PRs) | — (diff phases) |
+| Observation-shaped MCP result | ✅ | — | — | — |
 | Human judge + pick winner | ✅ | — | ✅ (review PR) | — |
 | **Learn from judge picks** | ✅ Dream/Dreamify | — | — | — |
 | Multi-provider support | 4 CLIs | Claude/Codex/Gemini/Copilot | Claude-first | 16+ providers |
@@ -128,6 +139,7 @@ Verified 2026-06 via AnySearch + page extract.
 | Git worktree + lock contract | ✅ | — | — | — | partial |
 | Provider race + judge pause | ✅ | — | — | — | — |
 | MCP tool surface for IDE hosts | ✅ | optional | MCP (recent) | — | different |
+| Observation-shaped result | ✅ | DIY | DIY | DIY | partial |
 | Local trace + experiment eval | ✅ | +LangSmith | DIY | DIY | partial |
 | Conversational multi-agent chat | — | graph | ✅ core | ✅ core | ✅ |
 | Self-hosted code-agent focus | ✅ | general | general | general | ✅ |
