@@ -90,13 +90,14 @@ Trace postmortems and experiment eval reports surface `observationSummary` so of
 
 ## Harness evolution control plane
 
-`runoff_harness_evolve` and `npm run runoff:harness` provide the local control plane for improving the harness itself. Dataset splits, candidate lineage, leakage audit, frontier state, and promotion bundles are persisted as first-class artifacts under `~/.runoff/harness-evolution/`.
+`runoff_harness_evolve` and `npm run runoff:harness` provide the local control plane for improving the harness itself. Dataset splits, orchestrated runs, run reports, candidate lineage, leakage audit, frontier state, and promotion bundles are persisted as first-class artifacts under `~/.runoff/harness-evolution/`.
 
 | Capability | Mechanism |
 |---|---|
 | Failure signature mining | `mine` clusters failed traces into `failure-signatures/<id>.json` with evidence traces, suspected harness surface, and suggested editable surface |
 | Dataset / split object | `dataset` writes `datasets/<datasetId>.json` with held-in and held-out trace items, source signatures, and leakage terms |
 | Dataset evaluation | `evaluate_dataset` maps every dataset baseline trace to a candidate trace, runs the held-in/held-out gate, and writes `datasets/<datasetId>/evaluations/<candidateId>.json` |
+| Evolution plan / run / report | `run` writes `runs/<runId>/plan.json`, `run.json`, and `report.json`; `report` exposes status, next action, missing candidate trace mappings, and artifact refs |
 | Change manifest + lineage | Candidate records under `candidates/<id>/manifest.json` and `candidate.json` track editable surface, expected fixes, parent candidates, mined signatures, and dataset IDs |
 | Variant isolation | Optional source directory copied to an isolated candidate `variant/` directory |
 | Automatic proposer | `propose` invokes a configured provider with `workDir` set to the isolated `variant/`, includes mined signatures plus `history-context.json`, records `proposal.json`, and flags files outside `editableSurface` |
@@ -109,7 +110,7 @@ Trace postmortems and experiment eval reports surface `observationSummary` so of
 | Acceptance guard / rollback audit | `decide` accepts only when proposal is clean, observed diff exists, audit passed, and held-in/held-out gate passed; otherwise it rolls back or blocks forced accept without mutating the user repo |
 | Promotion bundle | `export` writes `promotion/bundle.json` plus copied observed variant files for accepted candidates only |
 
-Proposers edit only candidate variant directories, and promotion still goes through manifest + proposal audit + regression gate + frontier/rank + decision + export artifacts before any human applies it elsewhere.
+Proposers edit only candidate variant directories. A full `run` can orchestrate coreset, mining, dataset creation, proposal, dataset evaluation, audit, rank/frontier, decision, and optional export; when candidate trace mappings are missing it stops at `awaiting_candidate_traces` with an explicit `nextAction` instead of inventing evaluation evidence.
 
 **LangFuse 借鉴已落地**：`traces/scores.jsonl` 记录 `traceId` + 数值/备注；eval-report 的 `traceInsights` 带一行 postmortem 摘要。
 

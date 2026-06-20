@@ -15,9 +15,12 @@ import {
   evaluateHarnessDataset,
   exportHarnessPromotionBundle,
   listHarnessCandidates,
+  listHarnessEvolutionRuns,
   mineHarnessFailureSignatures,
   proposeHarnessCandidate,
+  queryHarnessEvolutionReport,
   rankHarnessCandidates,
+  runHarnessEvolution,
   selectHarnessCoreset,
   updateHarnessFrontier,
   type HarnessEvalPair,
@@ -95,6 +98,37 @@ export type HarnessEvolveAuditOptions = {
 export type HarnessEvolveFrontierOptions = {
   frontierId?: string;
   candidateIds?: string[];
+  json?: boolean;
+};
+
+export type HarnessEvolveRunOptions = {
+  runId?: string;
+  summary: string;
+  configPath: string;
+  provider?: string;
+  traceIds?: string[];
+  failureSignatureIds?: string[];
+  datasetId?: string;
+  candidateId?: string;
+  frontierId?: string;
+  sourceDir?: string;
+  editableSurface?: string[];
+  expectedFixes?: string[];
+  possibleRegressions?: string[];
+  leakageTerms?: string[];
+  instructions?: string;
+  candidateTraceMap?: Record<string, string>;
+  exportOnAccept?: boolean;
+  json?: boolean;
+};
+
+export type HarnessEvolveReportOptions = {
+  runId: string;
+  json?: boolean;
+};
+
+export type HarnessEvolveRunsOptions = {
+  limit?: number;
   json?: boolean;
 };
 
@@ -265,6 +299,67 @@ export function harnessEvolveFrontier(opts: HarnessEvolveFrontierOptions = {}): 
   console.log(`FRONTIER ${frontier.frontierId}`);
   for (const entry of frontier.entries) {
     console.log(`  ${entry.candidateId} score=${entry.score} accepted=${entry.accepted} audit=${entry.auditPassed}`);
+  }
+}
+
+export async function harnessEvolveRun(opts: HarnessEvolveRunOptions): Promise<void> {
+  const config = loadConfigFromPath(opts.configPath);
+  const providerName = opts.provider ?? config.orchestration?.plannerProvider ?? Object.keys(config.providers)[0];
+  if (!providerName || !config.providers[providerName]) throw new Error("provider is required");
+  const provider = createProvider(providerName, config.providers[providerName]!);
+  if (!provider) throw new Error(`provider "${providerName}" cannot execute harness evolution runs`);
+  const run = await runHarnessEvolution({
+    runId: opts.runId,
+    summary: opts.summary,
+    provider,
+    traceIds: opts.traceIds,
+    failureSignatureIds: opts.failureSignatureIds,
+    datasetId: opts.datasetId,
+    candidateId: opts.candidateId,
+    frontierId: opts.frontierId,
+    sourceDir: opts.sourceDir,
+    editableSurface: opts.editableSurface,
+    expectedFixes: opts.expectedFixes,
+    possibleRegressions: opts.possibleRegressions,
+    leakageTerms: opts.leakageTerms,
+    instructions: opts.instructions,
+    candidateTraceIdsByBaseline: opts.candidateTraceMap,
+    exportOnAccept: opts.exportOnAccept,
+  });
+  if (opts.json) {
+    console.log(JSON.stringify({ run }, null, 2));
+    return;
+  }
+  console.log(`RUN ${run.runId} status=${run.status}`);
+  console.log(`  candidate: ${run.plan.candidateId}`);
+  console.log(`  dataset:   ${run.plan.datasetId}`);
+  console.log(`  next:      ${run.nextAction}`);
+}
+
+export function harnessEvolveReport(opts: HarnessEvolveReportOptions): void {
+  const report = queryHarnessEvolutionReport(opts.runId);
+  if (opts.json) {
+    console.log(JSON.stringify({ report }, null, 2));
+    return;
+  }
+  console.log(`REPORT ${report.runId} status=${report.status}`);
+  console.log(`  next:      ${report.nextAction}`);
+  console.log(`  candidate: ${report.candidateId}`);
+  console.log(`  dataset:   ${report.datasetId}`);
+}
+
+export function harnessEvolveRuns(opts: HarnessEvolveRunsOptions = {}): void {
+  const runs = listHarnessEvolutionRuns().slice(0, opts.limit ?? 20);
+  if (opts.json) {
+    console.log(JSON.stringify({ runs, count: runs.length }, null, 2));
+    return;
+  }
+  if (!runs.length) {
+    console.log("No harness evolution runs found.");
+    return;
+  }
+  for (const run of runs) {
+    console.log(`${run.startedAt}  ${run.runId}  ${run.status}  candidate=${run.plan.candidateId}  ${run.plan.summary}`);
   }
 }
 

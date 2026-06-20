@@ -503,6 +503,106 @@ test("pipeline-cli harness audit and frontier expose acceptance artifacts", asyn
   }
 });
 
+test("pipeline-cli harness run report and runs expose orchestrated run state", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "pipeline-cli-harness-run-"));
+  try {
+    const home = join(dir, "home");
+    const config: PipelineConfig = {
+      providers: { mock: { type: "mock" } },
+      pipeline: { implement: ["mock"] },
+      orchestration: { mode: "dag", plannerProvider: "mock" },
+    };
+    const configPath = join(dir, "pipeline.config.json");
+    writeFileSync(configPath, JSON.stringify(config), "utf-8");
+    const oldHome = process.env.RUNOFF_HOME;
+    process.env.RUNOFF_HOME = home;
+    try {
+      recordTrace(trace("cli-run-base-a", { finalStatus: "failed", timestamp: "2026-06-20T00:00:01.000Z" }));
+      recordTrace(trace("cli-run-base-b", { totalDurationMs: 2000, timestamp: "2026-06-20T00:00:02.000Z" }));
+    } finally {
+      if (oldHome !== undefined) process.env.RUNOFF_HOME = oldHome;
+      else delete process.env.RUNOFF_HOME;
+    }
+
+    const run = spawn("npx", [
+      "tsx",
+      CLI,
+      "harness",
+      "run",
+      "--run-id",
+      "cli-run",
+      "--candidate-id",
+      "cli-run-candidate",
+      "--dataset-id",
+      "cli-run-dataset",
+      "--summary",
+      "cli orchestrated run",
+      "--trace-ids-json",
+      "[\"cli-run-base-a\",\"cli-run-base-b\"]",
+      "--editable-surface-json",
+      "[\"skill/\"]",
+      "--config",
+      configPath,
+      "--home",
+      home,
+      "--json",
+    ], {
+      cwd: ROOT,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let runStdout = "";
+    let runStderr = "";
+    run.stdout?.on("data", (d) => { runStdout += d.toString(); });
+    run.stderr?.on("data", (d) => { runStderr += d.toString(); });
+    const runCode = await new Promise<number>((resolve, reject) => {
+      run.on("error", reject);
+      run.on("close", (x) => resolve(x ?? 1));
+    });
+    assert.equal(runCode, 0, runStderr);
+    const runBody = JSON.parse(runStdout) as { run: { runId: string; status: string; missingCandidateTraceIds: string[] } };
+    assert.equal(runBody.run.runId, "cli-run");
+    assert.equal(runBody.run.status, "awaiting_candidate_traces");
+    assert.deepEqual(runBody.run.missingCandidateTraceIds, ["cli-run-base-a", "cli-run-base-b"]);
+
+    const report = spawn("npx", ["tsx", CLI, "harness", "report", "cli-run", "--home", home, "--json"], {
+      cwd: ROOT,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let reportStdout = "";
+    let reportStderr = "";
+    report.stdout?.on("data", (d) => { reportStdout += d.toString(); });
+    report.stderr?.on("data", (d) => { reportStderr += d.toString(); });
+    const reportCode = await new Promise<number>((resolve, reject) => {
+      report.on("error", reject);
+      report.on("close", (x) => resolve(x ?? 1));
+    });
+    assert.equal(reportCode, 0, reportStderr);
+    const reportBody = JSON.parse(reportStdout) as { report: { runId: string; status: string; nextAction: string } };
+    assert.equal(reportBody.report.runId, "cli-run");
+    assert.equal(reportBody.report.status, "awaiting_candidate_traces");
+    assert.match(reportBody.report.nextAction, /provide candidateTraceIdsByBaseline/);
+
+    const runs = spawn("npx", ["tsx", CLI, "harness", "runs", "--home", home, "--json"], {
+      cwd: ROOT,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let runsStdout = "";
+    let runsStderr = "";
+    runs.stdout?.on("data", (d) => { runsStdout += d.toString(); });
+    runs.stderr?.on("data", (d) => { runsStderr += d.toString(); });
+    const runsCode = await new Promise<number>((resolve, reject) => {
+      runs.on("error", reject);
+      runs.on("close", (x) => resolve(x ?? 1));
+    });
+    assert.equal(runsCode, 0, runsStderr);
+    const runsBody = JSON.parse(runsStdout) as { count: number; runs: Array<{ runId: string }> };
+    assert.equal(runsBody.count, 1);
+    assert.equal(runsBody.runs[0]?.runId, "cli-run");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("pipeline-cli harness export writes accepted promotion bundle", async () => {
   const dir = mkdtempSync(join(tmpdir(), "pipeline-cli-harness-export-"));
   try {

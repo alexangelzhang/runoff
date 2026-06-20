@@ -189,6 +189,76 @@ export interface HarnessFrontier {
   rejectedCandidateIds: string[];
 }
 
+export type HarnessEvolutionRunStatus =
+  | "planned"
+  | "awaiting_candidate_traces"
+  | "accepted"
+  | "rolled_back"
+  | "blocked"
+  | "exported";
+
+export interface HarnessEvolutionPlan {
+  schema: typeof HARNESS_EVOLUTION_SCHEMA;
+  planId: string;
+  createdAt: string;
+  summary: string;
+  traceIds: string[];
+  failureSignatureIds: string[];
+  datasetId: string;
+  candidateId: string;
+  frontierId: string;
+  sourceDir?: string;
+  provider?: string;
+  editableSurface: string[];
+  expectedFixes: string[];
+  possibleRegressions: string[];
+  leakageTerms: string[];
+  instructions?: string;
+  autoDecide: boolean;
+  exportOnAccept: boolean;
+}
+
+export interface HarnessEvolutionRun {
+  schema: typeof HARNESS_EVOLUTION_SCHEMA;
+  runId: string;
+  plan: HarnessEvolutionPlan;
+  startedAt: string;
+  completedAt?: string;
+  status: HarnessEvolutionRunStatus;
+  coresetTraceIds: string[];
+  failureSignatureIds: string[];
+  dataset?: HarnessDataset;
+  candidate?: HarnessCandidateRecord;
+  evaluation?: HarnessDatasetEvaluation;
+  audit?: HarnessAuditReport;
+  ranks?: HarnessCandidateRank[];
+  frontier?: HarnessFrontier;
+  decision?: HarnessDecisionRecord;
+  bundle?: HarnessPromotionBundle;
+  missingCandidateTraceIds: string[];
+  artifactRefs: string[];
+  nextAction: string;
+}
+
+export interface HarnessEvolutionReport {
+  schema: typeof HARNESS_EVOLUTION_SCHEMA;
+  runId: string;
+  generatedAt: string;
+  status: HarnessEvolutionRunStatus;
+  summary: string;
+  nextAction: string;
+  planId: string;
+  candidateId: string;
+  datasetId: string;
+  frontierId: string;
+  gateAccepted?: boolean;
+  auditPassed?: boolean;
+  decision?: "accept" | "rollback";
+  exportedBundleDir?: string;
+  missingCandidateTraceIds: string[];
+  artifactRefs: string[];
+}
+
 export interface HarnessDecisionRecord {
   candidateId: string;
   decision: "accept" | "rollback";
@@ -304,6 +374,10 @@ function frontiersDir(): string {
   return join(evolutionDir(), "frontiers");
 }
 
+function runsDir(): string {
+  return join(evolutionDir(), "runs");
+}
+
 function candidateDir(candidateId: string): string {
   return join(candidatesDir(), safePathSegment(candidateId));
 }
@@ -326,6 +400,22 @@ function datasetEvaluationPath(datasetId: string, candidateId: string): string {
 
 function frontierPath(frontierId = "default"): string {
   return join(frontiersDir(), `${safePathSegment(frontierId)}.json`);
+}
+
+function runDir(runId: string): string {
+  return join(runsDir(), safePathSegment(runId));
+}
+
+function runPath(runId: string): string {
+  return join(runDir(runId), "run.json");
+}
+
+function runPlanPath(runId: string): string {
+  return join(runDir(runId), "plan.json");
+}
+
+function runReportPath(runId: string): string {
+  return join(runDir(runId), "report.json");
 }
 
 function gatePath(candidateId: string): string {
@@ -1368,4 +1458,223 @@ export function exportHarnessPromotionBundle(input: {
   };
   atomicWriteJson(join(dir, "bundle.json"), bundle);
   return bundle;
+}
+
+export function loadHarnessEvolutionRun(runId: string): HarnessEvolutionRun | undefined {
+  return readJsonFile<HarnessEvolutionRun>(runPath(runId));
+}
+
+export function listHarnessEvolutionRuns(): HarnessEvolutionRun[] {
+  if (!existsSync(runsDir())) return [];
+  return readdirSync(runsDir())
+    .flatMap((name) => {
+      const run = readJsonFile<HarnessEvolutionRun>(join(runsDir(), name, "run.json"));
+      return run ? [run] : [];
+    })
+    .sort((a, b) => b.startedAt.localeCompare(a.startedAt));
+}
+
+function artifactRefsForRun(runId: string, plan: HarnessEvolutionPlan, includePromotion: boolean): string[] {
+  const refs = [
+    runPlanPath(runId),
+    runPath(runId),
+    runReportPath(runId),
+    datasetPath(plan.datasetId),
+    candidatePath(plan.candidateId),
+    proposalPath(plan.candidateId),
+    auditPath(plan.candidateId),
+    gatePath(plan.candidateId),
+    rankingPath(plan.candidateId),
+    frontierPath(plan.frontierId),
+    decisionPath(plan.candidateId),
+  ];
+  if (includePromotion) refs.push(join(promotionDir(plan.candidateId), "bundle.json"));
+  return refs;
+}
+
+function buildHarnessEvolutionReport(run: HarnessEvolutionRun): HarnessEvolutionReport {
+  return {
+    schema: HARNESS_EVOLUTION_SCHEMA,
+    runId: run.runId,
+    generatedAt: new Date().toISOString(),
+    status: run.status,
+    summary: run.plan.summary,
+    nextAction: run.nextAction,
+    planId: run.plan.planId,
+    candidateId: run.plan.candidateId,
+    datasetId: run.plan.datasetId,
+    frontierId: run.plan.frontierId,
+    gateAccepted: run.evaluation?.gate.accepted,
+    auditPassed: run.audit?.passed,
+    decision: run.decision?.decision,
+    exportedBundleDir: run.bundle?.bundleDir,
+    missingCandidateTraceIds: run.missingCandidateTraceIds,
+    artifactRefs: run.artifactRefs,
+  };
+}
+
+function persistHarnessEvolutionRun(run: HarnessEvolutionRun): HarnessEvolutionRun {
+  mkdirSync(runDir(run.runId), { recursive: true });
+  atomicWriteJson(runPlanPath(run.runId), run.plan);
+  atomicWriteJson(runPath(run.runId), run);
+  atomicWriteJson(runReportPath(run.runId), buildHarnessEvolutionReport(run));
+  return run;
+}
+
+function createHarnessEvolutionPlan(input: {
+  runId: string;
+  summary: string;
+  traceIds?: string[];
+  failureSignatureIds?: string[];
+  datasetId?: string;
+  candidateId?: string;
+  frontierId?: string;
+  sourceDir?: string;
+  provider?: string;
+  editableSurface?: string[];
+  expectedFixes?: string[];
+  possibleRegressions?: string[];
+  leakageTerms?: string[];
+  instructions?: string;
+  autoDecide?: boolean;
+  exportOnAccept?: boolean;
+}): HarnessEvolutionPlan {
+  return {
+    schema: HARNESS_EVOLUTION_SCHEMA,
+    planId: `plan-${input.runId}`,
+    createdAt: new Date().toISOString(),
+    summary: input.summary,
+    traceIds: input.traceIds ?? [],
+    failureSignatureIds: input.failureSignatureIds ?? [],
+    datasetId: input.datasetId?.trim() || `dataset-${input.runId}`,
+    candidateId: input.candidateId?.trim() || `candidate-${input.runId}`,
+    frontierId: input.frontierId?.trim() || "default",
+    sourceDir: input.sourceDir,
+    provider: input.provider,
+    editableSurface: input.editableSurface ?? [],
+    expectedFixes: input.expectedFixes ?? [],
+    possibleRegressions: input.possibleRegressions ?? [],
+    leakageTerms: input.leakageTerms ?? [],
+    instructions: input.instructions,
+    autoDecide: input.autoDecide ?? true,
+    exportOnAccept: input.exportOnAccept ?? false,
+  };
+}
+
+export async function runHarnessEvolution(input: {
+  runId?: string;
+  summary: string;
+  provider: LLMProvider;
+  traceIds?: string[];
+  failureSignatureIds?: string[];
+  datasetId?: string;
+  candidateId?: string;
+  frontierId?: string;
+  sourceDir?: string;
+  editableSurface?: string[];
+  expectedFixes?: string[];
+  possibleRegressions?: string[];
+  leakageTerms?: string[];
+  instructions?: string;
+  candidateTraceIdsByBaseline?: Record<string, string>;
+  autoDecide?: boolean;
+  exportOnAccept?: boolean;
+}): Promise<HarnessEvolutionRun> {
+  const runId = input.runId?.trim() || `run-${randomUUID().slice(0, 8)}`;
+  const plan = createHarnessEvolutionPlan({ ...input, runId, provider: input.provider.name });
+  const coreset = selectHarnessCoreset({ traceIds: plan.traceIds, limit: Math.max(2, plan.traceIds.length || 10) });
+  const coresetTraceIds = coreset.map((item) => item.traceId);
+  const mined = mineHarnessFailureSignatures({
+    traceIds: plan.traceIds.length ? plan.traceIds : coresetTraceIds,
+  });
+  const failureSignatureIds = [...new Set([...plan.failureSignatureIds, ...mined.map((signature) => signature.signatureId)])];
+  const datasetTraceIds = plan.traceIds.length ? plan.traceIds : coresetTraceIds;
+  const dataset = createHarnessDataset({
+    datasetId: plan.datasetId,
+    name: plan.summary,
+    traceIds: datasetTraceIds,
+    failureSignatureIds,
+    leakageTerms: plan.leakageTerms,
+  });
+  const proposal = await proposeHarnessCandidate({
+    candidateId: plan.candidateId,
+    provider: input.provider,
+    summary: plan.summary,
+    sourceDir: plan.sourceDir,
+    editableSurface: plan.editableSurface,
+    expectedFixes: plan.expectedFixes,
+    possibleRegressions: plan.possibleRegressions,
+    evidenceTraceIds: dataset.sourceTraceIds,
+    failureSignatureIds,
+    datasetIds: [plan.datasetId],
+    instructions: plan.instructions,
+  });
+  const missingCandidateTraceIds = [...dataset.heldIn, ...dataset.heldOut]
+    .map((item) => item.baselineTraceId)
+    .filter((baselineTraceId) => !input.candidateTraceIdsByBaseline?.[baselineTraceId]);
+
+  let evaluation: HarnessDatasetEvaluation | undefined;
+  let audit: HarnessAuditReport | undefined;
+  let ranks: HarnessCandidateRank[] | undefined;
+  let frontier: HarnessFrontier | undefined;
+  let decision: HarnessDecisionRecord | undefined;
+  let bundle: HarnessPromotionBundle | undefined;
+  let status: HarnessEvolutionRunStatus = "awaiting_candidate_traces";
+  let nextAction = `provide candidateTraceIdsByBaseline for: ${missingCandidateTraceIds.join(", ")}`;
+
+  if (!missingCandidateTraceIds.length) {
+    evaluation = evaluateHarnessDataset({
+      candidateId: plan.candidateId,
+      datasetId: plan.datasetId,
+      candidateTraceIdsByBaseline: input.candidateTraceIdsByBaseline ?? {},
+    });
+    audit = auditHarnessCandidate({ candidateId: plan.candidateId, datasetId: plan.datasetId, leakageTerms: plan.leakageTerms });
+    ranks = rankHarnessCandidates([plan.candidateId]);
+    frontier = updateHarnessFrontier({ frontierId: plan.frontierId, candidateIds: [plan.candidateId] });
+    if (plan.autoDecide) {
+      decision = decideHarnessCandidate({ candidateId: plan.candidateId });
+      status = decision.decision === "accept" ? "accepted" : "rolled_back";
+      nextAction = decision.decision === "accept" ? "review promotion bundle or export accepted candidate" : "inspect audit/gate findings and create a derived candidate";
+      if (decision.decision === "accept" && plan.exportOnAccept) {
+        bundle = exportHarnessPromotionBundle({ candidateId: plan.candidateId });
+        status = "exported";
+        nextAction = "review exported promotion bundle before applying outside runoff";
+      }
+    } else {
+      status = audit.passed && evaluation.gate.accepted ? "planned" : "blocked";
+      nextAction = "run decide after reviewing audit, gate, and frontier";
+    }
+  }
+
+  const completed = status !== "awaiting_candidate_traces";
+  const run: HarnessEvolutionRun = {
+    schema: HARNESS_EVOLUTION_SCHEMA,
+    runId,
+    plan,
+    startedAt: plan.createdAt,
+    completedAt: completed ? new Date().toISOString() : undefined,
+    status,
+    coresetTraceIds,
+    failureSignatureIds,
+    dataset,
+    candidate: loadHarnessCandidate(plan.candidateId) ?? proposal.candidate,
+    evaluation,
+    audit,
+    ranks,
+    frontier,
+    decision,
+    bundle,
+    missingCandidateTraceIds,
+    artifactRefs: artifactRefsForRun(runId, plan, Boolean(bundle)),
+    nextAction,
+  };
+  return persistHarnessEvolutionRun(run);
+}
+
+export function queryHarnessEvolutionReport(runId: string): HarnessEvolutionReport {
+  const run = loadHarnessEvolutionRun(runId);
+  if (!run) throw new Error(`Harness evolution run not found: ${runId}`);
+  const report = buildHarnessEvolutionReport(run);
+  atomicWriteJson(runReportPath(runId), report);
+  return report;
 }

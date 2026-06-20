@@ -4,7 +4,7 @@
  *
  *   pipeline run | init | doctor | config edit | config validate | mcp
  *   pipeline runs list|show
- *   pipeline harness coreset|mine|dataset|create|propose|evaluate|evaluate-dataset|audit|rank|frontier|decide|export|list
+ *   pipeline harness coreset|mine|dataset|create|propose|run|report|runs|evaluate|evaluate-dataset|audit|rank|frontier|decide|export|list
  *   pipeline traces list|show|tail | observability ui
  */
 
@@ -42,6 +42,9 @@ import {
   harnessEvolveMine,
   harnessEvolvePropose,
   harnessEvolveRank,
+  harnessEvolveReport,
+  harnessEvolveRun,
+  harnessEvolveRuns,
 } from "../../../src/pipeline/harness-evolve-cli.js";
 import { runsList, runsShow } from "../../../src/pipeline/run-control-cli.js";
 import { tracesList, tracesShow, tracesTail } from "../../../src/pipeline/trace-cli.js";
@@ -71,6 +74,9 @@ Usage:
   pipeline harness dataset --summary <name> [--dataset-id <id>] [--trace-ids-json <json>] [--failure-signature-ids-json <json>] [--held-in-ratio <n>] [--leakage-terms-json <json>] [--json]
   pipeline harness create --summary <text> [--candidate-id <id>] [--source-dir <dir>] [--parent-candidate-ids-json <json>] [--dataset-ids-json <json>] [--json]
   pipeline harness propose --summary <text> [--candidate-id <id>] [--provider <name>] [--source-dir <dir>] [--instructions <text>] [--parent-candidate-ids-json <json>] [--dataset-ids-json <json>] [--json]
+  pipeline harness run --summary <text> [--run-id <id>] [--candidate-id <id>] [--dataset-id <id>] [--frontier-id <id>] [--trace-ids-json <json>] [--candidate-trace-map-json <json>] [--export-on-accept] [--json]
+  pipeline harness report <runId> [--json]
+  pipeline harness runs [--limit <n>] [--json]
   pipeline harness evaluate <candidateId> --pairs-json <json> [--json]
   pipeline harness evaluate-dataset <candidateId> --dataset-id <id> --candidate-trace-map-json <json> [--json]
   pipeline harness audit <candidateId> [--dataset-id <id>] [--leakage-terms-json <json>] [--json]
@@ -106,6 +112,7 @@ type CliArgs = {
   port?: number;
   noOpen?: boolean;
   traceId?: string;
+  runId?: string;
   sessionId?: string;
   winner?: number;
   reason?: string;
@@ -130,6 +137,7 @@ type CliArgs = {
   decision?: "accept" | "rollback";
   since?: string;
   cleanupOrphans?: boolean;
+  exportOnAccept?: boolean;
   json?: boolean;
   postmortem?: boolean;
   once?: boolean;
@@ -162,6 +170,10 @@ function parseArgs(argv: string[]): CliArgs {
     out.traceId = argv[2];
     positionalConsumed = 1;
   }
+  if (out.command === "harness" && out.sub === "report" && argv[2] && !argv[2].startsWith("-")) {
+    out.runId = argv[2];
+    positionalConsumed = 1;
+  }
   if (out.command === "traces" && out.sub === "show" && argv[2] && !argv[2].startsWith("-")) {
     out.traceId = argv[2];
     positionalConsumed = 1;
@@ -187,6 +199,7 @@ function parseArgs(argv: string[]): CliArgs {
     else if (a === "--port") out.port = Number(next());
     else if (a === "--no-open") out.noOpen = true;
     else if (a === "--trace-id") out.traceId = next();
+    else if (a === "--run-id") out.runId = next();
     else if (a === "--candidate-id") out.traceId = next();
     else if (a === "--dataset-id") out.datasetId = next();
     else if (a === "--frontier-id") out.frontierId = next();
@@ -217,6 +230,7 @@ function parseArgs(argv: string[]): CliArgs {
     else if (a === "--winner") out.winner = Number(next());
     else if (a === "--reason") out.reason = next();
     else if (a === "--cleanup-orphans") out.cleanupOrphans = true;
+    else if (a === "--export-on-accept") out.exportOnAccept = true;
     else if (a === "--json") out.json = true;
     else if (a === "--postmortem") out.postmortem = true;
     else if (a === "--once") out.once = true;
@@ -446,6 +460,42 @@ async function cmdHarness(args: CliArgs): Promise<void> {
     });
     return;
   }
+  if (args.sub === "run") {
+    if (!args.summary?.trim()) throw new Error("--summary is required");
+    const configPath = resolve(args.config ?? join(process.cwd(), "pipeline.config.json"));
+    if (!existsSync(configPath)) throw new Error(`Config not found: ${configPath}`);
+    const candidateTraceMap = args.candidateTraceMapJson ? JSON.parse(args.candidateTraceMapJson) as Record<string, string> : undefined;
+    await harnessEvolveRun({
+      runId: args.runId,
+      configPath,
+      candidateId: args.traceId,
+      datasetId: args.datasetId,
+      frontierId: args.frontierId,
+      summary: args.summary,
+      sourceDir: args.sourceDir,
+      provider: args.provider,
+      instructions: args.instructions,
+      editableSurface: parseJsonArray(args.editableSurfaceJson, "--editable-surface-json"),
+      expectedFixes: parseJsonArray(args.expectedFixesJson, "--expected-fixes-json"),
+      possibleRegressions: parseJsonArray(args.possibleRegressionsJson, "--possible-regressions-json"),
+      traceIds: parseJsonArray(args.traceIdsJson, "--trace-ids-json"),
+      failureSignatureIds: parseJsonArray(args.failureSignatureIdsJson, "--failure-signature-ids-json"),
+      leakageTerms: parseJsonArray(args.leakageTermsJson, "--leakage-terms-json"),
+      candidateTraceMap,
+      exportOnAccept: args.exportOnAccept,
+      json: args.json,
+    });
+    return;
+  }
+  if (args.sub === "report") {
+    if (!args.runId) throw new Error("run id required: pipeline harness report <runId>");
+    harnessEvolveReport({ runId: args.runId, json: args.json });
+    return;
+  }
+  if (args.sub === "runs") {
+    harnessEvolveRuns({ limit: args.limit, json: args.json });
+    return;
+  }
   if (args.sub === "evaluate") {
     if (!args.traceId) throw new Error("candidate id required: pipeline harness evaluate <candidateId>");
     harnessEvolveEvaluate({
@@ -514,7 +564,7 @@ async function cmdHarness(args: CliArgs): Promise<void> {
     harnessEvolveList({ limit: args.limit, json: args.json });
     return;
   }
-  throw new Error("Usage: pipeline harness coreset|mine|dataset|create|propose|evaluate|evaluate-dataset|audit|rank|frontier|decide|export|list");
+  throw new Error("Usage: pipeline harness coreset|mine|dataset|create|propose|run|report|runs|evaluate|evaluate-dataset|audit|rank|frontier|decide|export|list");
 }
 
 async function cmdObservabilityUi(args: CliArgs): Promise<void> {

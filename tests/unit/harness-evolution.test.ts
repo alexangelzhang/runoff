@@ -16,10 +16,14 @@ import {
   exportHarnessPromotionBundle,
   loadHarnessCandidate,
   loadHarnessDataset,
+  loadHarnessEvolutionRun,
   listHarnessCandidates,
+  listHarnessEvolutionRuns,
   mineHarnessFailureSignatures,
   proposeHarnessCandidate,
+  queryHarnessEvolutionReport,
   rankHarnessCandidates,
+  runHarnessEvolution,
   selectHarnessCoreset,
   updateHarnessFrontier,
 } from "../../src/orchestration/harness-evolution.ts";
@@ -659,6 +663,102 @@ test("harness evolution frontier records lineage, gate, audit, and rejected cand
     assert.equal(rejected.auditPassed, false);
     assert.ok(frontier.rejectedCandidateIds.includes("candidate-frontier-rejected"));
     assert.equal(existsSync(join(process.env.RUNOFF_HOME, "harness-evolution", "frontiers", "main.json")), true);
+  } finally {
+    if (oldHome === undefined) delete process.env.RUNOFF_HOME;
+    else process.env.RUNOFF_HOME = oldHome;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("harness evolution run persists complete accepted report and promotion bundle", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "runoff-harness-run-"));
+  const oldHome = process.env.RUNOFF_HOME;
+  try {
+    process.env.RUNOFF_HOME = join(dir, "home");
+    recordTrace(trace("run-base-in", { finalStatus: "failed", timestamp: "2026-06-20T00:00:01.000Z" }));
+    recordTrace(trace("run-base-out", { totalDurationMs: 2000, timestamp: "2026-06-20T00:00:02.000Z" }));
+    recordTrace(trace("run-cand-in", { finalStatus: "approved", timestamp: "2026-06-20T00:00:03.000Z" }));
+    recordTrace(trace("run-cand-out", { totalDurationMs: 1000, timestamp: "2026-06-20T00:00:04.000Z" }));
+    const provider = new ProposalProvider("agent-proposer", {
+      summary: "Complete run candidate",
+      changes: "diff --git a/skill/SKILL.md b/skill/SKILL.md\n",
+      filesModified: ["skill/SKILL.md"],
+      diffStat: "1 file changed",
+    }, (req) => {
+      mkdirSync(join(req.workDir!, "skill"), { recursive: true });
+      writeFileSync(join(req.workDir!, "skill", "SKILL.md"), "updated", "utf-8");
+    });
+
+    const run = await runHarnessEvolution({
+      runId: "run-complete",
+      provider,
+      summary: "Complete harness evolution run",
+      candidateId: "candidate-run-complete",
+      datasetId: "dataset-run-complete",
+      frontierId: "frontier-run-complete",
+      traceIds: ["run-base-in", "run-base-out"],
+      editableSurface: ["skill/"],
+      candidateTraceIdsByBaseline: {
+        "run-base-in": "run-cand-in",
+        "run-base-out": "run-cand-out",
+      },
+      exportOnAccept: true,
+    });
+    const report = queryHarnessEvolutionReport("run-complete");
+
+    assert.equal(run.status, "exported");
+    assert.equal(run.decision?.decision, "accept");
+    assert.equal(run.audit?.passed, true);
+    assert.equal(run.evaluation?.gate.accepted, true);
+    assert.equal(run.bundle?.candidateId, "candidate-run-complete");
+    assert.equal(report.status, "exported");
+    assert.equal(report.auditPassed, true);
+    assert.equal(report.gateAccepted, true);
+    assert.deepEqual(report.missingCandidateTraceIds, []);
+    assert.equal(loadHarnessEvolutionRun("run-complete")?.runId, "run-complete");
+    assert.equal(listHarnessEvolutionRuns()[0]?.runId, "run-complete");
+    assert.equal(existsSync(join(process.env.RUNOFF_HOME, "harness-evolution", "runs", "run-complete", "report.json")), true);
+  } finally {
+    if (oldHome === undefined) delete process.env.RUNOFF_HOME;
+    else process.env.RUNOFF_HOME = oldHome;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("harness evolution run stops with next action when candidate trace map is missing", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "runoff-harness-run-awaiting-"));
+  const oldHome = process.env.RUNOFF_HOME;
+  try {
+    process.env.RUNOFF_HOME = join(dir, "home");
+    recordTrace(trace("await-base-in", { finalStatus: "failed", timestamp: "2026-06-20T00:00:01.000Z" }));
+    recordTrace(trace("await-base-out", { totalDurationMs: 2000, timestamp: "2026-06-20T00:00:02.000Z" }));
+    const provider = new ProposalProvider("agent-proposer", {
+      summary: "Awaiting candidate traces",
+      changes: "diff --git a/skill/SKILL.md b/skill/SKILL.md\n",
+      filesModified: ["skill/SKILL.md"],
+      diffStat: "1 file changed",
+    }, (req) => {
+      mkdirSync(join(req.workDir!, "skill"), { recursive: true });
+      writeFileSync(join(req.workDir!, "skill", "SKILL.md"), "updated", "utf-8");
+    });
+
+    const run = await runHarnessEvolution({
+      runId: "run-awaiting",
+      provider,
+      summary: "Awaiting trace map",
+      candidateId: "candidate-run-awaiting",
+      datasetId: "dataset-run-awaiting",
+      traceIds: ["await-base-in", "await-base-out"],
+      editableSurface: ["skill/"],
+    });
+    const report = queryHarnessEvolutionReport("run-awaiting");
+
+    assert.equal(run.status, "awaiting_candidate_traces");
+    assert.deepEqual(run.missingCandidateTraceIds, ["await-base-in", "await-base-out"]);
+    assert.match(run.nextAction, /provide candidateTraceIdsByBaseline/);
+    assert.equal(run.evaluation, undefined);
+    assert.equal(report.status, "awaiting_candidate_traces");
+    assert.deepEqual(report.missingCandidateTraceIds, ["await-base-in", "await-base-out"]);
   } finally {
     if (oldHome === undefined) delete process.env.RUNOFF_HOME;
     else process.env.RUNOFF_HOME = oldHome;
