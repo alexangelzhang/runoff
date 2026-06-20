@@ -40,13 +40,40 @@ describe("observability P0–P2", () => {
       mode: "pipeline",
       steps: [
         { name: "gen", provider: "mock", durationMs: 10, round: 1 },
-        { name: "review", provider: "mock", durationMs: 5, round: 1, error: "syntax error" },
+        {
+          name: "review",
+          provider: "mock",
+          durationMs: 5,
+          round: 1,
+          error: "syntax error",
+          observation: {
+            schemaVersion: 1,
+            action: "pipeline_step_result",
+            purpose: "Report review result.",
+            status: "failed",
+            summary: "review failed: syntax error",
+            evidence: ["error=syntax error"],
+            coverageGaps: ["Step failed before producing a complete successful result."],
+            artifactRefs: [],
+          },
+        },
       ],
       totalRounds: 1,
       finalStatus: "failed",
       totalDurationMs: 15,
       hasVerifyResults: false,
       timestamp: "2026-05-26T12:00:00.000Z",
+      observation: {
+        schemaVersion: 1,
+        action: "pipeline_result",
+        purpose: "Report pipeline outcome.",
+        status: "failed",
+        summary: "Pipeline failed; step \"review\" failed.",
+        evidence: ["traceId=abc12345"],
+        coverageGaps: [],
+        stepRefs: [{ stepName: "review", status: "failed", round: 1, summary: "review failed: syntax error" }],
+        traceRef: { traceId: "abc12345" },
+      },
       ...overrides,
     };
   }
@@ -76,6 +103,8 @@ describe("observability P0–P2", () => {
     assert.equal(pm.sessionId, "sess-1");
     assert.ok(pm.failedSteps.length >= 1);
     assert.match(pm.headline, /failed|review/i);
+    assert.equal(pm.observationSummary, "Pipeline failed; step \"review\" failed.");
+    assert.equal(pm.failedSteps[0]?.observationSummary, "review failed: syntax error");
   });
 
   it("appendTraceScore writes scores.jsonl", () => {
@@ -107,5 +136,6 @@ describe("observability P0–P2", () => {
     const report = buildExperimentEvalReport("exp-x");
     assert.ok(report.traceInsights?.length);
     assert.match(report.traceInsights![0]!.postmortemSummary, /failed|review/i);
+    assert.equal(report.traceInsights![0]!.observationSummary, "Pipeline failed; step \"review\" failed.");
   });
 });

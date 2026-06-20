@@ -32,7 +32,7 @@ export class AgentStepRunner implements StepRunner {
   }
 }
 
-/** Direct step execution without registry (tests, llm_run_step-style callers). */
+/** Direct step execution without registry (tests, runoff_run_step-style callers). */
 export function createConfigStepRunner(config: PipelineConfig): StepRunner {
   return {
     executeStep: (stepName, ctx) => executePipelineStep(config, stepName, ctx),

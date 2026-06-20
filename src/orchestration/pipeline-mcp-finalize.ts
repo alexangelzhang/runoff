@@ -11,6 +11,7 @@ import { enrichTraceWithEventLog } from "./replay.js";
 import { recordTrace, type PipelineTrace, type StepTrace } from "../observability/trace.js";
 import type { EventLog } from "./event-log.js";
 import type { PipelineHooks, PipelineEndContext } from "../pipeline/pipeline-hooks.js";
+import { buildPipelineObservation } from "./observation.js";
 
 export async function finalizePipelineRunResult(args: {
   traceId: string;
@@ -48,10 +49,11 @@ export async function finalizePipelineRunResult(args: {
   } = args;
 
   const summary = costTracker.getSummary();
+  const totalDurationMs = Date.now() - startTime;
   const finalResult: PipelineResult = {
     status: finalStatus,
     rounds: completedRounds,
-    totalDurationMs: Date.now() - startTime,
+    totalDurationMs,
     totalCostUSD: summary.totalCostUSD,
     checkpointFile: sessionId,
     traceId,
@@ -60,6 +62,15 @@ export async function finalizePipelineRunResult(args: {
     costBreakdown: {},
     error: undefined,
   };
+  finalResult.observation = buildPipelineObservation({
+    status: finalResult.status,
+    traceId: finalResult.traceId,
+    checkpointFile: finalResult.checkpointFile,
+    stepResults: finalResult.stepResults,
+    rounds: finalResult.rounds,
+    totalDurationMs: finalResult.totalDurationMs,
+    error: finalResult.error,
+  });
 
   let finalTrace: PipelineTrace = {
     id: traceId,
@@ -70,12 +81,13 @@ export async function finalizePipelineRunResult(args: {
     steps: stepTraces,
     totalRounds: completedRounds,
     finalStatus,
-    totalDurationMs: Date.now() - startTime,
+    totalDurationMs,
     timestamp: new Date().toISOString(),
     hasVerifyResults: !!verifyResults,
     totalUsage: { promptTokens: summary.totalTokens, completionTokens: 0 },
     lifecycle: "final",
     globalKnowledge: Object.keys(globalKnowledge).length > 0 ? globalKnowledge : undefined,
+    observation: finalResult.observation,
   };
   if (controlPlaneMode === "file" && eventLog) {
     finalTrace = enrichTraceWithEventLog(finalTrace, eventLog, traceId);

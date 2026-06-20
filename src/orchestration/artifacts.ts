@@ -12,6 +12,8 @@ export type ArtifactKind = "plan" | "code" | "diff" | "review" | "verdict" | "pa
 // --- Base ---
 
 interface ArtifactBase {
+  /** Stable within a step result; used by observations and trace postmortems. */
+  artifactId?: string;
   kind: ArtifactKind;
   /** Agent that produced this artifact. */
   producedBy?: string;
@@ -146,4 +148,11 @@ export function createVerdictArtifact(approved: boolean, feedback: string, opts?
 
 export function createPatchArtifact(patchBase64: string, baseRef: string, filesModified: string[], diffStat: string, opts?: Partial<Omit<PatchArtifact, "kind">>): PatchArtifact {
   return { kind: "patch", patchBase64, baseRef, filesModified, diffStat, createdAt: Date.now(), ...opts };
+}
+
+export function assignArtifactIds(stepName: string, artifacts: Artifact[]): Artifact[] {
+  return artifacts.map((artifact, index) => ({
+    ...artifact,
+    artifactId: artifact.artifactId ?? `${stepName}:${artifact.kind}:${index}`,
+  }));
 }

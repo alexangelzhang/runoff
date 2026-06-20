@@ -101,6 +101,7 @@ export type ExperimentTraceInsight = {
   status: PipelineStatus;
   verdict?: ExperimentEntry["verdict"];
   postmortemSummary: string;
+  observationSummary?: string;
 };
 
 export type ExperimentEvalReport = {
@@ -159,6 +160,7 @@ function buildTraceInsights(entries: ExperimentEntry[]): ExperimentTraceInsight[
       status: e.status,
       verdict: e.verdict,
       postmortemSummary,
+      observationSummary: trace?.observation?.summary,
     };
   });
 }

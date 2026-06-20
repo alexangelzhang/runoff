@@ -70,7 +70,7 @@ export function formatPipelineRunOutcomeHints(
     case "awaiting_approval":
     case "awaiting_plan_approval":
       lines.push("");
-      lines.push("resume after approval (MCP llm_run_pipeline with same sessionId + approvalDecision):");
+      lines.push("resume after approval (MCP runoff_run_pipeline with same sessionId + approvalDecision):");
       lines.push(`  sessionId: ${session}`);
       break;
     case "max_rounds":
@@ -84,7 +84,7 @@ export function formatPipelineRunOutcomeHints(
     case "aborted":
       if (session) {
         lines.push("");
-        lines.push("retry from checkpoint (MCP): llm_run_pipeline with sessionId + matching prompt/config");
+        lines.push("retry from checkpoint (MCP): runoff_run_pipeline with sessionId + matching prompt/config");
       }
       break;
     default:

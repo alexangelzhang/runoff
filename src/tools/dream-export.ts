@@ -1,5 +1,5 @@
 /**
- * llm_dream_export — export local memory rows to dream-export.jsonl (M4).
+ * runoff_dream_export — export local memory rows to dream-export.jsonl (M4).
  */
 
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";

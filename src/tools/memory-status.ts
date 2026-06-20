@@ -1,5 +1,5 @@
 /**
- * llm_memory_status — resolved external memory backend + optional reachability probe.
+ * runoff_memory_status — resolved external memory backend + optional reachability probe.
  */
 
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";

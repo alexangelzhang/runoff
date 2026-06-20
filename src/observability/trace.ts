@@ -7,7 +7,8 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, writeFile
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { getTracesDir } from "../core/paths.js";
-import { PipelineStatus } from "../core/state.js";
+import { PipelineStatus, type StepObservation } from "../core/state.js";
+import type { PipelineObservation } from "../core/pipeline-run-types.js";
 import { logger } from "../core/logger.js";
 
 export interface StepTrace {
@@ -46,6 +47,8 @@ export interface StepTrace {
   errorDetail?: { message: string; source?: string; code?: string };
   /** Phase 8.3.11: id of stored prompt version for this step execution. */
   promptVersionId?: string;
+  /** Work-memory snapshot returned to the host/model for this step. */
+  observation?: StepObservation;
 }
 
 /** Create a short unique span id for step traces. */
@@ -116,6 +119,8 @@ export interface PipelineTrace {
   approvals?: ApprovalTraceRecord[];
   /** Run-scoped orchestrator insights (persisted on trace for Dream promotion). */
   globalKnowledge?: Record<string, string>;
+  /** Work-memory snapshot returned to the host/model at run boundary. */
+  observation?: PipelineObservation;
 }
 
 export interface OrchestrationTraceRecord {

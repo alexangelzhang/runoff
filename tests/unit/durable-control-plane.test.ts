@@ -11,6 +11,7 @@ import { createControlPlane } from "../../src/orchestration/control-plane.ts";
 import {
   pauseRunForApproval,
   resumeRunAfterApproval,
+  syncRunStoreFromPipeline,
 } from "../../src/orchestration/run-control.ts";
 import type { RunState } from "../../src/orchestration/run-store.ts";
 
@@ -130,6 +131,26 @@ test("approval pause and resume updates FileRunStore", () => {
       reason: "too risky",
     });
     assert.equal(rejected?.status, "failed");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("syncRunStoreFromPipeline preserves exact pipeline status in metadata", () => {
+  const dir = mkdtempSync(join(tmpdir(), "llm-sync-status-"));
+  try {
+    const store = new FileRunStore(join(dir, "runs"));
+    const run = syncRunStoreFromPipeline(store, {
+      runId: "trace-awaiting-judge",
+      sessionId: "session-awaiting-judge",
+      round: 2,
+      pipelineStatus: "awaiting_judge",
+      resumeToken: "resume-1",
+    });
+
+    assert.equal(run.status, "paused");
+    assert.equal(run.metadata?.pipelineStatus, "awaiting_judge");
+    assert.equal(store.load("trace-awaiting-judge")?.metadata?.pipelineStatus, "awaiting_judge");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

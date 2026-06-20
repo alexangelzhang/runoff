@@ -3,6 +3,7 @@
  * runoff CLI (no MCP host required).
  *
  *   pipeline run | init | doctor | config edit | config validate | mcp
+ *   pipeline runs list|show
  *   pipeline traces list|show|tail | observability ui
  */
 
@@ -26,8 +27,10 @@ import {
   resolveRaceTraceId,
 } from "../../../src/runtime/race-finalize.js";
 import { startObservabilityUiServer } from "../../../src/pipeline/observability-ui-server.js";
+import { runsList, runsShow } from "../../../src/pipeline/run-control-cli.js";
 import { tracesList, tracesShow, tracesTail } from "../../../src/pipeline/trace-cli.js";
 import type { PipelineStatus } from "../../../src/core/state.js";
+import type { RunStatus } from "../../../src/orchestration/run-store.js";
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), "../../..");
 
@@ -45,6 +48,8 @@ Usage:
   pipeline race apply --trace-id <id> --winner <n>
   pipeline race apply --session <checkpointId> --winner <n>
   pipeline race abort --trace-id <id> [--reason <text>]
+  pipeline runs list [--status <status>] [--session-id <id>] [--limit <n>] [--json]
+  pipeline runs show <runId> [--json]
   pipeline traces list [--status <status>] [--session <id>] [--limit <n>] [--json]
   pipeline traces show <traceId> [--postmortem] [--json]
   pipeline traces tail [--once]
@@ -80,22 +85,29 @@ type CliArgs = {
   postmortem?: boolean;
   once?: boolean;
   status?: PipelineStatus;
+  runStatus?: RunStatus;
   sessionFilter?: string;
   limit?: number;
 };
 
 function parseArgs(argv: string[]): CliArgs {
   const out: CliArgs = { command: argv[0] ?? "help" };
-  if (out.command === "config" || out.command === "race" || out.command === "traces" || out.command === "observability") {
+  if (out.command === "config" || out.command === "race" || out.command === "runs" || out.command === "traces" || out.command === "observability") {
     out.sub = argv[1] ?? "help";
   }
   const multiSub =
-    out.command === "config" || out.command === "race" || out.command === "traces" || out.command === "observability";
+    out.command === "config" || out.command === "race" || out.command === "runs" || out.command === "traces" || out.command === "observability";
   const start = multiSub ? 2 : 1;
+  let positionalConsumed = 0;
+  if (out.command === "runs" && out.sub === "show" && argv[2] && !argv[2].startsWith("-")) {
+    out.traceId = argv[2];
+    positionalConsumed = 1;
+  }
   if (out.command === "traces" && out.sub === "show" && argv[2] && !argv[2].startsWith("-")) {
     out.traceId = argv[2];
+    positionalConsumed = 1;
   }
-  for (let i = start; i < argv.length; i++) {
+  for (let i = start + positionalConsumed; i < argv.length; i++) {
     const a = argv[i];
     const next = () => {
       const v = argv[++i];
@@ -123,7 +135,12 @@ function parseArgs(argv: string[]): CliArgs {
     else if (a === "--json") out.json = true;
     else if (a === "--postmortem") out.postmortem = true;
     else if (a === "--once") out.once = true;
-    else if (a === "--status") out.status = next() as PipelineStatus;
+    else if (a === "--status") {
+      const status = next();
+      if (out.command === "runs") out.runStatus = status as RunStatus;
+      else out.status = status as PipelineStatus;
+    }
+    else if (a === "--session-id") out.sessionFilter = next();
     else if (a === "--session") out.sessionFilter = next();
     else if (a === "--limit") out.limit = Number(next());
     else if (a === "--help" || a === "-h") out.command = "help";
@@ -247,6 +264,29 @@ function cmdTraces(args: CliArgs): void {
   throw new Error("Usage: pipeline traces list|show|tail");
 }
 
+function cmdRuns(args: CliArgs): void {
+  const configPath = resolve(args.config ?? join(process.cwd(), "pipeline.config.json"));
+  if (!existsSync(configPath)) throw new Error(`Config not found: ${configPath}`);
+  if (args.home) process.env.RUNOFF_HOME = resolve(args.home);
+
+  if (args.sub === "list") {
+    runsList({
+      configPath,
+      status: args.runStatus,
+      sessionId: args.sessionFilter,
+      limit: args.limit,
+      json: args.json,
+    });
+    return;
+  }
+  if (args.sub === "show") {
+    if (!args.traceId) throw new Error("run id required: pipeline runs show <runId>");
+    runsShow({ configPath, runId: args.traceId, json: args.json });
+    return;
+  }
+  throw new Error("Usage: pipeline runs list|show");
+}
+
 async function cmdObservabilityUi(args: CliArgs): Promise<void> {
   if (args.home) process.env.RUNOFF_HOME = resolve(args.home);
   const handle = await startObservabilityUiServer({ port: args.port });
@@ -317,6 +357,10 @@ async function main(): Promise<void> {
   }
   if (args.command === "race" && args.sub === "abort") {
     await cmdRaceAbort(args);
+    return;
+  }
+  if (args.command === "runs") {
+    cmdRuns(args);
     return;
   }
   if (args.command === "traces") {

@@ -1,5 +1,5 @@
 /**
- * llm_query_memory — hybrid local + remote memory search (retrieveMerged).
+ * runoff_query_memory — hybrid local + remote memory search (retrieveMerged).
  */
 
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";

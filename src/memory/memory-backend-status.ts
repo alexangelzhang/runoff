@@ -58,7 +58,7 @@ export function describeMemoryBackend(
 
   if (backend.type !== "local") {
     notes.push(
-      "Pipeline hooks use sync retrieve() (local disk). Use llm_query_memory or retrieveMerged for hybrid search.",
+      "Pipeline hooks use sync retrieve() (local disk). Use runoff_query_memory or retrieveMerged for hybrid search.",
     );
   }
 

@@ -1,5 +1,5 @@
 /**
- * llm_score_trace — Append a human or system score to a pipeline trace.
+ * runoff_score_trace — Append a human or system score to a pipeline trace.
  */
 
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";

@@ -50,6 +50,8 @@ import {
 import { resolveStepRunner, type StepRunner } from "./step-runner.js";
 import type { EventLog } from "./event-log.js";
 import { applyReflectReplan, shouldReflectOnTrigger } from "./reflect.js";
+import { buildStepObservation } from "./observation.js";
+import { assignArtifactIds } from "./artifacts.js";
 
 export type MutablePipelineRunState = {
   stepResults: Record<string, StepResult>;
@@ -416,17 +418,20 @@ export async function runPipelineDAGLoop(
               }),
         };
 
-        if (artifacts?.length) {
-          stepResult.artifacts = artifacts;
+        const artifactsForStep = artifacts?.length ? assignArtifactIds(stepName, artifacts) : undefined;
+        if (artifactsForStep?.length) {
+          stepResult.artifacts = artifactsForStep;
         }
+        stepResult.observation = buildStepObservation(stepName, stepResult);
+        trace.observation = stepResult.observation;
 
         if (isParallelStage) {
           const branchId = branchIdByStep.get(stepName);
-          if (branchId && artifacts?.length) {
+          if (branchId && artifactsForStep?.length) {
             recordOutcomeOnBranch(
               state.sharedContext!,
               branchId,
-              artifacts,
+              artifactsForStep,
               stepResult.filesModified,
             );
           }

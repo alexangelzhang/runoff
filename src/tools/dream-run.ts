@@ -1,5 +1,5 @@
 /**
- * llm_dream_run — offline Dream worker (tracks A + B + optional C).
+ * runoff_dream_run — offline Dream worker (tracks A + B + optional C).
  */
 
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";

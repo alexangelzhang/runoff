@@ -1,5 +1,5 @@
 /**
- * llm_query_traces — Query pipeline execution traces for analysis.
+ * runoff_query_traces — Query pipeline execution traces for analysis.
  */
 
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";

@@ -107,7 +107,14 @@ test("runPipelineDAGLoop reruns steps in a new round after review rejection", as
   assert.equal(state.stepResults.generate.round, 2);
   assert.equal(state.stepResults.review.round, 2);
   assert.equal(state.approved, true);
+  assert.equal(state.stepResults.generate.observation?.status, "success");
+  assert.equal(state.stepResults.generate.observation?.schemaVersion, 1);
+  assert.equal(state.stepResults.generate.observation?.artifactRefs[0]?.artifactId, "generate:code:0");
+  assert.equal(state.stepResults.generate.observation?.artifactRefs[0]?.stepName, "generate");
+  assert.equal(state.stepResults.generate.observation?.artifactRefs[0]?.artifactIndex, 0);
+  assert.equal(state.stepResults.generate.observation?.artifactRefs[0]?.ref, "stepResults.generate.artifacts[0]");
   assert.ok(state.stepResults.generate.artifacts?.length);
+  assert.equal(state.stepResults.generate.artifacts?.[0]?.artifactId, "generate:code:0");
   assert.ok(isCodeArtifact(state.stepResults.generate.artifacts![0]!));
 });
 

@@ -1,5 +1,5 @@
 /**
- * llm_query_experiments — A/B experiment log, eval report, dataset export (Phase 9+).
+ * runoff_query_experiments — A/B experiment log, eval report, dataset export (Phase 9+).
  */
 
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";

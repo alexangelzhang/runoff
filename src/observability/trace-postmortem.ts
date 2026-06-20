@@ -22,7 +22,9 @@ export type TracePostmortem = {
     round: number;
     error?: string;
     errorDetail?: StepTrace["errorDetail"];
+    observationSummary?: string;
   }>;
+  observationSummary?: string;
   lastSuccessfulStep?: string;
   costSummary?: PipelineTrace["costSummary"];
   experiment?: PipelineTrace["experiment"];
@@ -40,6 +42,7 @@ function failedStepRows(steps: StepTrace[]): TracePostmortem["failedSteps"] {
       round: s.round,
       error: s.error,
       errorDetail: s.errorDetail,
+      observationSummary: s.observation?.summary,
     }));
 }
 
@@ -100,6 +103,7 @@ export function buildTracePostmortem(trace: PipelineTrace): TracePostmortem {
     finalStatus: trace.finalStatus,
     headline: buildHeadline(trace),
     failedSteps: failed,
+    observationSummary: trace.observation?.summary,
     lastSuccessfulStep: okSteps.length ? okSteps[okSteps.length - 1]!.name : undefined,
     costSummary: trace.costSummary,
     experiment: trace.experiment,

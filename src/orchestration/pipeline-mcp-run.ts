@@ -31,6 +31,7 @@ import type { SessionWorkspace } from "../runtime/workspace.js";
 import { PatternCache } from "./pattern-cache.js";
 import { getPipelineMemory } from "../memory/pipeline-memory.js";
 import type { HistoricalPattern } from "../core/pipeline-run-types.js";
+import { buildPipelineObservation } from "./observation.js";
 
 export type PipelineRunParams = PipelineParams & { signal?: AbortSignal };
 
@@ -240,7 +241,7 @@ export async function executePipelineRun(args: PipelineRunParams): Promise<Pipel
         pipelineStatus: "awaiting_plan_approval",
         resumeToken: sessionId,
       });
-      return {
+      const pausedResult: PipelineResult = {
         status: "awaiting_plan_approval",
         rounds: 0,
         totalDurationMs: Date.now() - startTime,
@@ -251,6 +252,15 @@ export async function executePipelineRun(args: PipelineRunParams): Promise<Pipel
         usage: { promptTokens: 0, completionTokens: 0 },
         costBreakdown: {},
       };
+      pausedResult.observation = buildPipelineObservation({
+        status: pausedResult.status,
+        traceId: pausedResult.traceId,
+        checkpointFile: pausedResult.checkpointFile,
+        stepResults: pausedResult.stepResults,
+        rounds: pausedResult.rounds,
+        totalDurationMs: pausedResult.totalDurationMs,
+      });
+      return pausedResult;
     }
 
     syncRunStoreFromPipeline(controlPlane.runStore, {
@@ -348,6 +358,15 @@ export async function executePipelineRun(args: PipelineRunParams): Promise<Pipel
             });
           if (patterns.length > 0) {
             finalResult.historicalPatterns = patterns;
+            finalResult.observation = buildPipelineObservation({
+              status: finalResult.status,
+              traceId: finalResult.traceId,
+              checkpointFile: finalResult.checkpointFile,
+              stepResults: finalResult.stepResults,
+              rounds: finalResult.rounds,
+              totalDurationMs: finalResult.totalDurationMs,
+              error: finalResult.error,
+            });
           }
         }
       } catch {

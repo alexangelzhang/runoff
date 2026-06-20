@@ -55,6 +55,7 @@
     "runoff:init": "tsx scripts/ts/dev/pipeline-cli.ts init",
     "runoff:doctor": "tsx scripts/ts/dev/pipeline-cli.ts doctor",
     "runoff:validate": "tsx scripts/ts/dev/pipeline-cli.ts config validate",
+    "runoff:runs": "tsx scripts/ts/dev/pipeline-cli.ts runs",
     "runoff:race:apply": "tsx scripts/ts/dev/pipeline-cli.ts race apply",
     "runoff:race:abort": "tsx scripts/ts/dev/pipeline-cli.ts race abort",
     "typecheck": "tsc --noEmit",

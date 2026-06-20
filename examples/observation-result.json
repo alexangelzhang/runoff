@@ -1,0 +1,77 @@
+{
+  "status": "awaiting_judge",
+  "rounds": 1,
+  "checkpointFile": "session-race-123",
+  "traceId": "trace-race-123",
+  "observation": {
+    "schemaVersion": 1,
+    "action": "pipeline_result",
+    "purpose": "Report the pipeline outcome for the next host/model reasoning turn.",
+    "status": "awaiting_judge",
+    "summary": "Pipeline awaiting_judge; latest step \"implement\" completed.",
+    "evidence": [
+      "traceId=trace-race-123",
+      "checkpoint=session-race-123",
+      "rounds=1"
+    ],
+    "coverageGaps": [
+      "Race winner has not been applied yet."
+    ],
+    "stepRefs": [
+      {
+        "stepName": "implement",
+        "status": "success",
+        "round": 1,
+        "summary": "Two candidate diffs are ready for judging."
+      }
+    ],
+    "traceRef": { "traceId": "trace-race-123" },
+    "checkpointRef": { "sessionId": "session-race-123", "status": "awaiting_judge" },
+    "nextHint": "Select a race candidate with runoff_race_apply or abort with runoff_race_abort."
+  },
+  "stepResults": {
+    "implement": {
+      "status": "success",
+      "round": 1,
+      "provider": "codex|gemini",
+      "summary": "Two candidate diffs are ready for judging.",
+      "observation": {
+        "schemaVersion": 1,
+        "action": "pipeline_step_result",
+        "purpose": "Report the outcome of pipeline step \"implement\" for the next reasoning turn.",
+        "status": "success",
+        "summary": "Two candidate diffs are ready for judging.",
+        "evidence": [
+          "provider=codex|gemini",
+          "filesModified=src/feature.ts",
+          "diffStat=1 file changed, 42 insertions(+)"
+        ],
+        "coverageGaps": [],
+        "artifactRefs": [
+          {
+            "artifactId": "implement:diff:0",
+            "stepName": "implement",
+            "artifactIndex": 0,
+            "kind": "diff",
+            "ref": "stepResults.implement.artifacts[0]",
+            "summary": "Candidate diff ready for review.",
+            "producedBy": "implement"
+          }
+        ],
+        "nextHint": "Inspect artifactRefs for complete step output before making detailed claims."
+      },
+      "artifacts": [
+        {
+          "artifactId": "implement:diff:0",
+          "kind": "diff",
+          "producedBy": "implement",
+          "createdAt": 1781920000000,
+          "summary": "Candidate diff ready for review.",
+          "filesModified": ["src/feature.ts"],
+          "diffStat": "1 file changed, 42 insertions(+)",
+          "changes": "diff --git a/src/feature.ts b/src/feature.ts ..."
+        }
+      ]
+    }
+  }
+}

@@ -1,5 +1,5 @@
 /**
- * In-process registry for multi-provider race sessions (llm_race_apply / abort).
+ * In-process registry for multi-provider race sessions (runoff_race_apply / abort).
  * Lives under src/ so core execution (scheduler) does not depend on MCP tools/.
  */
 

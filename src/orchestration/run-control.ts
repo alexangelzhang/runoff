@@ -35,6 +35,7 @@ export function resumeRunAfterApproval(
       pendingApproval: undefined,
       metadata: {
         ...run.metadata,
+        pipelineStatus: "failed",
         approvalRejected: response.reason,
       },
     });
@@ -45,6 +46,7 @@ export function resumeRunAfterApproval(
       pendingApproval: undefined,
       metadata: {
         ...run.metadata,
+        pipelineStatus: "running",
         approvalModifications: response.decision === "modify" ? response.modifications : undefined,
       },
     });
@@ -94,7 +96,7 @@ export function syncRunStoreFromPipeline(
     resumeToken: input.resumeToken ?? input.sessionId,
     pendingApproval: existing?.pendingApproval,
     agentStates: existing?.agentStates,
-    metadata: existing?.metadata,
+    metadata: { ...existing?.metadata, pipelineStatus: input.pipelineStatus },
     createdAt: existing?.createdAt ?? now,
     updatedAt: now,
   };

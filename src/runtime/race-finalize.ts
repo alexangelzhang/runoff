@@ -379,7 +379,7 @@ export async function applyRaceSession(traceId: string, winnerIndex: number): Pr
       cleanupErrors.push(...(await clearRaceCheckpointAfterApplyFailure(session)));
       deleteRaceSession(traceId);
       throw new Error(
-        `Race winner applied to repo but trace persist failed for ${traceId}; repo may contain winner changes — do not call llm_race_apply again`,
+        `Race winner applied to repo but trace persist failed for ${traceId}; repo may contain winner changes — do not call runoff_race_apply again`,
       );
     }
 

@@ -13,6 +13,7 @@ import { raceSessions, cleanupStaleRaceSessions } from "./runtime/race-registry.
 import { register as registerRunStep } from "./tools/run-step.js";
 import { register as registerShowConfig } from "./tools/show-config.js";
 import { register as registerQueryTraces } from "./tools/query-traces.js";
+import { register as registerQueryRuns } from "./tools/query-runs.js";
 import { register as registerScoreTrace } from "./tools/score-trace.js";
 import { register as registerQueryExperiments } from "./tools/query-experiments.js";
 import { register as registerMemoryStatus } from "./tools/memory-status.js";
@@ -38,6 +39,7 @@ const server = new McpServer({
 registerRunStep(server, initialConfig);
 registerShowConfig(server);
 registerQueryTraces(server);
+registerQueryRuns(server);
 registerScoreTrace(server);
 registerQueryExperiments(server);
 registerMemoryStatus(server);

@@ -19,5 +19,8 @@
     "maxRounds": 3,
     "reviewStep": "review"
   },
+  "runtime": {
+    "controlPlane": "file"
+  },
   "routing": []
 }

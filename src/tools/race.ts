@@ -1,5 +1,5 @@
 /**
- * llm_race_apply + llm_race_abort — Race session finalization tools.
+ * runoff_race_apply + runoff_race_abort — Race session finalization tools.
  */
 
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
@@ -12,7 +12,7 @@ export function register(server: McpServer) {
     "runoff_race_apply",
     "Finalize a race: apply the winning candidate's changes to the source repo, clean up all candidate workspaces, and update the trace status.",
     {
-      traceId: z.string().describe("The traceId returned by llm_run_pipeline in race mode"),
+      traceId: z.string().describe("The traceId returned by runoff_run_pipeline in race mode"),
       winnerIndex: z.number().describe("The index of the winning candidate (0-based)"),
     },
     async ({ traceId, winnerIndex }) => {
@@ -29,7 +29,7 @@ export function register(server: McpServer) {
     "runoff_race_abort",
     "Abort a race session, reject all candidates, and clean up all candidate workspaces without applying anything.",
     {
-      traceId: z.string().describe("The traceId returned by llm_run_pipeline in race mode"),
+      traceId: z.string().describe("The traceId returned by runoff_run_pipeline in race mode"),
       reason: z.string().optional().describe("Reason for aborting the race"),
     },
     async ({ traceId, reason }) => {

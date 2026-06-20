@@ -12,7 +12,7 @@ function providerLabel(providers: string | string[]): string {
   return Array.isArray(providers) ? providers.join("|") : providers;
 }
 
-/** Mermaid flowchart (render in GitHub, Obsidian, or llm_show_agent_graph format=mermaid). */
+/** Mermaid flowchart (render in GitHub, Obsidian, or runoff_show_agent_graph format=mermaid). */
 export function agentGraphToMermaid(snapshot: AgentGraphSnapshot): string {
   const lines: string[] = ["flowchart TD"];
   const nodeIds = new Map<string, string>();

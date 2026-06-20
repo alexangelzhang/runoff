@@ -365,7 +365,7 @@ export type AgentGraphEditorOptions = {
   configPathLabel?: string;
 };
 
-/** Interactive editor HTML (no build step; opens locally or via llm_show_agent_graph format=editor). */
+/** Interactive editor HTML (no build step; opens locally or via runoff_show_agent_graph format=editor). */
 export function agentGraphToEditorHtml(
   snapshot: AgentGraphSnapshot,
   title = "AgentGraph Editor",

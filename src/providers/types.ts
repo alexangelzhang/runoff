@@ -12,7 +12,7 @@ export interface LLMRequest {
   system?: string;
   staticContext?: string;
   dynamicContext?: string;
-  /** Agent finalize semantics: auto finalize (default) or defer to llm_race_apply / abort. */
+  /** Agent finalize semantics: auto finalize (default) or defer to runoff_race_apply / abort. */
   finalizeStrategy?: "auto" | "defer";
   /** Shared repo lock key for intentional concurrent workspaces (e.g. race candidates). */
   sharedLockKey?: string;

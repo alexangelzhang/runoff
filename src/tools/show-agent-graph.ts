@@ -98,7 +98,7 @@ export function register(server: McpServer) {
               {
                 type: "text",
                 text: writeEditor
-                  ? `AgentGraph editor written to ${editorPath}\n\nOpen in a browser, edit nodes, copy JSON, then llm_show_agent_graph action=apply snapshot=<json>`
+                  ? `AgentGraph editor written to ${editorPath}\n\nOpen in a browser, edit nodes, copy JSON, then runoff_show_agent_graph action=apply snapshot=<json>`
                   : html,
               },
             ],

@@ -101,8 +101,32 @@ export interface StepResult {
   usage?: { promptTokens: number; completionTokens: number };
   candidateSnapshot?: Partial<Candidate>;
   durationMs?: number;
+  /** Runtime-shaped work memory for the next host/model turn. */
+  observation?: StepObservation;
   /** Typed artifacts for this step (Wave 7.5 / Gate 2.7). */
   artifacts?: import("../orchestration/artifacts.js").Artifact[];
+}
+
+export interface StepObservationArtifactRef {
+  artifactId?: string;
+  stepName: string;
+  artifactIndex: number;
+  kind: string;
+  ref: string;
+  summary?: string;
+  producedBy?: string;
+}
+
+export interface StepObservation {
+  schemaVersion: 1;
+  action: string;
+  purpose: string;
+  status: StepStatus;
+  summary: string;
+  evidence: string[];
+  coverageGaps: string[];
+  artifactRefs: StepObservationArtifactRef[];
+  nextHint?: string;
 }
 
 export interface ResumeMetadata {
@@ -253,7 +277,7 @@ export function assertResumeCompatible(state: PipelineState, request: ResumeRequ
   }
 
   if (state.status === "awaiting_judge") {
-    throw new Error(`Checkpoint ${state.sessionId} is awaiting judge; use llm_race_apply or llm_race_abort instead of resume`);
+    throw new Error(`Checkpoint ${state.sessionId} is awaiting judge; use runoff_race_apply or runoff_race_abort instead of resume`);
   }
 
   if (state.status === "awaiting_approval" || state.status === "awaiting_plan_approval") {

@@ -23,6 +23,7 @@ import {
   getResumeStartRound,
 } from "./pipeline-mcp-checkpoint.js";
 import type { ResumeRequest } from "../core/state.js";
+import { buildPipelineObservation } from "./observation.js";
 
 export type LoadedPipelineResumeState = {
   resumedState: PipelineState | null;
@@ -154,6 +155,15 @@ export async function loadPipelineResumeState(args: {
         costBreakdown: {},
         error: response.decision === "reject" ? response.reason : "Approval resume failed",
       };
+      earlyResult.observation = buildPipelineObservation({
+        status: earlyResult.status,
+        traceId: earlyResult.traceId,
+        checkpointFile: earlyResult.checkpointFile,
+        stepResults: earlyResult.stepResults,
+        rounds: earlyResult.rounds,
+        totalDurationMs: earlyResult.totalDurationMs,
+        error: earlyResult.error,
+      });
     } else {
       resumedState = { ...checkpoint, status: "running" };
       if (checkpoint.status === "awaiting_plan_approval") {

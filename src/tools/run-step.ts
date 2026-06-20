@@ -1,5 +1,5 @@
 /**
- * llm_run_step — Execute a single pipeline step with a given provider.
+ * runoff_run_step — Execute a single pipeline step with a given provider.
  */
 
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
@@ -44,7 +44,7 @@ export function register(server: McpServer, initialConfig: PipelineConfig) {
               status: "error",
               step,
               reason: Array.isArray(result.provider)
-                ? `Step "${step}" is a race step — use llm_run_pipeline instead.`
+                ? `Step "${step}" is a race step — use runoff_run_pipeline instead.`
                 : `No provider available for step "${step}".`,
             },
             { isError: true },

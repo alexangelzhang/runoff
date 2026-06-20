@@ -42,6 +42,7 @@ export interface PipelineResult {
   stepResults: Record<string, StepResult>;
   usage: { promptTokens: number; completionTokens: number };
   costBreakdown: Record<string, number>;
+  observation?: PipelineObservation;
   error?: string;
   /** Non-fatal warnings (trace persist, enrichment, etc.). */
   warnings?: string[];
@@ -52,4 +53,25 @@ export interface PipelineResult {
    * Only populated when status === "awaiting_judge".
    */
   historicalPatterns?: HistoricalPattern[];
+}
+
+export interface PipelineObservationStepRef {
+  stepName: string;
+  status: StepResult["status"];
+  round?: number;
+  summary?: string;
+}
+
+export interface PipelineObservation {
+  schemaVersion: 1;
+  action: "pipeline_result";
+  purpose: string;
+  status: PipelineStatus;
+  summary: string;
+  evidence: string[];
+  coverageGaps: string[];
+  stepRefs: PipelineObservationStepRef[];
+  traceRef: { traceId: string };
+  checkpointRef?: { sessionId: string; status: PipelineStatus };
+  nextHint?: string;
 }

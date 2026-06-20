@@ -165,7 +165,7 @@ export type PipelineRuntimeConfig = {
   /** `file` persists RunStore/EventLog/MessageBus under ~/.runoff/control-plane. */
   controlPlane?: "memory" | "file";
   governance?: GovernanceConfig;
-  /** Phase 8.2.2: enable semantic prompt similarity cache in llm_run_step. */
+  /** Phase 8.2.2: enable semantic prompt similarity cache in runoff_run_step. */
   semanticCache?: boolean;
   /** Phase 8.2.2: Jaccard threshold for semantic cache hits (default 0.95). */
   semanticCacheMinSimilarity?: number;
@@ -180,7 +180,7 @@ export type PipelineRuntimeConfig = {
   /** Phase 8.3.11: persist structured prompts per step (default on; `LLM_PROMPT_VERSIONS=0` disables). */
   promptVersionStore?: boolean;
   /**
-   * Agent provider race: `defer` pauses for llm_race_apply (default).
+   * Agent provider race: `defer` pauses for runoff_race_apply (default).
    * `auto-pick` applies resolveProviderRaceWinner choice immediately.
    */
   raceFinalize?: "defer" | "auto-pick";

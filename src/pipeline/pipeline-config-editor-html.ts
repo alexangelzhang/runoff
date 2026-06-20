@@ -365,7 +365,7 @@ export function pipelineConfigToEditorHtml(
     </label>
     <label>runtime.raceFinalize
       <select id="raceFinalize">
-        <option value="defer">defer (manual llm_race_apply)</option>
+        <option value="defer">defer (manual runoff_race_apply)</option>
         <option value="auto-pick">auto-pick</option>
       </select>
     </label>

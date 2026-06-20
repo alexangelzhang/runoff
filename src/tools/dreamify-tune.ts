@@ -1,5 +1,5 @@
 /**
- * llm_dreamify_tune — grid-search retrieval params using experiment eval data.
+ * runoff_dreamify_tune — grid-search retrieval params using experiment eval data.
  */
 
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";

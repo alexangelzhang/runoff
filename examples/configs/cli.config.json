@@ -41,6 +41,7 @@
     "reviewStep": "review"
   },
   "runtime": {
+    "controlPlane": "file",
     "raceFinalize": "defer"
   },
   "routing": []
