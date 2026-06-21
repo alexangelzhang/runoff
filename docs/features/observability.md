@@ -90,14 +90,17 @@ Trace postmortems and experiment eval reports surface `observationSummary` so of
 
 ## Harness evolution control plane
 
-`runoff_harness_evolve` and `npm run runoff:harness` provide the local control plane for improving the harness itself. Dataset splits, orchestrated runs, run reports, candidate lineage, leakage audit, frontier state, and promotion bundles are persisted as first-class artifacts under `~/.runoff/harness-evolution/`.
+`runoff_harness_evolve` and `npm run runoff:harness` provide the local control plane for improving the harness itself. Trigger scans, dataset splits, orchestrated runs, role policy evidence, connector writebacks, run reports, candidate lineage, leakage audit, frontier state, and promotion bundles are persisted as first-class artifacts under `~/.runoff/harness-evolution/`.
 
 | Capability | Mechanism |
 |---|---|
 | Failure signature mining | `mine` clusters failed traces into `failure-signatures/<id>.json` with evidence traces, suspected harness surface, and suggested editable surface |
+| Trigger runtime | `trigger_scan` evaluates explicit rules such as `trace_failure`, `audit_blocker`, and `frontier_stagnation`; it writes trigger events and pending plans without default source edits |
 | Dataset / split object | `dataset` writes `datasets/<datasetId>.json` with held-in and held-out trace items, source signatures, and leakage terms |
 | Dataset evaluation | `evaluate_dataset` maps every dataset baseline trace to a candidate trace, runs the held-in/held-out gate, and writes `datasets/<datasetId>/evaluations/<candidateId>.json` |
 | Evolution plan / run / report | `run` writes `runs/<runId>/plan.json`, `run.json`, and `report.json`; `report` exposes status, next action, missing candidate trace mappings, and artifact refs |
+| Role policy evidence | `run` records builder/reviewer/verifier provider separation and blocks automatic acceptance when configured independence is not met |
+| Connector writeback | `writeback` writes local Markdown or JSONL report artifacts for CI, PR comments, or external systems to consume later |
 | Change manifest + lineage | Candidate records under `candidates/<id>/manifest.json` and `candidate.json` track editable surface, expected fixes, parent candidates, mined signatures, and dataset IDs |
 | Variant isolation | Optional source directory copied to an isolated candidate `variant/` directory |
 | Automatic proposer | `propose` invokes a configured provider with `workDir` set to the isolated `variant/`, includes mined signatures plus `history-context.json`, records `proposal.json`, and flags files outside `editableSurface` |
@@ -107,10 +110,10 @@ Trace postmortems and experiment eval reports surface `observationSummary` so of
 | Coreset selection | `coreset` ranks difficult traces while preserving diversity keys |
 | Self-preference rank | `rank` performs deterministic pairwise preference over gate results |
 | Frontier | `frontier` writes `frontiers/<frontierId>.json` with rank, gate, audit, lineage, accepted, and rejected candidate state |
-| Acceptance guard / rollback audit | `decide` accepts only when proposal is clean, observed diff exists, audit passed, and held-in/held-out gate passed; otherwise it rolls back or blocks forced accept without mutating the user repo |
+| Acceptance guard / rollback audit | `decide` accepts only when proposal is clean, observed diff exists, audit passed, role policy passed when configured, and held-in/held-out gate passed; otherwise it rolls back or blocks forced accept without mutating the user repo |
 | Promotion bundle | `export` writes `promotion/bundle.json` plus copied observed variant files for accepted candidates only |
 
-Proposers edit only candidate variant directories. A full `run` can orchestrate coreset, mining, dataset creation, proposal, dataset evaluation, audit, rank/frontier, decision, and optional export; when candidate trace mappings are missing it stops at `awaiting_candidate_traces` with an explicit `nextAction` instead of inventing evaluation evidence.
+Proposers edit only candidate variant directories. A full `run` can orchestrate coreset, mining, dataset creation, proposal, dataset evaluation, audit, role-policy enforcement, rank/frontier, decision, connector writeback, and optional export; when candidate trace mappings are missing it stops at `awaiting_candidate_traces` with an explicit `nextAction` instead of inventing evaluation evidence.
 
 **LangFuse 借鉴已落地**：`traces/scores.jsonl` 记录 `traceId` + 数值/备注；eval-report 的 `traceInsights` 带一行 postmortem 摘要。
 

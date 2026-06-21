@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -598,6 +598,129 @@ test("pipeline-cli harness run report and runs expose orchestrated run state", a
     const runsBody = JSON.parse(runsStdout) as { count: number; runs: Array<{ runId: string }> };
     assert.equal(runsBody.count, 1);
     assert.equal(runsBody.runs[0]?.runId, "cli-run");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("pipeline-cli harness trigger-scan and writeback expose loop operations", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "pipeline-cli-harness-loop-"));
+  try {
+    const home = join(dir, "home");
+    const oldHome = process.env.RUNOFF_HOME;
+    process.env.RUNOFF_HOME = home;
+    try {
+      recordTrace(trace("cli-trigger-failed", {
+        finalStatus: "failed",
+        steps: [{ name: "implement", provider: "mock", durationMs: 10, round: 1, error: "verify failed" }],
+        timestamp: "2026-06-20T00:00:01.000Z",
+      }));
+      recordTrace(trace("cli-trigger-failed-b", {
+        finalStatus: "failed",
+        steps: [{ name: "implement", provider: "mock", durationMs: 10, round: 1, error: "verify failed again" }],
+        timestamp: "2026-06-20T00:00:02.000Z",
+      }));
+    } finally {
+      if (oldHome !== undefined) process.env.RUNOFF_HOME = oldHome;
+      else delete process.env.RUNOFF_HOME;
+    }
+
+    const scan = spawn("npx", [
+      "tsx",
+      CLI,
+      "harness",
+      "trigger-scan",
+      "--scan-id",
+      "cli-scan",
+      "--rules-json",
+      "[{\"ruleId\":\"cli-failed\",\"kind\":\"trace_failure\",\"enabled\":true,\"summary\":\"CLI failed traces\",\"allowedAction\":\"propose\",\"traceIds\":[\"cli-trigger-failed\"],\"minFailureCount\":1}]",
+      "--home",
+      home,
+      "--json",
+    ], {
+      cwd: ROOT,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let scanStdout = "";
+    let scanStderr = "";
+    scan.stdout?.on("data", (d) => { scanStdout += d.toString(); });
+    scan.stderr?.on("data", (d) => { scanStderr += d.toString(); });
+    const scanCode = await new Promise<number>((resolve, reject) => {
+      scan.on("error", reject);
+      scan.on("close", (x) => resolve(x ?? 1));
+    });
+    assert.equal(scanCode, 0, scanStderr);
+    const scanBody = JSON.parse(scanStdout) as { scan: { events: Array<{ kind: string; plan?: { triggerEventId: string } }> } };
+    assert.equal(scanBody.scan.events[0]?.kind, "trace_failure");
+    assert.ok(scanBody.scan.events[0]?.plan?.triggerEventId);
+
+    const config: PipelineConfig = {
+      providers: { mock: { type: "mock" } },
+      pipeline: { implement: ["mock"] },
+      orchestration: { mode: "dag", plannerProvider: "mock" },
+    };
+    const configPath = join(dir, "pipeline.config.json");
+    const markdownPath = join(dir, "cli-report.md");
+    writeFileSync(configPath, JSON.stringify(config), "utf-8");
+    const run = spawn("npx", [
+      "tsx",
+      CLI,
+      "harness",
+      "run",
+      "--run-id",
+      "cli-writeback-run",
+      "--summary",
+      "cli writeback run",
+      "--trace-ids-json",
+      "[\"cli-trigger-failed\",\"cli-trigger-failed-b\"]",
+      "--connectors-json",
+      `[{\"kind\":\"markdown\",\"path\":\"${markdownPath}\"}]`,
+      "--config",
+      configPath,
+      "--home",
+      home,
+      "--json",
+    ], {
+      cwd: ROOT,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let runStderr = "";
+    run.stderr?.on("data", (d) => { runStderr += d.toString(); });
+    const runCode = await new Promise<number>((resolve, reject) => {
+      run.on("error", reject);
+      run.on("close", (x) => resolve(x ?? 1));
+    });
+    assert.equal(runCode, 0, runStderr);
+    assert.match(readFileSync(markdownPath, "utf-8"), /Harness Evolution Report: cli-writeback-run/);
+
+    const jsonlPath = join(dir, "cli-report.jsonl");
+    const writeback = spawn("npx", [
+      "tsx",
+      CLI,
+      "harness",
+      "writeback",
+      "cli-writeback-run",
+      "--connectors-json",
+      `[{\"kind\":\"local_jsonl\",\"path\":\"${jsonlPath}\"}]`,
+      "--home",
+      home,
+      "--json",
+    ], {
+      cwd: ROOT,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let writebackStdout = "";
+    let writebackStderr = "";
+    writeback.stdout?.on("data", (d) => { writebackStdout += d.toString(); });
+    writeback.stderr?.on("data", (d) => { writebackStderr += d.toString(); });
+    const writebackCode = await new Promise<number>((resolve, reject) => {
+      writeback.on("error", reject);
+      writeback.on("close", (x) => resolve(x ?? 1));
+    });
+    assert.equal(writebackCode, 0, writebackStderr);
+    const writebackBody = JSON.parse(writebackStdout) as { count: number };
+    assert.equal(writebackBody.count, 1);
+    assert.match(readFileSync(jsonlPath, "utf-8"), /"runId":"cli-writeback-run"/);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

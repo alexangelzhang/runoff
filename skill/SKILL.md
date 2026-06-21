@@ -36,6 +36,7 @@ What does the user want?
 │   └─ A/B experiments / eval report             → runoff_query_experiments
 │
 ├─ Evolve the harness
+│   ├─ Scan trigger rules                       → runoff_harness_evolve(action="trigger_scan")
 │   ├─ Select hard/diverse traces                → runoff_harness_evolve(action="coreset")
 │   ├─ Mine failure signatures                   → runoff_harness_evolve(action="mine")
 │   ├─ Create held-in / held-out dataset split   → runoff_harness_evolve(action="dataset")
@@ -43,6 +44,7 @@ What does the user want?
 │   ├─ Propose isolated candidate edits          → runoff_harness_evolve(action="propose")
 │   ├─ Run full harness evolution loop           → runoff_harness_evolve(action="run")
 │   ├─ Inspect harness evolution run report      → runoff_harness_evolve(action="report"|"runs")
+│   ├─ Write report to local connectors          → runoff_harness_evolve(action="writeback")
 │   ├─ Run held-in / held-out gate               → runoff_harness_evolve(action="evaluate")
 │   ├─ Evaluate candidate against dataset        → runoff_harness_evolve(action="evaluate_dataset")
 │   ├─ Audit leakage / overfit / surface safety  → runoff_harness_evolve(action="audit")
@@ -80,7 +82,7 @@ Example configs: [examples/configs/](../examples/configs/) · scaffold: `npm run
 | `runoff_query_traces` | Find runs by status/time; `traceId` for one run; `format=postmortem` on failures |
 | `runoff_score_trace` | Record numeric quality score → `~/.runoff/traces/scores.jsonl`; read back via `runoff_query_traces traceId=<id> format=postmortem` → `humanScores` |
 | `runoff_query_experiments` | A/B variants; `format=eval-report` for winner recommendation |
-| `runoff_harness_evolve` | Harness evolution substrate: coreset selection, failure signature mining, dataset/split objects, full run orchestration, run reports, change manifest, isolated proposer with history context and observed variant diff, dataset evaluation, leakage/overfit audit, pairwise rank, persisted frontier, acceptance guard/rollback, promotion bundle export |
+| `runoff_harness_evolve` | Harness evolution substrate: trigger scans, coreset selection, failure signature mining, dataset/split objects, full run orchestration, role policy evidence, run reports, connector writebacks, change manifest, isolated proposer with history context and observed variant diff, dataset evaluation, leakage/overfit audit, pairwise rank, persisted frontier, acceptance guard/rollback, promotion bundle export |
 | `runoff_memory_status` | Before enabling Mem0/Zep; `probe=true` checks remote reachability |
 | `runoff_query_memory` | Hybrid search (local + remote); ops/debug — **not** the hot pipeline read path |
 | `runoff_dream_run` | After several runs — offline ADD/UPDATE/FORGET on `~/.runoff/memory/` |

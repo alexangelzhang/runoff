@@ -7,7 +7,7 @@
  * pairwise self-preference ranking, and auditable accept/rollback records.
  */
 
-import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, normalize, resolve } from "node:path";
 import { createHash, randomUUID } from "node:crypto";
 import type { LLMProvider, LLMResponse } from "../providers/types.js";
@@ -214,6 +214,9 @@ export interface HarnessEvolutionPlan {
   possibleRegressions: string[];
   leakageTerms: string[];
   instructions?: string;
+  triggerEventId?: string;
+  rolePolicy?: HarnessRolePolicy;
+  connectors: HarnessConnectorTarget[];
   autoDecide: boolean;
   exportOnAccept: boolean;
 }
@@ -233,6 +236,9 @@ export interface HarnessEvolutionRun {
   audit?: HarnessAuditReport;
   ranks?: HarnessCandidateRank[];
   frontier?: HarnessFrontier;
+  triggerEvent?: HarnessTriggerEvent;
+  roleEvidence?: HarnessRoleEvidence;
+  connectorWritebacks?: HarnessConnectorWriteback[];
   decision?: HarnessDecisionRecord;
   bundle?: HarnessPromotionBundle;
   missingCandidateTraceIds: string[];
@@ -251,12 +257,89 @@ export interface HarnessEvolutionReport {
   candidateId: string;
   datasetId: string;
   frontierId: string;
+  triggerEventId?: string;
   gateAccepted?: boolean;
   auditPassed?: boolean;
+  rolePolicyPassed?: boolean;
+  connectorWritebacks: HarnessConnectorWriteback[];
   decision?: "accept" | "rollback";
   exportedBundleDir?: string;
   missingCandidateTraceIds: string[];
   artifactRefs: string[];
+}
+
+export type HarnessTriggerKind = "trace_failure" | "audit_blocker" | "frontier_stagnation";
+export type HarnessTriggerAllowedAction = "report" | "propose" | "export";
+
+export interface HarnessTriggerRule {
+  ruleId: string;
+  kind: HarnessTriggerKind;
+  enabled: boolean;
+  summary: string;
+  allowedAction: HarnessTriggerAllowedAction;
+  traceIds?: string[];
+  frontierId?: string;
+  minFailureCount?: number;
+  minBlockedAudits?: number;
+}
+
+export interface HarnessTriggerEvent {
+  schema: typeof HARNESS_EVOLUTION_SCHEMA;
+  eventId: string;
+  ruleId: string;
+  kind: HarnessTriggerKind;
+  createdAt: string;
+  allowedAction: HarnessTriggerAllowedAction;
+  summary: string;
+  traceIds: string[];
+  candidateIds: string[];
+  frontierId?: string;
+  plan?: HarnessEvolutionPlan;
+  nextAction: string;
+}
+
+export interface HarnessTriggerScan {
+  schema: typeof HARNESS_EVOLUTION_SCHEMA;
+  scanId: string;
+  createdAt: string;
+  rules: HarnessTriggerRule[];
+  events: HarnessTriggerEvent[];
+  artifactRefs: string[];
+}
+
+export interface HarnessRolePolicy {
+  requireIndependentReviewer: boolean;
+  requireIndependentVerifier: boolean;
+  builderProvider?: string;
+  reviewerProvider?: string;
+  verifierProvider?: string;
+}
+
+export interface HarnessRoleEvidence {
+  builderProvider?: string;
+  reviewerProvider?: string;
+  verifierProvider?: string;
+  independentReviewer: boolean;
+  independentVerifier: boolean;
+  passed: boolean;
+  reasons: string[];
+}
+
+export type HarnessConnectorKind = "local_jsonl" | "markdown";
+
+export interface HarnessConnectorTarget {
+  kind: HarnessConnectorKind;
+  path?: string;
+}
+
+export interface HarnessConnectorWriteback {
+  schema: typeof HARNESS_EVOLUTION_SCHEMA;
+  writebackId: string;
+  runId: string;
+  kind: HarnessConnectorKind;
+  writtenAt: string;
+  path: string;
+  status: "written";
 }
 
 export interface HarnessDecisionRecord {
@@ -378,6 +461,14 @@ function runsDir(): string {
   return join(evolutionDir(), "runs");
 }
 
+function triggersDir(): string {
+  return join(evolutionDir(), "triggers");
+}
+
+function connectorsDir(): string {
+  return join(evolutionDir(), "connectors");
+}
+
 function candidateDir(candidateId: string): string {
   return join(candidatesDir(), safePathSegment(candidateId));
 }
@@ -416,6 +507,19 @@ function runPlanPath(runId: string): string {
 
 function runReportPath(runId: string): string {
   return join(runDir(runId), "report.json");
+}
+
+function triggerEventPath(eventId: string): string {
+  return join(triggersDir(), "events", `${safePathSegment(eventId)}.json`);
+}
+
+function triggerScanPath(scanId: string): string {
+  return join(triggersDir(), "scans", `${safePathSegment(scanId)}.json`);
+}
+
+function connectorDefaultPath(runId: string, kind: HarnessConnectorKind): string {
+  const extension = kind === "markdown" ? "md" : "jsonl";
+  return join(connectorsDir(), `${safePathSegment(runId)}.${extension}`);
 }
 
 function gatePath(candidateId: string): string {
@@ -1391,6 +1495,29 @@ function acceptanceChecks(record: HarnessCandidateRecord): HarnessAcceptanceChec
   };
 }
 
+function evaluateHarnessRolePolicy(plan: HarnessEvolutionPlan): HarnessRoleEvidence {
+  const builderProvider = plan.rolePolicy?.builderProvider ?? plan.provider;
+  const reviewerProvider = plan.rolePolicy?.reviewerProvider;
+  const verifierProvider = plan.rolePolicy?.verifierProvider;
+  const requireIndependentReviewer = plan.rolePolicy?.requireIndependentReviewer ?? false;
+  const requireIndependentVerifier = plan.rolePolicy?.requireIndependentVerifier ?? false;
+  const independentReviewer = !requireIndependentReviewer || Boolean(reviewerProvider && reviewerProvider !== builderProvider);
+  const independentVerifier = !requireIndependentVerifier || Boolean(verifierProvider && verifierProvider !== builderProvider && verifierProvider !== reviewerProvider);
+  const reasons: string[] = [];
+  if (!independentReviewer) reasons.push("reviewerProvider must be present and different from builderProvider");
+  if (!independentVerifier) reasons.push("verifierProvider must be present and different from builderProvider/reviewerProvider");
+  if (!reasons.length) reasons.push("role policy passed");
+  return {
+    builderProvider,
+    reviewerProvider,
+    verifierProvider,
+    independentReviewer,
+    independentVerifier,
+    passed: independentReviewer && independentVerifier,
+    reasons,
+  };
+}
+
 export function decideHarnessCandidate(input: {
   candidateId: string;
   decision?: "accept" | "rollback";
@@ -1504,8 +1631,11 @@ function buildHarnessEvolutionReport(run: HarnessEvolutionRun): HarnessEvolution
     candidateId: run.plan.candidateId,
     datasetId: run.plan.datasetId,
     frontierId: run.plan.frontierId,
+    triggerEventId: run.plan.triggerEventId,
     gateAccepted: run.evaluation?.gate.accepted,
     auditPassed: run.audit?.passed,
+    rolePolicyPassed: run.roleEvidence?.passed,
+    connectorWritebacks: run.connectorWritebacks ?? [],
     decision: run.decision?.decision,
     exportedBundleDir: run.bundle?.bundleDir,
     missingCandidateTraceIds: run.missingCandidateTraceIds,
@@ -1519,6 +1649,148 @@ function persistHarnessEvolutionRun(run: HarnessEvolutionRun): HarnessEvolutionR
   atomicWriteJson(runPath(run.runId), run);
   atomicWriteJson(runReportPath(run.runId), buildHarnessEvolutionReport(run));
   return run;
+}
+
+function renderHarnessReportMarkdown(report: HarnessEvolutionReport): string {
+  return [
+    `# Harness Evolution Report: ${report.runId}`,
+    "",
+    `- Status: ${report.status}`,
+    `- Summary: ${report.summary}`,
+    `- Next action: ${report.nextAction}`,
+    `- Candidate: ${report.candidateId}`,
+    `- Dataset: ${report.datasetId}`,
+    `- Frontier: ${report.frontierId}`,
+    `- Gate accepted: ${report.gateAccepted ?? "unknown"}`,
+    `- Audit passed: ${report.auditPassed ?? "unknown"}`,
+    `- Role policy passed: ${report.rolePolicyPassed ?? "unknown"}`,
+    `- Decision: ${report.decision ?? "none"}`,
+    "",
+    "## Missing Candidate Trace Mappings",
+    report.missingCandidateTraceIds.length ? report.missingCandidateTraceIds.map((id) => `- ${id}`).join("\n") : "- none",
+    "",
+    "## Artifacts",
+    report.artifactRefs.map((ref) => `- ${ref}`).join("\n"),
+    "",
+  ].join("\n");
+}
+
+export function writeHarnessConnectorReport(input: {
+  runId: string;
+  targets?: HarnessConnectorTarget[];
+}): HarnessConnectorWriteback[] {
+  const run = loadHarnessEvolutionRun(input.runId);
+  if (!run) throw new Error(`Harness evolution run not found: ${input.runId}`);
+  const report = queryHarnessEvolutionReport(input.runId);
+  const targets = input.targets?.length ? input.targets : run.plan.connectors;
+  const writebacks: HarnessConnectorWriteback[] = [];
+  for (const target of targets) {
+    const path = resolve(target.path ?? connectorDefaultPath(input.runId, target.kind));
+    mkdirSync(dirname(path), { recursive: true });
+    if (target.kind === "markdown") {
+      atomicWriteJson(`${path}.meta.json`, { schema: HARNESS_EVOLUTION_SCHEMA, runId: input.runId, path });
+      // Keep the human-facing file plain Markdown while preserving atomic metadata separately.
+      const content = renderHarnessReportMarkdown(report);
+      const tmpPath = `${path}.${randomUUID().slice(0, 8)}.tmp`;
+      writeFileSync(tmpPath, content, "utf-8");
+      renameSync(tmpPath, path);
+    } else {
+      const row = JSON.stringify({ ...report, writtenAt: new Date().toISOString() });
+      const existing = existsSync(path) ? readFileSync(path, "utf-8") : "";
+      const tmpPath = `${path}.${randomUUID().slice(0, 8)}.tmp`;
+      writeFileSync(tmpPath, `${existing}${row}\n`, "utf-8");
+      renameSync(tmpPath, path);
+    }
+    writebacks.push({
+      schema: HARNESS_EVOLUTION_SCHEMA,
+      writebackId: `writeback-${randomUUID().slice(0, 8)}`,
+      runId: input.runId,
+      kind: target.kind,
+      writtenAt: new Date().toISOString(),
+      path,
+      status: "written",
+    });
+  }
+  const nextRun = { ...run, connectorWritebacks: writebacks } satisfies HarnessEvolutionRun;
+  persistHarnessEvolutionRun(nextRun);
+  return writebacks;
+}
+
+function triggerEventFromRule(rule: HarnessTriggerRule, traceIds: string[], candidateIds: string[]): HarnessTriggerEvent {
+  const eventId = `trigger-${rule.ruleId}-${randomUUID().slice(0, 8)}`;
+  const plan = rule.allowedAction === "report"
+    ? undefined
+    : createHarnessEvolutionPlan({
+        runId: `run-${eventId}`,
+        summary: rule.summary,
+        traceIds,
+        candidateId: candidateIds[0],
+        frontierId: rule.frontierId,
+        triggerEventId: eventId,
+        autoDecide: false,
+        exportOnAccept: rule.allowedAction === "export",
+      });
+  return {
+    schema: HARNESS_EVOLUTION_SCHEMA,
+    eventId,
+    ruleId: rule.ruleId,
+    kind: rule.kind,
+    createdAt: new Date().toISOString(),
+    allowedAction: rule.allowedAction,
+    summary: rule.summary,
+    traceIds,
+    candidateIds,
+    frontierId: rule.frontierId,
+    plan,
+    nextAction: plan ? "review pending harness evolution plan before running" : "inspect trigger report and decide whether to create a harness evolution run",
+  };
+}
+
+export function scanHarnessTriggers(input: {
+  rules: HarnessTriggerRule[];
+  scanId?: string;
+}): HarnessTriggerScan {
+  const events: HarnessTriggerEvent[] = [];
+  for (const rule of input.rules.filter((item) => item.enabled)) {
+    if (rule.kind === "trace_failure") {
+      const traces = (rule.traceIds?.length ? rule.traceIds.flatMap((id) => {
+        const trace = loadTraceById(id);
+        return trace ? [trace] : [];
+      }) : queryTraces({})).filter((trace) => trace.finalStatus === "failed" || trace.finalStatus === "max_rounds" || trace.finalStatus === "aborted");
+      const traceIds = traces.map((trace) => trace.id);
+      if (traceIds.length >= (rule.minFailureCount ?? 1)) events.push(triggerEventFromRule(rule, traceIds, []));
+    }
+    if (rule.kind === "audit_blocker") {
+      const blocked = listHarnessCandidates().filter((candidate) => candidate.audit?.passed === false);
+      const candidateIds = blocked.map((candidate) => candidate.candidateId);
+      if (candidateIds.length >= (rule.minBlockedAudits ?? 1)) {
+        const traceIds = [...new Set(blocked.flatMap((candidate) => candidate.manifest.evidenceTraceIds))];
+        events.push(triggerEventFromRule(rule, traceIds, candidateIds));
+      }
+    }
+    if (rule.kind === "frontier_stagnation") {
+      const frontier = readJsonFile<HarnessFrontier>(frontierPath(rule.frontierId ?? "default"));
+      const rejectedCandidateIds = frontier?.rejectedCandidateIds ?? [];
+      if (frontier && rejectedCandidateIds.length > 0 && !frontier.entries.some((entry) => entry.accepted)) {
+        events.push(triggerEventFromRule(rule, [], rejectedCandidateIds));
+      }
+    }
+  }
+  const scan: HarnessTriggerScan = {
+    schema: HARNESS_EVOLUTION_SCHEMA,
+    scanId: input.scanId?.trim() || `scan-${randomUUID().slice(0, 8)}`,
+    createdAt: new Date().toISOString(),
+    rules: input.rules,
+    events,
+    artifactRefs: [],
+  };
+  mkdirSync(join(triggersDir(), "events"), { recursive: true });
+  mkdirSync(join(triggersDir(), "scans"), { recursive: true });
+  for (const event of events) atomicWriteJson(triggerEventPath(event.eventId), event);
+  const refs = [triggerScanPath(scan.scanId), ...events.map((event) => triggerEventPath(event.eventId))];
+  const persisted = { ...scan, artifactRefs: refs };
+  atomicWriteJson(triggerScanPath(scan.scanId), persisted);
+  return persisted;
 }
 
 function createHarnessEvolutionPlan(input: {
@@ -1536,6 +1808,9 @@ function createHarnessEvolutionPlan(input: {
   possibleRegressions?: string[];
   leakageTerms?: string[];
   instructions?: string;
+  triggerEventId?: string;
+  rolePolicy?: HarnessRolePolicy;
+  connectors?: HarnessConnectorTarget[];
   autoDecide?: boolean;
   exportOnAccept?: boolean;
 }): HarnessEvolutionPlan {
@@ -1556,6 +1831,9 @@ function createHarnessEvolutionPlan(input: {
     possibleRegressions: input.possibleRegressions ?? [],
     leakageTerms: input.leakageTerms ?? [],
     instructions: input.instructions,
+    triggerEventId: input.triggerEventId,
+    rolePolicy: input.rolePolicy,
+    connectors: input.connectors ?? [],
     autoDecide: input.autoDecide ?? true,
     exportOnAccept: input.exportOnAccept ?? false,
   };
@@ -1576,6 +1854,9 @@ export async function runHarnessEvolution(input: {
   possibleRegressions?: string[];
   leakageTerms?: string[];
   instructions?: string;
+  triggerEventId?: string;
+  rolePolicy?: HarnessRolePolicy;
+  connectors?: HarnessConnectorTarget[];
   candidateTraceIdsByBaseline?: Record<string, string>;
   autoDecide?: boolean;
   exportOnAccept?: boolean;
@@ -1619,6 +1900,8 @@ export async function runHarnessEvolution(input: {
   let frontier: HarnessFrontier | undefined;
   let decision: HarnessDecisionRecord | undefined;
   let bundle: HarnessPromotionBundle | undefined;
+  const roleEvidence = evaluateHarnessRolePolicy(plan);
+  let connectorWritebacks: HarnessConnectorWriteback[] = [];
   let status: HarnessEvolutionRunStatus = "awaiting_candidate_traces";
   let nextAction = `provide candidateTraceIdsByBaseline for: ${missingCandidateTraceIds.join(", ")}`;
 
@@ -1631,7 +1914,10 @@ export async function runHarnessEvolution(input: {
     audit = auditHarnessCandidate({ candidateId: plan.candidateId, datasetId: plan.datasetId, leakageTerms: plan.leakageTerms });
     ranks = rankHarnessCandidates([plan.candidateId]);
     frontier = updateHarnessFrontier({ frontierId: plan.frontierId, candidateIds: [plan.candidateId] });
-    if (plan.autoDecide) {
+    if (!roleEvidence.passed) {
+      status = "blocked";
+      nextAction = `fix role policy before deciding: ${roleEvidence.reasons.join("; ")}`;
+    } else if (plan.autoDecide) {
       decision = decideHarnessCandidate({ candidateId: plan.candidateId });
       status = decision.decision === "accept" ? "accepted" : "rolled_back";
       nextAction = decision.decision === "accept" ? "review promotion bundle or export accepted candidate" : "inspect audit/gate findings and create a derived candidate";
@@ -1662,13 +1948,21 @@ export async function runHarnessEvolution(input: {
     audit,
     ranks,
     frontier,
+    triggerEvent: undefined,
+    roleEvidence,
+    connectorWritebacks,
     decision,
     bundle,
     missingCandidateTraceIds,
     artifactRefs: artifactRefsForRun(runId, plan, Boolean(bundle)),
     nextAction,
   };
-  return persistHarnessEvolutionRun(run);
+  const persisted = persistHarnessEvolutionRun(run);
+  if (plan.connectors.length) {
+    connectorWritebacks = writeHarnessConnectorReport({ runId, targets: plan.connectors });
+    return loadHarnessEvolutionRun(runId) ?? { ...persisted, connectorWritebacks };
+  }
+  return persisted;
 }
 
 export function queryHarnessEvolutionReport(runId: string): HarnessEvolutionReport {

@@ -24,8 +24,10 @@ import {
   queryHarnessEvolutionReport,
   rankHarnessCandidates,
   runHarnessEvolution,
+  scanHarnessTriggers,
   selectHarnessCoreset,
   updateHarnessFrontier,
+  writeHarnessConnectorReport,
 } from "../../src/orchestration/harness-evolution.ts";
 
 function trace(id: string, overrides: Partial<PipelineTrace> = {}): PipelineTrace {
@@ -759,6 +761,150 @@ test("harness evolution run stops with next action when candidate trace map is m
     assert.equal(run.evaluation, undefined);
     assert.equal(report.status, "awaiting_candidate_traces");
     assert.deepEqual(report.missingCandidateTraceIds, ["await-base-in", "await-base-out"]);
+  } finally {
+    if (oldHome === undefined) delete process.env.RUNOFF_HOME;
+    else process.env.RUNOFF_HOME = oldHome;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("harness trigger scan emits report-only and proposed pending plans from durable state", () => {
+  const dir = mkdtempSync(join(tmpdir(), "runoff-harness-trigger-"));
+  const oldHome = process.env.RUNOFF_HOME;
+  try {
+    process.env.RUNOFF_HOME = join(dir, "home");
+    recordTrace(trace("trigger-failed", {
+      finalStatus: "failed",
+      steps: [{ name: "implement", provider: "mock", durationMs: 10, round: 1, error: "verify failed" }],
+    }));
+
+    const scan = scanHarnessTriggers({
+      scanId: "scan-main",
+      rules: [
+        {
+          ruleId: "failed-report",
+          kind: "trace_failure",
+          enabled: true,
+          summary: "Report failed traces",
+          allowedAction: "report",
+          traceIds: ["trigger-failed"],
+          minFailureCount: 1,
+        },
+        {
+          ruleId: "failed-propose",
+          kind: "trace_failure",
+          enabled: true,
+          summary: "Propose from failed traces",
+          allowedAction: "propose",
+          traceIds: ["trigger-failed"],
+          minFailureCount: 1,
+        },
+      ],
+    });
+
+    assert.equal(scan.events.length, 2);
+    assert.equal(scan.events[0]?.plan, undefined);
+    assert.equal(scan.events[1]?.plan?.triggerEventId, scan.events[1]?.eventId);
+    assert.deepEqual(scan.events[1]?.traceIds, ["trigger-failed"]);
+    assert.equal(existsSync(join(process.env.RUNOFF_HOME, "harness-evolution", "triggers", "scans", "scan-main.json")), true);
+  } finally {
+    if (oldHome === undefined) delete process.env.RUNOFF_HOME;
+    else process.env.RUNOFF_HOME = oldHome;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("harness evolution run blocks acceptance when role policy lacks independent checker", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "runoff-harness-role-policy-"));
+  const oldHome = process.env.RUNOFF_HOME;
+  try {
+    process.env.RUNOFF_HOME = join(dir, "home");
+    recordTrace(trace("role-base-in", { finalStatus: "failed", timestamp: "2026-06-20T00:00:01.000Z" }));
+    recordTrace(trace("role-base-out", { totalDurationMs: 2000, timestamp: "2026-06-20T00:00:02.000Z" }));
+    recordTrace(trace("role-cand-in", { finalStatus: "approved", timestamp: "2026-06-20T00:00:03.000Z" }));
+    recordTrace(trace("role-cand-out", { totalDurationMs: 1000, timestamp: "2026-06-20T00:00:04.000Z" }));
+    const provider = new ProposalProvider("builder", {
+      summary: "Role policy candidate",
+      changes: "diff --git a/skill/SKILL.md b/skill/SKILL.md\n",
+      filesModified: ["skill/SKILL.md"],
+      diffStat: "1 file changed",
+    }, (req) => {
+      mkdirSync(join(req.workDir!, "skill"), { recursive: true });
+      writeFileSync(join(req.workDir!, "skill", "SKILL.md"), "updated", "utf-8");
+    });
+
+    const run = await runHarnessEvolution({
+      runId: "run-role-blocked",
+      provider,
+      summary: "Role policy blocked",
+      candidateId: "candidate-role-blocked",
+      datasetId: "dataset-role-blocked",
+      traceIds: ["role-base-in", "role-base-out"],
+      editableSurface: ["skill/"],
+      candidateTraceIdsByBaseline: {
+        "role-base-in": "role-cand-in",
+        "role-base-out": "role-cand-out",
+      },
+      rolePolicy: {
+        requireIndependentReviewer: true,
+        requireIndependentVerifier: true,
+        builderProvider: "builder",
+        reviewerProvider: "builder",
+      },
+    });
+
+    assert.equal(run.status, "blocked");
+    assert.equal(run.roleEvidence?.passed, false);
+    assert.match(run.nextAction, /fix role policy/);
+    assert.equal(loadHarnessCandidate("candidate-role-blocked")?.status, "proposed");
+    assert.equal(queryHarnessEvolutionReport("run-role-blocked").rolePolicyPassed, false);
+  } finally {
+    if (oldHome === undefined) delete process.env.RUNOFF_HOME;
+    else process.env.RUNOFF_HOME = oldHome;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("harness connector writeback emits markdown and jsonl reports", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "runoff-harness-writeback-"));
+  const oldHome = process.env.RUNOFF_HOME;
+  try {
+    process.env.RUNOFF_HOME = join(dir, "home");
+    recordTrace(trace("write-base-in", { finalStatus: "failed", timestamp: "2026-06-20T00:00:01.000Z" }));
+    recordTrace(trace("write-base-out", { totalDurationMs: 2000, timestamp: "2026-06-20T00:00:02.000Z" }));
+    const provider = new ProposalProvider("builder", {
+      summary: "Writeback candidate",
+      changes: "diff --git a/skill/SKILL.md b/skill/SKILL.md\n",
+      filesModified: ["skill/SKILL.md"],
+      diffStat: "1 file changed",
+    }, (req) => {
+      mkdirSync(join(req.workDir!, "skill"), { recursive: true });
+      writeFileSync(join(req.workDir!, "skill", "SKILL.md"), "updated", "utf-8");
+    });
+    await runHarnessEvolution({
+      runId: "run-writeback",
+      provider,
+      summary: "Writeback run",
+      candidateId: "candidate-writeback",
+      datasetId: "dataset-writeback",
+      traceIds: ["write-base-in", "write-base-out"],
+      editableSurface: ["skill/"],
+    });
+
+    const markdownPath = join(dir, "report.md");
+    const jsonlPath = join(dir, "report.jsonl");
+    const writebacks = writeHarnessConnectorReport({
+      runId: "run-writeback",
+      targets: [
+        { kind: "markdown", path: markdownPath },
+        { kind: "local_jsonl", path: jsonlPath },
+      ],
+    });
+
+    assert.equal(writebacks.length, 2);
+    assert.match(readFileSync(markdownPath, "utf-8"), /Harness Evolution Report: run-writeback/);
+    assert.match(readFileSync(jsonlPath, "utf-8"), /"runId":"run-writeback"/);
+    assert.equal(loadHarnessEvolutionRun("run-writeback")?.connectorWritebacks?.length, 2);
   } finally {
     if (oldHome === undefined) delete process.env.RUNOFF_HOME;
     else process.env.RUNOFF_HOME = oldHome;

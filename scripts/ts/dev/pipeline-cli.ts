@@ -4,7 +4,7 @@
  *
  *   pipeline run | init | doctor | config edit | config validate | mcp
  *   pipeline runs list|show
- *   pipeline harness coreset|mine|dataset|create|propose|run|report|runs|evaluate|evaluate-dataset|audit|rank|frontier|decide|export|list
+ *   pipeline harness coreset|mine|dataset|create|propose|run|report|runs|trigger-scan|writeback|evaluate|evaluate-dataset|audit|rank|frontier|decide|export|list
  *   pipeline traces list|show|tail | observability ui
  */
 
@@ -45,6 +45,8 @@ import {
   harnessEvolveReport,
   harnessEvolveRun,
   harnessEvolveRuns,
+  harnessEvolveTriggerScan,
+  harnessEvolveWriteback,
 } from "../../../src/pipeline/harness-evolve-cli.js";
 import { runsList, runsShow } from "../../../src/pipeline/run-control-cli.js";
 import { tracesList, tracesShow, tracesTail } from "../../../src/pipeline/trace-cli.js";
@@ -77,6 +79,8 @@ Usage:
   pipeline harness run --summary <text> [--run-id <id>] [--candidate-id <id>] [--dataset-id <id>] [--frontier-id <id>] [--trace-ids-json <json>] [--candidate-trace-map-json <json>] [--export-on-accept] [--json]
   pipeline harness report <runId> [--json]
   pipeline harness runs [--limit <n>] [--json]
+  pipeline harness trigger-scan --rules-json <json> [--scan-id <id>] [--json]
+  pipeline harness writeback <runId> [--connectors-json <json>] [--json]
   pipeline harness evaluate <candidateId> --pairs-json <json> [--json]
   pipeline harness evaluate-dataset <candidateId> --dataset-id <id> --candidate-trace-map-json <json> [--json]
   pipeline harness audit <candidateId> [--dataset-id <id>] [--leakage-terms-json <json>] [--json]
@@ -113,6 +117,7 @@ type CliArgs = {
   noOpen?: boolean;
   traceId?: string;
   runId?: string;
+  scanId?: string;
   sessionId?: string;
   winner?: number;
   reason?: string;
@@ -131,6 +136,9 @@ type CliArgs = {
   datasetIdsJson?: string;
   leakageTermsJson?: string;
   candidateTraceMapJson?: string;
+  rolePolicyJson?: string;
+  connectorsJson?: string;
+  rulesJson?: string;
   pairsJson?: string;
   candidateIdsJson?: string;
   traceIdsJson?: string;
@@ -170,7 +178,7 @@ function parseArgs(argv: string[]): CliArgs {
     out.traceId = argv[2];
     positionalConsumed = 1;
   }
-  if (out.command === "harness" && out.sub === "report" && argv[2] && !argv[2].startsWith("-")) {
+  if (out.command === "harness" && (out.sub === "report" || out.sub === "writeback") && argv[2] && !argv[2].startsWith("-")) {
     out.runId = argv[2];
     positionalConsumed = 1;
   }
@@ -200,6 +208,7 @@ function parseArgs(argv: string[]): CliArgs {
     else if (a === "--no-open") out.noOpen = true;
     else if (a === "--trace-id") out.traceId = next();
     else if (a === "--run-id") out.runId = next();
+    else if (a === "--scan-id") out.scanId = next();
     else if (a === "--candidate-id") out.traceId = next();
     else if (a === "--dataset-id") out.datasetId = next();
     else if (a === "--frontier-id") out.frontierId = next();
@@ -215,6 +224,9 @@ function parseArgs(argv: string[]): CliArgs {
     else if (a === "--dataset-ids-json") out.datasetIdsJson = next();
     else if (a === "--leakage-terms-json") out.leakageTermsJson = next();
     else if (a === "--candidate-trace-map-json") out.candidateTraceMapJson = next();
+    else if (a === "--role-policy-json") out.rolePolicyJson = next();
+    else if (a === "--connectors-json") out.connectorsJson = next();
+    else if (a === "--rules-json") out.rulesJson = next();
     else if (a === "--summary") out.summary = next();
     else if (a === "--pairs-json") out.pairsJson = next();
     else if (a === "--candidate-ids-json") out.candidateIdsJson = next();
@@ -393,6 +405,13 @@ function parseJsonArray<T>(raw: string | undefined, name: string): T[] {
   return parsed as T[];
 }
 
+function parseJsonObject<T>(raw: string | undefined, name: string): T | undefined {
+  if (!raw?.trim()) return undefined;
+  const parsed = JSON.parse(raw) as unknown;
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error(`${name} must be a JSON object`);
+  return parsed as T;
+}
+
 async function cmdHarness(args: CliArgs): Promise<void> {
   if (args.home) process.env.RUNOFF_HOME = resolve(args.home);
   if (args.sub === "coreset") {
@@ -482,6 +501,8 @@ async function cmdHarness(args: CliArgs): Promise<void> {
       failureSignatureIds: parseJsonArray(args.failureSignatureIdsJson, "--failure-signature-ids-json"),
       leakageTerms: parseJsonArray(args.leakageTermsJson, "--leakage-terms-json"),
       candidateTraceMap,
+      rolePolicy: parseJsonObject(args.rolePolicyJson, "--role-policy-json"),
+      connectors: parseJsonArray(args.connectorsJson, "--connectors-json"),
       exportOnAccept: args.exportOnAccept,
       json: args.json,
     });
@@ -494,6 +515,23 @@ async function cmdHarness(args: CliArgs): Promise<void> {
   }
   if (args.sub === "runs") {
     harnessEvolveRuns({ limit: args.limit, json: args.json });
+    return;
+  }
+  if (args.sub === "trigger-scan") {
+    harnessEvolveTriggerScan({
+      scanId: args.scanId,
+      rules: parseJsonArray(args.rulesJson, "--rules-json"),
+      json: args.json,
+    });
+    return;
+  }
+  if (args.sub === "writeback") {
+    if (!args.runId) throw new Error("run id required: pipeline harness writeback <runId>");
+    harnessEvolveWriteback({
+      runId: args.runId,
+      targets: parseJsonArray(args.connectorsJson, "--connectors-json"),
+      json: args.json,
+    });
     return;
   }
   if (args.sub === "evaluate") {
@@ -564,7 +602,7 @@ async function cmdHarness(args: CliArgs): Promise<void> {
     harnessEvolveList({ limit: args.limit, json: args.json });
     return;
   }
-  throw new Error("Usage: pipeline harness coreset|mine|dataset|create|propose|run|report|runs|evaluate|evaluate-dataset|audit|rank|frontier|decide|export|list");
+  throw new Error("Usage: pipeline harness coreset|mine|dataset|create|propose|run|report|runs|trigger-scan|writeback|evaluate|evaluate-dataset|audit|rank|frontier|decide|export|list");
 }
 
 async function cmdObservabilityUi(args: CliArgs): Promise<void> {

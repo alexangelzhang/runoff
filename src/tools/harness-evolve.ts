@@ -20,13 +20,18 @@ import {
   queryHarnessEvolutionReport,
   rankHarnessCandidates,
   runHarnessEvolution,
+  scanHarnessTriggers,
   selectHarnessCoreset,
   updateHarnessFrontier,
+  writeHarnessConnectorReport,
+  type HarnessConnectorTarget,
   type HarnessEvalPair,
+  type HarnessRolePolicy,
+  type HarnessTriggerRule,
 } from "../orchestration/harness-evolution.js";
 import { mcpError, mcpErrorFrom, mcpJson } from "./mcp-response.js";
 
-const ACTIONS = ["coreset", "mine", "dataset", "create", "propose", "run", "report", "runs", "evaluate", "evaluate_dataset", "audit", "rank", "frontier", "decide", "export", "list"] as const;
+const ACTIONS = ["coreset", "mine", "dataset", "create", "propose", "run", "report", "runs", "trigger_scan", "writeback", "evaluate", "evaluate_dataset", "audit", "rank", "frontier", "decide", "export", "list"] as const;
 
 function parseJsonArray<T>(raw: string | undefined, name: string): T[] {
   if (!raw?.trim()) return [];
@@ -40,8 +45,9 @@ export function register(server: McpServer) {
     "runoff_harness_evolve",
     "Manage local harness evolution: coreset selection, change manifests, isolated variants, dataset runs, regression gates, leakage audits, frontier state, and accept/rollback records.",
     {
-      action: z.enum(ACTIONS).describe("coreset | mine | dataset | create | propose | run | report | runs | evaluate | evaluate_dataset | audit | rank | frontier | decide | export | list"),
+      action: z.enum(ACTIONS).describe("coreset | mine | dataset | create | propose | run | report | runs | trigger_scan | writeback | evaluate | evaluate_dataset | audit | rank | frontier | decide | export | list"),
       runId: z.string().optional().describe("Harness evolution run id"),
+      scanId: z.string().optional().describe("Harness trigger scan id"),
       candidateId: z.string().optional().describe("Harness candidate id"),
       datasetId: z.string().optional().describe("Harness dataset id"),
       frontierId: z.string().optional().describe("Harness frontier id"),
@@ -58,6 +64,9 @@ export function register(server: McpServer) {
       datasetIdsJson: z.string().optional().describe("JSON array of dataset ids"),
       leakageTermsJson: z.string().optional().describe("JSON array of leakage terms"),
       candidateTraceMapJson: z.string().optional().describe("JSON object mapping baseline trace id to candidate trace id"),
+      rolePolicyJson: z.string().optional().describe("JSON object with role policy for action=run"),
+      connectorsJson: z.string().optional().describe("JSON array of connector writeback targets"),
+      rulesJson: z.string().optional().describe("JSON array of trigger rules for action=trigger_scan"),
       evalPairsJson: z.string().optional().describe("JSON array of {baselineTraceId,candidateTraceId,split:'held-in'|'held-out'}"),
       candidateIdsJson: z.string().optional().describe("JSON array of candidate ids for ranking"),
       traceIdsJson: z.string().optional().describe("JSON array of trace ids for coreset selection"),
@@ -176,6 +185,8 @@ export function register(server: McpServer) {
                 leakageTerms: parseJsonArray<string>(args.leakageTermsJson, "leakageTermsJson"),
                 instructions: args.instructions,
                 candidateTraceIdsByBaseline: candidateTraceMap,
+                rolePolicy: args.rolePolicyJson ? JSON.parse(args.rolePolicyJson) as HarnessRolePolicy : undefined,
+                connectors: parseJsonArray<HarnessConnectorTarget>(args.connectorsJson, "connectorsJson"),
                 exportOnAccept: args.exportOnAccept,
               }),
             });
@@ -186,6 +197,24 @@ export function register(server: McpServer) {
           }
           case "runs":
             return mcpJson({ action: args.action, runs: listHarnessEvolutionRuns().slice(0, args.limit ?? 20) });
+          case "trigger_scan":
+            return mcpJson({
+              action: args.action,
+              scan: scanHarnessTriggers({
+                scanId: args.scanId,
+                rules: parseJsonArray<HarnessTriggerRule>(args.rulesJson, "rulesJson"),
+              }),
+            });
+          case "writeback": {
+            if (!args.runId?.trim()) return mcpError("Harness evolve error", "runId is required for action=writeback");
+            return mcpJson({
+              action: args.action,
+              writebacks: writeHarnessConnectorReport({
+                runId: args.runId,
+                targets: parseJsonArray<HarnessConnectorTarget>(args.connectorsJson, "connectorsJson"),
+              }),
+            });
+          }
           case "evaluate": {
             if (!args.candidateId?.trim()) return mcpError("Harness evolve error", "candidateId is required for action=evaluate");
             const pairs = parseJsonArray<HarnessEvalPair>(args.evalPairsJson, "evalPairsJson");

@@ -21,9 +21,14 @@ import {
   queryHarnessEvolutionReport,
   rankHarnessCandidates,
   runHarnessEvolution,
+  scanHarnessTriggers,
   selectHarnessCoreset,
   updateHarnessFrontier,
+  writeHarnessConnectorReport,
+  type HarnessConnectorTarget,
   type HarnessEvalPair,
+  type HarnessRolePolicy,
+  type HarnessTriggerRule,
 } from "../orchestration/harness-evolution.js";
 
 export type HarnessEvolveListOptions = {
@@ -118,6 +123,8 @@ export type HarnessEvolveRunOptions = {
   leakageTerms?: string[];
   instructions?: string;
   candidateTraceMap?: Record<string, string>;
+  rolePolicy?: HarnessRolePolicy;
+  connectors?: HarnessConnectorTarget[];
   exportOnAccept?: boolean;
   json?: boolean;
 };
@@ -129,6 +136,18 @@ export type HarnessEvolveReportOptions = {
 
 export type HarnessEvolveRunsOptions = {
   limit?: number;
+  json?: boolean;
+};
+
+export type HarnessEvolveTriggerScanOptions = {
+  rules: HarnessTriggerRule[];
+  scanId?: string;
+  json?: boolean;
+};
+
+export type HarnessEvolveWritebackOptions = {
+  runId: string;
+  targets?: HarnessConnectorTarget[];
   json?: boolean;
 };
 
@@ -324,6 +343,8 @@ export async function harnessEvolveRun(opts: HarnessEvolveRunOptions): Promise<v
     leakageTerms: opts.leakageTerms,
     instructions: opts.instructions,
     candidateTraceIdsByBaseline: opts.candidateTraceMap,
+    rolePolicy: opts.rolePolicy,
+    connectors: opts.connectors,
     exportOnAccept: opts.exportOnAccept,
   });
   if (opts.json) {
@@ -361,6 +382,25 @@ export function harnessEvolveRuns(opts: HarnessEvolveRunsOptions = {}): void {
   for (const run of runs) {
     console.log(`${run.startedAt}  ${run.runId}  ${run.status}  candidate=${run.plan.candidateId}  ${run.plan.summary}`);
   }
+}
+
+export function harnessEvolveTriggerScan(opts: HarnessEvolveTriggerScanOptions): void {
+  const scan = scanHarnessTriggers({ rules: opts.rules, scanId: opts.scanId });
+  if (opts.json) {
+    console.log(JSON.stringify({ scan }, null, 2));
+    return;
+  }
+  console.log(`TRIGGER_SCAN ${scan.scanId} events=${scan.events.length}`);
+  for (const event of scan.events) console.log(`  ${event.eventId} kind=${event.kind} action=${event.allowedAction}`);
+}
+
+export function harnessEvolveWriteback(opts: HarnessEvolveWritebackOptions): void {
+  const writebacks = writeHarnessConnectorReport({ runId: opts.runId, targets: opts.targets });
+  if (opts.json) {
+    console.log(JSON.stringify({ writebacks, count: writebacks.length }, null, 2));
+    return;
+  }
+  for (const writeback of writebacks) console.log(`WRITEBACK ${writeback.kind} ${writeback.path}`);
 }
 
 export function harnessEvolveEvaluate(opts: HarnessEvolveEvaluateOptions): void {
