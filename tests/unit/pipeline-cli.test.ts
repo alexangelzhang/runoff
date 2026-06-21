@@ -1,6 +1,13 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -16,12 +23,18 @@ import {
   evaluateHarnessCandidate,
   loadHarnessCandidate,
 } from "../../src/orchestration/harness-evolution.ts";
-import { recordTrace, type PipelineTrace } from "../../src/observability/trace.ts";
+import {
+  recordTrace,
+  type PipelineTrace,
+} from "../../src/observability/trace.ts";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "../..");
 const CLI = join(ROOT, "scripts", "ts", "dev", "pipeline-cli.ts");
 
-function trace(id: string, overrides: Partial<PipelineTrace> = {}): PipelineTrace {
+function trace(
+  id: string,
+  overrides: Partial<PipelineTrace> = {},
+): PipelineTrace {
   return {
     id,
     prompt: `cli harness ${id}`,
@@ -39,7 +52,10 @@ function trace(id: string, overrides: Partial<PipelineTrace> = {}): PipelineTrac
 
 test("pipeline-cli --help exits 0", async () => {
   const code = await new Promise<number>((resolve, reject) => {
-    const c = spawn("npx", ["tsx", CLI, "--help"], { cwd: ROOT, stdio: "ignore" });
+    const c = spawn("npx", ["tsx", CLI, "--help"], {
+      cwd: ROOT,
+      stdio: "ignore",
+    });
     c.on("error", reject);
     c.on("close", (x) => resolve(x ?? 1));
   });
@@ -52,7 +68,9 @@ test("pipeline-cli run requires --work-dir", async () => {
     stdio: ["ignore", "pipe", "pipe"],
   });
   let stderr = "";
-  child.stderr?.on("data", (d) => { stderr += d.toString(); });
+  child.stderr?.on("data", (d) => {
+    stderr += d.toString();
+  });
   const code = await new Promise<number>((resolve, reject) => {
     child.on("error", reject);
     child.on("close", (x) => resolve(x ?? 1));
@@ -91,21 +109,42 @@ test("pipeline-cli runs list emits JSON control-plane state", async () => {
       else delete process.env.RUNOFF_HOME;
     }
 
-    const child = spawn("npx", ["tsx", CLI, "runs", "list", "--config", configPath, "--home", home, "--json"], {
-      cwd: ROOT,
-      stdio: ["ignore", "pipe", "pipe"],
-    });
+    const child = spawn(
+      "npx",
+      [
+        "tsx",
+        CLI,
+        "runs",
+        "list",
+        "--config",
+        configPath,
+        "--home",
+        home,
+        "--json",
+      ],
+      {
+        cwd: ROOT,
+        stdio: ["ignore", "pipe", "pipe"],
+      },
+    );
     let stdout = "";
     let stderr = "";
-    child.stdout?.on("data", (d) => { stdout += d.toString(); });
-    child.stderr?.on("data", (d) => { stderr += d.toString(); });
+    child.stdout?.on("data", (d) => {
+      stdout += d.toString();
+    });
+    child.stderr?.on("data", (d) => {
+      stderr += d.toString();
+    });
     const code = await new Promise<number>((resolve, reject) => {
       child.on("error", reject);
       child.on("close", (x) => resolve(x ?? 1));
     });
 
     assert.equal(code, 0, stderr);
-    const body = JSON.parse(stdout) as { count: number; runs: Array<{ runId: string; nextAction: string }> };
+    const body = JSON.parse(stdout) as {
+      count: number;
+      runs: Array<{ runId: string; nextAction: string }>;
+    };
     assert.equal(body.count, 1);
     assert.equal(body.runs[0]?.runId, "trace-cli");
     assert.equal(body.runs[0]?.nextAction, "wait");
@@ -140,14 +179,32 @@ test("pipeline-cli runs show accepts positional run id", async () => {
       else delete process.env.RUNOFF_HOME;
     }
 
-    const child = spawn("npx", ["tsx", CLI, "runs", "show", "trace-cli-show", "--config", configPath, "--home", home], {
-      cwd: ROOT,
-      stdio: ["ignore", "pipe", "pipe"],
-    });
+    const child = spawn(
+      "npx",
+      [
+        "tsx",
+        CLI,
+        "runs",
+        "show",
+        "trace-cli-show",
+        "--config",
+        configPath,
+        "--home",
+        home,
+      ],
+      {
+        cwd: ROOT,
+        stdio: ["ignore", "pipe", "pipe"],
+      },
+    );
     let stdout = "";
     let stderr = "";
-    child.stdout?.on("data", (d) => { stdout += d.toString(); });
-    child.stderr?.on("data", (d) => { stderr += d.toString(); });
+    child.stdout?.on("data", (d) => {
+      stdout += d.toString();
+    });
+    child.stderr?.on("data", (d) => {
+      stderr += d.toString();
+    });
     const code = await new Promise<number>((resolve, reject) => {
       child.on("error", reject);
       child.on("close", (x) => resolve(x ?? 1));
@@ -165,47 +222,69 @@ test("pipeline-cli harness create and list use isolated evolution home", async (
   const dir = mkdtempSync(join(tmpdir(), "pipeline-cli-harness-"));
   try {
     const home = join(dir, "home");
-    const create = spawn("npx", [
-      "tsx",
-      CLI,
-      "harness",
-      "create",
-      "--candidate-id",
-      "cli-candidate",
-      "--summary",
-      "try recovery manifest",
-      "--home",
-      home,
-      "--json",
-    ], {
-      cwd: ROOT,
-      stdio: ["ignore", "pipe", "pipe"],
-    });
+    const create = spawn(
+      "npx",
+      [
+        "tsx",
+        CLI,
+        "harness",
+        "create",
+        "--candidate-id",
+        "cli-candidate",
+        "--summary",
+        "try recovery manifest",
+        "--home",
+        home,
+        "--json",
+      ],
+      {
+        cwd: ROOT,
+        stdio: ["ignore", "pipe", "pipe"],
+      },
+    );
     let createStdout = "";
     let createStderr = "";
-    create.stdout?.on("data", (d) => { createStdout += d.toString(); });
-    create.stderr?.on("data", (d) => { createStderr += d.toString(); });
+    create.stdout?.on("data", (d) => {
+      createStdout += d.toString();
+    });
+    create.stderr?.on("data", (d) => {
+      createStderr += d.toString();
+    });
     const createCode = await new Promise<number>((resolve, reject) => {
       create.on("error", reject);
       create.on("close", (x) => resolve(x ?? 1));
     });
     assert.equal(createCode, 0, createStderr);
-    assert.equal(JSON.parse(createStdout).candidate.candidateId, "cli-candidate");
+    assert.equal(
+      JSON.parse(createStdout).candidate.candidateId,
+      "cli-candidate",
+    );
 
-    const list = spawn("npx", ["tsx", CLI, "harness", "list", "--home", home, "--json"], {
-      cwd: ROOT,
-      stdio: ["ignore", "pipe", "pipe"],
-    });
+    const list = spawn(
+      "npx",
+      ["tsx", CLI, "harness", "list", "--home", home, "--json"],
+      {
+        cwd: ROOT,
+        stdio: ["ignore", "pipe", "pipe"],
+      },
+    );
     let listStdout = "";
     let listStderr = "";
-    list.stdout?.on("data", (d) => { listStdout += d.toString(); });
-    list.stderr?.on("data", (d) => { listStderr += d.toString(); });
+    list.stdout?.on("data", (d) => {
+      listStdout += d.toString();
+    });
+    list.stderr?.on("data", (d) => {
+      listStderr += d.toString();
+    });
     const listCode = await new Promise<number>((resolve, reject) => {
       list.on("error", reject);
       list.on("close", (x) => resolve(x ?? 1));
     });
     assert.equal(listCode, 0, listStderr);
-    const body = JSON.parse(listStdout) as { count: number; candidates: Array<{ candidateId: string }> };
+    const body = JSON.parse(listStdout) as {
+      count: number;
+      candidates: Array<{ candidateId: string }>;
+    };
     assert.equal(body.count, 1);
     assert.equal(body.candidates[0]?.candidateId, "cli-candidate");
   } finally {
@@ -220,31 +299,62 @@ test("pipeline-cli harness mine emits failure signatures", async () => {
     const oldHome = process.env.RUNOFF_HOME;
     process.env.RUNOFF_HOME = home;
     try {
-      recordTrace(trace("cli-mine", {
-        finalStatus: "failed",
-        steps: [{ name: "implement", provider: "mock", durationMs: 10, round: 1, error: "verify failed" }],
-        hasVerifyResults: false,
-      }));
+      recordTrace(
+        trace("cli-mine", {
+          finalStatus: "failed",
+          steps: [
+            {
+              name: "implement",
+              provider: "mock",
+              durationMs: 10,
+              round: 1,
+              error: "verify failed",
+            },
+          ],
+          hasVerifyResults: false,
+        }),
+      );
     } finally {
       if (oldHome !== undefined) process.env.RUNOFF_HOME = oldHome;
       else delete process.env.RUNOFF_HOME;
     }
 
-    const child = spawn("npx", ["tsx", CLI, "harness", "mine", "--trace-ids-json", "[\"cli-mine\"]", "--home", home, "--json"], {
-      cwd: ROOT,
-      stdio: ["ignore", "pipe", "pipe"],
-    });
+    const child = spawn(
+      "npx",
+      [
+        "tsx",
+        CLI,
+        "harness",
+        "mine",
+        "--trace-ids-json",
+        '["cli-mine"]',
+        "--home",
+        home,
+        "--json",
+      ],
+      {
+        cwd: ROOT,
+        stdio: ["ignore", "pipe", "pipe"],
+      },
+    );
     let stdout = "";
     let stderr = "";
-    child.stdout?.on("data", (d) => { stdout += d.toString(); });
-    child.stderr?.on("data", (d) => { stderr += d.toString(); });
+    child.stdout?.on("data", (d) => {
+      stdout += d.toString();
+    });
+    child.stderr?.on("data", (d) => {
+      stderr += d.toString();
+    });
     const code = await new Promise<number>((resolve, reject) => {
       child.on("error", reject);
       child.on("close", (x) => resolve(x ?? 1));
     });
 
     assert.equal(code, 0, stderr);
-    const body = JSON.parse(stdout) as { count: number; signatures: Array<{ category: string; evidenceTraceIds: string[] }> };
+    const body = JSON.parse(stdout) as {
+      count: number;
+      signatures: Array<{ category: string; evidenceTraceIds: string[] }>;
+    };
     assert.equal(body.count, 1);
     assert.equal(body.signatures[0]?.category, "step_error");
     assert.deepEqual(body.signatures[0]?.evidenceTraceIds, ["cli-mine"]);
@@ -260,65 +370,364 @@ test("pipeline-cli harness dataset creates persisted held-in and held-out split"
     const oldHome = process.env.RUNOFF_HOME;
     process.env.RUNOFF_HOME = home;
     try {
-      recordTrace(trace("cli-dataset-a", { finalStatus: "failed", timestamp: "2026-06-20T00:00:01.000Z" }));
-      recordTrace(trace("cli-dataset-b", { totalDurationMs: 2000, timestamp: "2026-06-20T00:00:02.000Z" }));
+      recordTrace(
+        trace("cli-dataset-a", {
+          finalStatus: "failed",
+          timestamp: "2026-06-20T00:00:01.000Z",
+        }),
+      );
+      recordTrace(
+        trace("cli-dataset-b", {
+          totalDurationMs: 2000,
+          timestamp: "2026-06-20T00:00:02.000Z",
+        }),
+      );
     } finally {
       if (oldHome !== undefined) process.env.RUNOFF_HOME = oldHome;
       else delete process.env.RUNOFF_HOME;
     }
 
-    const child = spawn("npx", [
-      "tsx",
-      CLI,
-      "harness",
-      "dataset",
-      "--dataset-id",
-      "cli-dataset",
-      "--summary",
-      "cli regression split",
-      "--trace-ids-json",
-      "[\"cli-dataset-a\",\"cli-dataset-b\"]",
-      "--held-in-ratio",
-      "0.5",
-      "--home",
-      home,
-      "--json",
-    ], {
-      cwd: ROOT,
-      stdio: ["ignore", "pipe", "pipe"],
-    });
+    const child = spawn(
+      "npx",
+      [
+        "tsx",
+        CLI,
+        "harness",
+        "dataset",
+        "--dataset-id",
+        "cli-dataset",
+        "--summary",
+        "cli regression split",
+        "--trace-ids-json",
+        '["cli-dataset-a","cli-dataset-b"]',
+        "--held-in-ratio",
+        "0.5",
+        "--home",
+        home,
+        "--json",
+      ],
+      {
+        cwd: ROOT,
+        stdio: ["ignore", "pipe", "pipe"],
+      },
+    );
     let stdout = "";
     let stderr = "";
-    child.stdout?.on("data", (d) => { stdout += d.toString(); });
-    child.stderr?.on("data", (d) => { stderr += d.toString(); });
+    child.stdout?.on("data", (d) => {
+      stdout += d.toString();
+    });
+    child.stderr?.on("data", (d) => {
+      stderr += d.toString();
+    });
     const code = await new Promise<number>((resolve, reject) => {
       child.on("error", reject);
       child.on("close", (x) => resolve(x ?? 1));
     });
 
     assert.equal(code, 0, stderr);
-    const body = JSON.parse(stdout) as { dataset: { datasetId: string; heldIn: unknown[]; heldOut: unknown[] } };
+    const body = JSON.parse(stdout) as {
+      dataset: { datasetId: string; heldIn: unknown[]; heldOut: unknown[] };
+    };
     assert.equal(body.dataset.datasetId, "cli-dataset");
     assert.equal(body.dataset.heldIn.length, 1);
     assert.equal(body.dataset.heldOut.length, 1);
-    assert.equal(existsSync(join(home, "harness-evolution", "datasets", "cli-dataset.json")), true);
+    assert.equal(
+      existsSync(
+        join(home, "harness-evolution", "datasets", "cli-dataset.json"),
+      ),
+      true,
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("pipeline-cli harness exposes taskset verifier skill-patch and rejected buffer", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "pipeline-cli-harness-eval-core-"));
+  try {
+    const home = join(dir, "home");
+    const oldHome = process.env.RUNOFF_HOME;
+    process.env.RUNOFF_HOME = home;
+    try {
+      recordTrace(
+        trace("cli-task-base", {
+          finalStatus: "failed",
+          timestamp: "2026-06-20T00:00:01.000Z",
+        }),
+      );
+      recordTrace(
+        trace("cli-task-cand", {
+          finalStatus: "approved",
+          timestamp: "2026-06-20T00:00:02.000Z",
+        }),
+      );
+      createHarnessCandidate({
+        candidateId: "cli-task-candidate",
+        summary: "CLI task candidate",
+        editableSurface: ["skill/"],
+      });
+    } finally {
+      if (oldHome !== undefined) process.env.RUNOFF_HOME = oldHome;
+      else delete process.env.RUNOFF_HOME;
+    }
+
+    const verifier = spawn(
+      "npx",
+      [
+        "tsx",
+        CLI,
+        "harness",
+        "verifier",
+        "--home",
+        home,
+        "--verifier-id",
+        "cli-trace-ok",
+        "--verifier-kind",
+        "trace_process",
+        "--summary",
+        "approved trace",
+        "--required-trace-statuses-json",
+        '["approved"]',
+        "--json",
+      ],
+      {
+        cwd: ROOT,
+        stdio: ["ignore", "pipe", "pipe"],
+      },
+    );
+    let verifierStdout = "";
+    let verifierStderr = "";
+    verifier.stdout?.on("data", (d) => {
+      verifierStdout += d.toString();
+    });
+    verifier.stderr?.on("data", (d) => {
+      verifierStderr += d.toString();
+    });
+    assert.equal(
+      await new Promise<number>((resolve, reject) => {
+        verifier.on("error", reject);
+        verifier.on("close", (x) => resolve(x ?? 1));
+      }),
+      0,
+      verifierStderr,
+    );
+    assert.equal(
+      JSON.parse(verifierStdout).verifier.verifierId,
+      "cli-trace-ok",
+    );
+
+    const tasksJson = JSON.stringify([
+      {
+        taskId: "task-cli-task-base",
+        prompt: "cli task",
+        toolsets: ["files"],
+        verifierId: "cli-trace-ok",
+        timeoutSec: 60,
+        forbiddenPaths: [],
+        expectedArtifacts: [],
+        criticality: "selection",
+        sourceTraceId: "cli-task-base",
+      },
+    ]);
+    const taskset = spawn(
+      "npx",
+      [
+        "tsx",
+        CLI,
+        "harness",
+        "taskset",
+        "--home",
+        home,
+        "--taskset-id",
+        "cli-taskset",
+        "--summary",
+        "CLI taskset",
+        "--tasks-json",
+        tasksJson,
+        "--json",
+      ],
+      {
+        cwd: ROOT,
+        stdio: ["ignore", "pipe", "pipe"],
+      },
+    );
+    let tasksetStdout = "";
+    let tasksetStderr = "";
+    taskset.stdout?.on("data", (d) => {
+      tasksetStdout += d.toString();
+    });
+    taskset.stderr?.on("data", (d) => {
+      tasksetStderr += d.toString();
+    });
+    assert.equal(
+      await new Promise<number>((resolve, reject) => {
+        taskset.on("error", reject);
+        taskset.on("close", (x) => resolve(x ?? 1));
+      }),
+      0,
+      tasksetStderr,
+    );
+    assert.equal(JSON.parse(tasksetStdout).taskSet.taskSetId, "cli-taskset");
+
+    const evaluate = spawn(
+      "npx",
+      [
+        "tsx",
+        CLI,
+        "harness",
+        "evaluate-taskset",
+        "cli-task-candidate",
+        "--home",
+        home,
+        "--taskset-id",
+        "cli-taskset",
+        "--candidate-trace-map-by-task-json",
+        '{"task-cli-task-base":"cli-task-cand"}',
+        "--json",
+      ],
+      {
+        cwd: ROOT,
+        stdio: ["ignore", "pipe", "pipe"],
+      },
+    );
+    let evaluateStdout = "";
+    let evaluateStderr = "";
+    evaluate.stdout?.on("data", (d) => {
+      evaluateStdout += d.toString();
+    });
+    evaluate.stderr?.on("data", (d) => {
+      evaluateStderr += d.toString();
+    });
+    assert.equal(
+      await new Promise<number>((resolve, reject) => {
+        evaluate.on("error", reject);
+        evaluate.on("close", (x) => resolve(x ?? 1));
+      }),
+      0,
+      evaluateStderr,
+    );
+    assert.equal(JSON.parse(evaluateStdout).evaluation.accepted, true);
+
+    const patch = spawn(
+      "npx",
+      [
+        "tsx",
+        CLI,
+        "harness",
+        "skill-patch",
+        "cli-task-candidate",
+        "--home",
+        home,
+        "--base-skill",
+        "skill@v1",
+        "--selection-delta",
+        "1",
+        "--regression-passed",
+        "--policy-passed",
+        "--audit-passed",
+        "--json",
+      ],
+      {
+        cwd: ROOT,
+        stdio: ["ignore", "pipe", "pipe"],
+      },
+    );
+    let patchStdout = "";
+    let patchStderr = "";
+    patch.stdout?.on("data", (d) => {
+      patchStdout += d.toString();
+    });
+    patch.stderr?.on("data", (d) => {
+      patchStderr += d.toString();
+    });
+    assert.equal(
+      await new Promise<number>((resolve, reject) => {
+        patch.on("error", reject);
+        patch.on("close", (x) => resolve(x ?? 1));
+      }),
+      0,
+      patchStderr,
+    );
+    assert.equal(JSON.parse(patchStdout).patch.accepted, true);
+
+    const rejected = spawn(
+      "npx",
+      [
+        "tsx",
+        CLI,
+        "harness",
+        "rejected",
+        "cli-task-candidate",
+        "--home",
+        home,
+        "--reason",
+        "manual negative example",
+        "--json",
+      ],
+      {
+        cwd: ROOT,
+        stdio: ["ignore", "pipe", "pipe"],
+      },
+    );
+    let rejectedStdout = "";
+    let rejectedStderr = "";
+    rejected.stdout?.on("data", (d) => {
+      rejectedStdout += d.toString();
+    });
+    rejected.stderr?.on("data", (d) => {
+      rejectedStderr += d.toString();
+    });
+    assert.equal(
+      await new Promise<number>((resolve, reject) => {
+        rejected.on("error", reject);
+        rejected.on("close", (x) => resolve(x ?? 1));
+      }),
+      0,
+      rejectedStderr,
+    );
+    assert.equal(JSON.parse(rejectedStdout).entry.optimizerOnly, true);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
 });
 
 test("pipeline-cli harness evaluate-dataset emits dataset evaluation gate", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "pipeline-cli-harness-evaluate-dataset-"));
+  const dir = mkdtempSync(
+    join(tmpdir(), "pipeline-cli-harness-evaluate-dataset-"),
+  );
   try {
     const home = join(dir, "home");
     const oldHome = process.env.RUNOFF_HOME;
     process.env.RUNOFF_HOME = home;
     try {
-      recordTrace(trace("cli-eval-base-a", { finalStatus: "failed", timestamp: "2026-06-20T00:00:01.000Z" }));
-      recordTrace(trace("cli-eval-base-b", { totalDurationMs: 2000, timestamp: "2026-06-20T00:00:02.000Z" }));
-      recordTrace(trace("cli-eval-cand-a", { finalStatus: "approved", timestamp: "2026-06-20T00:00:03.000Z" }));
-      recordTrace(trace("cli-eval-cand-b", { totalDurationMs: 1000, timestamp: "2026-06-20T00:00:04.000Z" }));
-      createHarnessCandidate({ candidateId: "cli-eval-candidate", summary: "dataset evaluation candidate" });
+      recordTrace(
+        trace("cli-eval-base-a", {
+          finalStatus: "failed",
+          timestamp: "2026-06-20T00:00:01.000Z",
+        }),
+      );
+      recordTrace(
+        trace("cli-eval-base-b", {
+          totalDurationMs: 2000,
+          timestamp: "2026-06-20T00:00:02.000Z",
+        }),
+      );
+      recordTrace(
+        trace("cli-eval-cand-a", {
+          finalStatus: "approved",
+          timestamp: "2026-06-20T00:00:03.000Z",
+        }),
+      );
+      recordTrace(
+        trace("cli-eval-cand-b", {
+          totalDurationMs: 1000,
+          timestamp: "2026-06-20T00:00:04.000Z",
+        }),
+      );
+      createHarnessCandidate({
+        candidateId: "cli-eval-candidate",
+        summary: "dataset evaluation candidate",
+      });
       createHarnessDataset({
         datasetId: "cli-eval-dataset",
         name: "cli dataset",
@@ -330,37 +739,59 @@ test("pipeline-cli harness evaluate-dataset emits dataset evaluation gate", asyn
       else delete process.env.RUNOFF_HOME;
     }
 
-    const child = spawn("npx", [
-      "tsx",
-      CLI,
-      "harness",
-      "evaluate-dataset",
-      "cli-eval-candidate",
-      "--dataset-id",
-      "cli-eval-dataset",
-      "--candidate-trace-map-json",
-      "{\"cli-eval-base-a\":\"cli-eval-cand-a\",\"cli-eval-base-b\":\"cli-eval-cand-b\"}",
-      "--home",
-      home,
-      "--json",
-    ], {
-      cwd: ROOT,
-      stdio: ["ignore", "pipe", "pipe"],
-    });
+    const child = spawn(
+      "npx",
+      [
+        "tsx",
+        CLI,
+        "harness",
+        "evaluate-dataset",
+        "cli-eval-candidate",
+        "--dataset-id",
+        "cli-eval-dataset",
+        "--candidate-trace-map-json",
+        '{"cli-eval-base-a":"cli-eval-cand-a","cli-eval-base-b":"cli-eval-cand-b"}',
+        "--home",
+        home,
+        "--json",
+      ],
+      {
+        cwd: ROOT,
+        stdio: ["ignore", "pipe", "pipe"],
+      },
+    );
     let stdout = "";
     let stderr = "";
-    child.stdout?.on("data", (d) => { stdout += d.toString(); });
-    child.stderr?.on("data", (d) => { stderr += d.toString(); });
+    child.stdout?.on("data", (d) => {
+      stdout += d.toString();
+    });
+    child.stderr?.on("data", (d) => {
+      stderr += d.toString();
+    });
     const code = await new Promise<number>((resolve, reject) => {
       child.on("error", reject);
       child.on("close", (x) => resolve(x ?? 1));
     });
 
     assert.equal(code, 0, stderr);
-    const body = JSON.parse(stdout) as { evaluation: { datasetId: string; gate: { accepted: boolean } } };
+    const body = JSON.parse(stdout) as {
+      evaluation: { datasetId: string; gate: { accepted: boolean } };
+    };
     assert.equal(body.evaluation.datasetId, "cli-eval-dataset");
     assert.equal(body.evaluation.gate.accepted, true);
-    assert.equal(existsSync(join(home, "harness-evolution", "datasets", "cli-eval-dataset", "evaluations", "cli-eval-candidate.json")), true);
+    assert.equal(
+      existsSync(
+        join(
+          home,
+          "harness-evolution",
+          "datasets",
+          "cli-eval-dataset",
+          "evaluations",
+          "cli-eval-candidate.json",
+        ),
+      ),
+      true,
+    );
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -378,30 +809,38 @@ test("pipeline-cli harness propose writes proposal with configured provider", as
     const configPath = join(dir, "pipeline.config.json");
     writeFileSync(configPath, JSON.stringify(config), "utf-8");
 
-    const child = spawn("npx", [
-      "tsx",
-      CLI,
-      "harness",
-      "propose",
-      "--candidate-id",
-      "cli-proposal",
-      "--summary",
-      "try automatic proposer",
-      "--editable-surface-json",
-      "[\"skill/\"]",
-      "--config",
-      configPath,
-      "--home",
-      home,
-      "--json",
-    ], {
-      cwd: ROOT,
-      stdio: ["ignore", "pipe", "pipe"],
-    });
+    const child = spawn(
+      "npx",
+      [
+        "tsx",
+        CLI,
+        "harness",
+        "propose",
+        "--candidate-id",
+        "cli-proposal",
+        "--summary",
+        "try automatic proposer",
+        "--editable-surface-json",
+        '["skill/"]',
+        "--config",
+        configPath,
+        "--home",
+        home,
+        "--json",
+      ],
+      {
+        cwd: ROOT,
+        stdio: ["ignore", "pipe", "pipe"],
+      },
+    );
     let stdout = "";
     let stderr = "";
-    child.stdout?.on("data", (d) => { stdout += d.toString(); });
-    child.stderr?.on("data", (d) => { stderr += d.toString(); });
+    child.stdout?.on("data", (d) => {
+      stdout += d.toString();
+    });
+    child.stderr?.on("data", (d) => {
+      stderr += d.toString();
+    });
     const code = await new Promise<number>((resolve, reject) => {
       child.on("error", reject);
       child.on("close", (x) => resolve(x ?? 1));
@@ -415,14 +854,27 @@ test("pipeline-cli harness propose writes proposal with configured provider", as
     assert.equal(body.candidate.candidateId, "cli-proposal");
     assert.equal(body.proposal.provider, "mock");
     assert.deepEqual(body.proposal.filesModified, []);
-    assert.equal(existsSync(join(home, "harness-evolution", "candidates", "cli-proposal", "proposal.json")), true);
+    assert.equal(
+      existsSync(
+        join(
+          home,
+          "harness-evolution",
+          "candidates",
+          "cli-proposal",
+          "proposal.json",
+        ),
+      ),
+      true,
+    );
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
 });
 
 test("pipeline-cli harness audit and frontier expose acceptance artifacts", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "pipeline-cli-harness-audit-frontier-"));
+  const dir = mkdtempSync(
+    join(tmpdir(), "pipeline-cli-harness-audit-frontier-"),
+  );
   try {
     const home = join(dir, "home");
     const oldHome = process.env.RUNOFF_HOME;
@@ -433,8 +885,14 @@ test("pipeline-cli harness audit and frontier expose acceptance artifacts", asyn
         summary: "audit candidate",
         editableSurface: ["skill/"],
       });
-      mkdirSync(join(candidate.variant.variantDir, "skill"), { recursive: true });
-      writeFileSync(join(candidate.variant.variantDir, "skill", "SKILL.md"), "updated", "utf-8");
+      mkdirSync(join(candidate.variant.variantDir, "skill"), {
+        recursive: true,
+      });
+      writeFileSync(
+        join(candidate.variant.variantDir, "skill", "SKILL.md"),
+        "updated",
+        "utf-8",
+      );
       const record = loadHarnessCandidate("cli-audit")!;
       const proposal = {
         schema: record.schema,
@@ -455,7 +913,13 @@ test("pipeline-cli harness audit and frontier expose acceptance artifacts", asyn
         failureSignatureIds: [],
       };
       writeFileSync(
-        join(home, "harness-evolution", "candidates", "cli-audit", "candidate.json"),
+        join(
+          home,
+          "harness-evolution",
+          "candidates",
+          "cli-audit",
+          "candidate.json",
+        ),
         JSON.stringify({ ...record, proposal }, null, 2),
         "utf-8",
       );
@@ -464,37 +928,70 @@ test("pipeline-cli harness audit and frontier expose acceptance artifacts", asyn
       else delete process.env.RUNOFF_HOME;
     }
 
-    const audit = spawn("npx", ["tsx", CLI, "harness", "audit", "cli-audit", "--home", home, "--json"], {
-      cwd: ROOT,
-      stdio: ["ignore", "pipe", "pipe"],
-    });
+    const audit = spawn(
+      "npx",
+      ["tsx", CLI, "harness", "audit", "cli-audit", "--home", home, "--json"],
+      {
+        cwd: ROOT,
+        stdio: ["ignore", "pipe", "pipe"],
+      },
+    );
     let auditStdout = "";
     let auditStderr = "";
-    audit.stdout?.on("data", (d) => { auditStdout += d.toString(); });
-    audit.stderr?.on("data", (d) => { auditStderr += d.toString(); });
+    audit.stdout?.on("data", (d) => {
+      auditStdout += d.toString();
+    });
+    audit.stderr?.on("data", (d) => {
+      auditStderr += d.toString();
+    });
     const auditCode = await new Promise<number>((resolve, reject) => {
       audit.on("error", reject);
       audit.on("close", (x) => resolve(x ?? 1));
     });
     assert.equal(auditCode, 0, auditStderr);
-    const auditBody = JSON.parse(auditStdout) as { audit: { passed: boolean; checkedFiles: string[] } };
+    const auditBody = JSON.parse(auditStdout) as {
+      audit: { passed: boolean; checkedFiles: string[] };
+    };
     assert.equal(auditBody.audit.passed, true);
     assert.deepEqual(auditBody.audit.checkedFiles, ["skill/SKILL.md"]);
 
-    const frontier = spawn("npx", ["tsx", CLI, "harness", "frontier", "--frontier-id", "cli-frontier", "--home", home, "--json"], {
-      cwd: ROOT,
-      stdio: ["ignore", "pipe", "pipe"],
-    });
+    const frontier = spawn(
+      "npx",
+      [
+        "tsx",
+        CLI,
+        "harness",
+        "frontier",
+        "--frontier-id",
+        "cli-frontier",
+        "--home",
+        home,
+        "--json",
+      ],
+      {
+        cwd: ROOT,
+        stdio: ["ignore", "pipe", "pipe"],
+      },
+    );
     let frontierStdout = "";
     let frontierStderr = "";
-    frontier.stdout?.on("data", (d) => { frontierStdout += d.toString(); });
-    frontier.stderr?.on("data", (d) => { frontierStderr += d.toString(); });
+    frontier.stdout?.on("data", (d) => {
+      frontierStdout += d.toString();
+    });
+    frontier.stderr?.on("data", (d) => {
+      frontierStderr += d.toString();
+    });
     const frontierCode = await new Promise<number>((resolve, reject) => {
       frontier.on("error", reject);
       frontier.on("close", (x) => resolve(x ?? 1));
     });
     assert.equal(frontierCode, 0, frontierStderr);
-    const frontierBody = JSON.parse(frontierStdout) as { frontier: { frontierId: string; entries: Array<{ candidateId: string; auditPassed: boolean }> } };
+    const frontierBody = JSON.parse(frontierStdout) as {
+      frontier: {
+        frontierId: string;
+        entries: Array<{ candidateId: string; auditPassed: boolean }>;
+      };
+    };
     assert.equal(frontierBody.frontier.frontierId, "cli-frontier");
     assert.equal(frontierBody.frontier.entries[0]?.candidateId, "cli-audit");
     assert.equal(frontierBody.frontier.entries[0]?.auditPassed, true);
@@ -517,85 +1014,136 @@ test("pipeline-cli harness run report and runs expose orchestrated run state", a
     const oldHome = process.env.RUNOFF_HOME;
     process.env.RUNOFF_HOME = home;
     try {
-      recordTrace(trace("cli-run-base-a", { finalStatus: "failed", timestamp: "2026-06-20T00:00:01.000Z" }));
-      recordTrace(trace("cli-run-base-b", { totalDurationMs: 2000, timestamp: "2026-06-20T00:00:02.000Z" }));
+      recordTrace(
+        trace("cli-run-base-a", {
+          finalStatus: "failed",
+          timestamp: "2026-06-20T00:00:01.000Z",
+        }),
+      );
+      recordTrace(
+        trace("cli-run-base-b", {
+          totalDurationMs: 2000,
+          timestamp: "2026-06-20T00:00:02.000Z",
+        }),
+      );
     } finally {
       if (oldHome !== undefined) process.env.RUNOFF_HOME = oldHome;
       else delete process.env.RUNOFF_HOME;
     }
 
-    const run = spawn("npx", [
-      "tsx",
-      CLI,
-      "harness",
-      "run",
-      "--run-id",
-      "cli-run",
-      "--candidate-id",
-      "cli-run-candidate",
-      "--dataset-id",
-      "cli-run-dataset",
-      "--summary",
-      "cli orchestrated run",
-      "--trace-ids-json",
-      "[\"cli-run-base-a\",\"cli-run-base-b\"]",
-      "--editable-surface-json",
-      "[\"skill/\"]",
-      "--config",
-      configPath,
-      "--home",
-      home,
-      "--json",
-    ], {
-      cwd: ROOT,
-      stdio: ["ignore", "pipe", "pipe"],
-    });
+    const run = spawn(
+      "npx",
+      [
+        "tsx",
+        CLI,
+        "harness",
+        "run",
+        "--run-id",
+        "cli-run",
+        "--candidate-id",
+        "cli-run-candidate",
+        "--dataset-id",
+        "cli-run-dataset",
+        "--summary",
+        "cli orchestrated run",
+        "--trace-ids-json",
+        '["cli-run-base-a","cli-run-base-b"]',
+        "--editable-surface-json",
+        '["skill/"]',
+        "--config",
+        configPath,
+        "--home",
+        home,
+        "--json",
+      ],
+      {
+        cwd: ROOT,
+        stdio: ["ignore", "pipe", "pipe"],
+      },
+    );
     let runStdout = "";
     let runStderr = "";
-    run.stdout?.on("data", (d) => { runStdout += d.toString(); });
-    run.stderr?.on("data", (d) => { runStderr += d.toString(); });
+    run.stdout?.on("data", (d) => {
+      runStdout += d.toString();
+    });
+    run.stderr?.on("data", (d) => {
+      runStderr += d.toString();
+    });
     const runCode = await new Promise<number>((resolve, reject) => {
       run.on("error", reject);
       run.on("close", (x) => resolve(x ?? 1));
     });
     assert.equal(runCode, 0, runStderr);
-    const runBody = JSON.parse(runStdout) as { run: { runId: string; status: string; missingCandidateTraceIds: string[] } };
+    const runBody = JSON.parse(runStdout) as {
+      run: {
+        runId: string;
+        status: string;
+        missingCandidateTraceIds: string[];
+      };
+    };
     assert.equal(runBody.run.runId, "cli-run");
     assert.equal(runBody.run.status, "awaiting_candidate_traces");
-    assert.deepEqual(runBody.run.missingCandidateTraceIds, ["cli-run-base-a", "cli-run-base-b"]);
+    assert.deepEqual(runBody.run.missingCandidateTraceIds, [
+      "cli-run-base-a",
+      "cli-run-base-b",
+    ]);
 
-    const report = spawn("npx", ["tsx", CLI, "harness", "report", "cli-run", "--home", home, "--json"], {
-      cwd: ROOT,
-      stdio: ["ignore", "pipe", "pipe"],
-    });
+    const report = spawn(
+      "npx",
+      ["tsx", CLI, "harness", "report", "cli-run", "--home", home, "--json"],
+      {
+        cwd: ROOT,
+        stdio: ["ignore", "pipe", "pipe"],
+      },
+    );
     let reportStdout = "";
     let reportStderr = "";
-    report.stdout?.on("data", (d) => { reportStdout += d.toString(); });
-    report.stderr?.on("data", (d) => { reportStderr += d.toString(); });
+    report.stdout?.on("data", (d) => {
+      reportStdout += d.toString();
+    });
+    report.stderr?.on("data", (d) => {
+      reportStderr += d.toString();
+    });
     const reportCode = await new Promise<number>((resolve, reject) => {
       report.on("error", reject);
       report.on("close", (x) => resolve(x ?? 1));
     });
     assert.equal(reportCode, 0, reportStderr);
-    const reportBody = JSON.parse(reportStdout) as { report: { runId: string; status: string; nextAction: string } };
+    const reportBody = JSON.parse(reportStdout) as {
+      report: { runId: string; status: string; nextAction: string };
+    };
     assert.equal(reportBody.report.runId, "cli-run");
     assert.equal(reportBody.report.status, "awaiting_candidate_traces");
-    assert.match(reportBody.report.nextAction, /provide candidateTraceIdsByBaseline/);
+    assert.match(
+      reportBody.report.nextAction,
+      /provide candidateTraceIdsByBaseline/,
+    );
 
-    const runs = spawn("npx", ["tsx", CLI, "harness", "runs", "--home", home, "--json"], {
-      cwd: ROOT,
-      stdio: ["ignore", "pipe", "pipe"],
-    });
+    const runs = spawn(
+      "npx",
+      ["tsx", CLI, "harness", "runs", "--home", home, "--json"],
+      {
+        cwd: ROOT,
+        stdio: ["ignore", "pipe", "pipe"],
+      },
+    );
     let runsStdout = "";
     let runsStderr = "";
-    runs.stdout?.on("data", (d) => { runsStdout += d.toString(); });
-    runs.stderr?.on("data", (d) => { runsStderr += d.toString(); });
+    runs.stdout?.on("data", (d) => {
+      runsStdout += d.toString();
+    });
+    runs.stderr?.on("data", (d) => {
+      runsStderr += d.toString();
+    });
     const runsCode = await new Promise<number>((resolve, reject) => {
       runs.on("error", reject);
       runs.on("close", (x) => resolve(x ?? 1));
     });
     assert.equal(runsCode, 0, runsStderr);
-    const runsBody = JSON.parse(runsStdout) as { count: number; runs: Array<{ runId: string }> };
+    const runsBody = JSON.parse(runsStdout) as {
+      count: number;
+      runs: Array<{ runId: string }>;
+    };
     assert.equal(runsBody.count, 1);
     assert.equal(runsBody.runs[0]?.runId, "cli-run");
   } finally {
@@ -610,47 +1158,79 @@ test("pipeline-cli harness trigger-scan and writeback expose loop operations", a
     const oldHome = process.env.RUNOFF_HOME;
     process.env.RUNOFF_HOME = home;
     try {
-      recordTrace(trace("cli-trigger-failed", {
-        finalStatus: "failed",
-        steps: [{ name: "implement", provider: "mock", durationMs: 10, round: 1, error: "verify failed" }],
-        timestamp: "2026-06-20T00:00:01.000Z",
-      }));
-      recordTrace(trace("cli-trigger-failed-b", {
-        finalStatus: "failed",
-        steps: [{ name: "implement", provider: "mock", durationMs: 10, round: 1, error: "verify failed again" }],
-        timestamp: "2026-06-20T00:00:02.000Z",
-      }));
+      recordTrace(
+        trace("cli-trigger-failed", {
+          finalStatus: "failed",
+          steps: [
+            {
+              name: "implement",
+              provider: "mock",
+              durationMs: 10,
+              round: 1,
+              error: "verify failed",
+            },
+          ],
+          timestamp: "2026-06-20T00:00:01.000Z",
+        }),
+      );
+      recordTrace(
+        trace("cli-trigger-failed-b", {
+          finalStatus: "failed",
+          steps: [
+            {
+              name: "implement",
+              provider: "mock",
+              durationMs: 10,
+              round: 1,
+              error: "verify failed again",
+            },
+          ],
+          timestamp: "2026-06-20T00:00:02.000Z",
+        }),
+      );
     } finally {
       if (oldHome !== undefined) process.env.RUNOFF_HOME = oldHome;
       else delete process.env.RUNOFF_HOME;
     }
 
-    const scan = spawn("npx", [
-      "tsx",
-      CLI,
-      "harness",
-      "trigger-scan",
-      "--scan-id",
-      "cli-scan",
-      "--rules-json",
-      "[{\"ruleId\":\"cli-failed\",\"kind\":\"trace_failure\",\"enabled\":true,\"summary\":\"CLI failed traces\",\"allowedAction\":\"propose\",\"traceIds\":[\"cli-trigger-failed\"],\"minFailureCount\":1}]",
-      "--home",
-      home,
-      "--json",
-    ], {
-      cwd: ROOT,
-      stdio: ["ignore", "pipe", "pipe"],
-    });
+    const scan = spawn(
+      "npx",
+      [
+        "tsx",
+        CLI,
+        "harness",
+        "trigger-scan",
+        "--scan-id",
+        "cli-scan",
+        "--rules-json",
+        '[{"ruleId":"cli-failed","kind":"trace_failure","enabled":true,"summary":"CLI failed traces","allowedAction":"propose","traceIds":["cli-trigger-failed"],"minFailureCount":1}]',
+        "--home",
+        home,
+        "--json",
+      ],
+      {
+        cwd: ROOT,
+        stdio: ["ignore", "pipe", "pipe"],
+      },
+    );
     let scanStdout = "";
     let scanStderr = "";
-    scan.stdout?.on("data", (d) => { scanStdout += d.toString(); });
-    scan.stderr?.on("data", (d) => { scanStderr += d.toString(); });
+    scan.stdout?.on("data", (d) => {
+      scanStdout += d.toString();
+    });
+    scan.stderr?.on("data", (d) => {
+      scanStderr += d.toString();
+    });
     const scanCode = await new Promise<number>((resolve, reject) => {
       scan.on("error", reject);
       scan.on("close", (x) => resolve(x ?? 1));
     });
     assert.equal(scanCode, 0, scanStderr);
-    const scanBody = JSON.parse(scanStdout) as { scan: { events: Array<{ kind: string; plan?: { triggerEventId: string } }> } };
+    const scanBody = JSON.parse(scanStdout) as {
+      scan: {
+        events: Array<{ kind: string; plan?: { triggerEventId: string } }>;
+      };
+    };
     assert.equal(scanBody.scan.events[0]?.kind, "trace_failure");
     assert.ok(scanBody.scan.events[0]?.plan?.triggerEventId);
 
@@ -662,57 +1242,74 @@ test("pipeline-cli harness trigger-scan and writeback expose loop operations", a
     const configPath = join(dir, "pipeline.config.json");
     const markdownPath = join(dir, "cli-report.md");
     writeFileSync(configPath, JSON.stringify(config), "utf-8");
-    const run = spawn("npx", [
-      "tsx",
-      CLI,
-      "harness",
-      "run",
-      "--run-id",
-      "cli-writeback-run",
-      "--summary",
-      "cli writeback run",
-      "--trace-ids-json",
-      "[\"cli-trigger-failed\",\"cli-trigger-failed-b\"]",
-      "--connectors-json",
-      `[{\"kind\":\"markdown\",\"path\":\"${markdownPath}\"}]`,
-      "--config",
-      configPath,
-      "--home",
-      home,
-      "--json",
-    ], {
-      cwd: ROOT,
-      stdio: ["ignore", "pipe", "pipe"],
-    });
+    const run = spawn(
+      "npx",
+      [
+        "tsx",
+        CLI,
+        "harness",
+        "run",
+        "--run-id",
+        "cli-writeback-run",
+        "--summary",
+        "cli writeback run",
+        "--trace-ids-json",
+        '["cli-trigger-failed","cli-trigger-failed-b"]',
+        "--connectors-json",
+        `[{\"kind\":\"markdown\",\"path\":\"${markdownPath}\"}]`,
+        "--config",
+        configPath,
+        "--home",
+        home,
+        "--json",
+      ],
+      {
+        cwd: ROOT,
+        stdio: ["ignore", "pipe", "pipe"],
+      },
+    );
     let runStderr = "";
-    run.stderr?.on("data", (d) => { runStderr += d.toString(); });
+    run.stderr?.on("data", (d) => {
+      runStderr += d.toString();
+    });
     const runCode = await new Promise<number>((resolve, reject) => {
       run.on("error", reject);
       run.on("close", (x) => resolve(x ?? 1));
     });
     assert.equal(runCode, 0, runStderr);
-    assert.match(readFileSync(markdownPath, "utf-8"), /Harness Evolution Report: cli-writeback-run/);
+    assert.match(
+      readFileSync(markdownPath, "utf-8"),
+      /Harness Evolution Report: cli-writeback-run/,
+    );
 
     const jsonlPath = join(dir, "cli-report.jsonl");
-    const writeback = spawn("npx", [
-      "tsx",
-      CLI,
-      "harness",
-      "writeback",
-      "cli-writeback-run",
-      "--connectors-json",
-      `[{\"kind\":\"local_jsonl\",\"path\":\"${jsonlPath}\"}]`,
-      "--home",
-      home,
-      "--json",
-    ], {
-      cwd: ROOT,
-      stdio: ["ignore", "pipe", "pipe"],
-    });
+    const writeback = spawn(
+      "npx",
+      [
+        "tsx",
+        CLI,
+        "harness",
+        "writeback",
+        "cli-writeback-run",
+        "--connectors-json",
+        `[{\"kind\":\"local_jsonl\",\"path\":\"${jsonlPath}\"}]`,
+        "--home",
+        home,
+        "--json",
+      ],
+      {
+        cwd: ROOT,
+        stdio: ["ignore", "pipe", "pipe"],
+      },
+    );
     let writebackStdout = "";
     let writebackStderr = "";
-    writeback.stdout?.on("data", (d) => { writebackStdout += d.toString(); });
-    writeback.stderr?.on("data", (d) => { writebackStderr += d.toString(); });
+    writeback.stdout?.on("data", (d) => {
+      writebackStdout += d.toString();
+    });
+    writeback.stderr?.on("data", (d) => {
+      writebackStderr += d.toString();
+    });
     const writebackCode = await new Promise<number>((resolve, reject) => {
       writeback.on("error", reject);
       writeback.on("close", (x) => resolve(x ?? 1));
@@ -720,7 +1317,10 @@ test("pipeline-cli harness trigger-scan and writeback expose loop operations", a
     assert.equal(writebackCode, 0, writebackStderr);
     const writebackBody = JSON.parse(writebackStdout) as { count: number };
     assert.equal(writebackBody.count, 1);
-    assert.match(readFileSync(jsonlPath, "utf-8"), /"runId":"cli-writeback-run"/);
+    assert.match(
+      readFileSync(jsonlPath, "utf-8"),
+      /"runId":"cli-writeback-run"/,
+    );
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -738,8 +1338,14 @@ test("pipeline-cli harness export writes accepted promotion bundle", async () =>
         summary: "export accepted candidate",
         editableSurface: ["skill/"],
       });
-      mkdirSync(join(candidate.variant.variantDir, "skill"), { recursive: true });
-      writeFileSync(join(candidate.variant.variantDir, "skill", "SKILL.md"), "updated", "utf-8");
+      mkdirSync(join(candidate.variant.variantDir, "skill"), {
+        recursive: true,
+      });
+      writeFileSync(
+        join(candidate.variant.variantDir, "skill", "SKILL.md"),
+        "updated",
+        "utf-8",
+      );
       const record = loadHarnessCandidate("cli-export")!;
       const proposal = {
         schema: record.schema,
@@ -760,7 +1366,13 @@ test("pipeline-cli harness export writes accepted promotion bundle", async () =>
         failureSignatureIds: [],
       };
       writeFileSync(
-        join(home, "harness-evolution", "candidates", "cli-export", "candidate.json"),
+        join(
+          home,
+          "harness-evolution",
+          "candidates",
+          "cli-export",
+          "candidate.json",
+        ),
         JSON.stringify({ ...record, proposal }, null, 2),
         "utf-8",
       );
@@ -771,8 +1383,16 @@ test("pipeline-cli harness export writes accepted promotion bundle", async () =>
       evaluateHarnessCandidate({
         candidateId: "cli-export",
         pairs: [
-          { split: "held-in", baselineTraceId: "cli-export-base-in", candidateTraceId: "cli-export-cand-in" },
-          { split: "held-out", baselineTraceId: "cli-export-base-out", candidateTraceId: "cli-export-cand-out" },
+          {
+            split: "held-in",
+            baselineTraceId: "cli-export-base-in",
+            candidateTraceId: "cli-export-cand-in",
+          },
+          {
+            split: "held-out",
+            baselineTraceId: "cli-export-base-out",
+            candidateTraceId: "cli-export-cand-out",
+          },
         ],
       });
       auditHarnessCandidate({ candidateId: "cli-export" });
@@ -782,21 +1402,35 @@ test("pipeline-cli harness export writes accepted promotion bundle", async () =>
       else delete process.env.RUNOFF_HOME;
     }
 
-    const child = spawn("npx", ["tsx", CLI, "harness", "export", "cli-export", "--home", home, "--json"], {
-      cwd: ROOT,
-      stdio: ["ignore", "pipe", "pipe"],
-    });
+    const child = spawn(
+      "npx",
+      ["tsx", CLI, "harness", "export", "cli-export", "--home", home, "--json"],
+      {
+        cwd: ROOT,
+        stdio: ["ignore", "pipe", "pipe"],
+      },
+    );
     let stdout = "";
     let stderr = "";
-    child.stdout?.on("data", (d) => { stdout += d.toString(); });
-    child.stderr?.on("data", (d) => { stderr += d.toString(); });
+    child.stdout?.on("data", (d) => {
+      stdout += d.toString();
+    });
+    child.stderr?.on("data", (d) => {
+      stderr += d.toString();
+    });
     const code = await new Promise<number>((resolve, reject) => {
       child.on("error", reject);
       child.on("close", (x) => resolve(x ?? 1));
     });
 
     assert.equal(code, 0, stderr);
-    const body = JSON.parse(stdout) as { bundle: { candidateId: string; bundleDir: string; files: Array<{ copied: boolean }> } };
+    const body = JSON.parse(stdout) as {
+      bundle: {
+        candidateId: string;
+        bundleDir: string;
+        files: Array<{ copied: boolean }>;
+      };
+    };
     assert.equal(body.bundle.candidateId, "cli-export");
     assert.equal(body.bundle.files[0]?.copied, true);
     assert.equal(existsSync(join(body.bundle.bundleDir, "bundle.json")), true);

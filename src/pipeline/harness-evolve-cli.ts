@@ -2,24 +2,31 @@
  * CLI helpers for local harness evolution commands.
  */
 
-import {
-  createProvider,
-  loadConfigFromPath,
-} from "../core/config.js";
+import { createProvider, loadConfigFromPath } from "../core/config.js";
 import {
   auditHarnessCandidate,
   createHarnessCandidate,
   createHarnessDataset,
+  createHarnessReplayManifest,
+  createHarnessTaskSet,
+  createHarnessTrajectory,
   decideHarnessCandidate,
+  decideHarnessSkillPatch,
   evaluateHarnessCandidate,
   evaluateHarnessDataset,
+  evaluateHarnessTaskSet,
   exportHarnessPromotionBundle,
   listHarnessCandidates,
   listHarnessEvolutionRuns,
+  listHarnessRejectedBuffer,
+  listHarnessTaskSets,
+  listHarnessVerifiers,
   mineHarnessFailureSignatures,
   proposeHarnessCandidate,
   queryHarnessEvolutionReport,
   rankHarnessCandidates,
+  recordHarnessRejectedBuffer,
+  registerHarnessVerifier,
   runHarnessEvolution,
   scanHarnessTriggers,
   selectHarnessCoreset,
@@ -28,6 +35,8 @@ import {
   type HarnessConnectorTarget,
   type HarnessEvalPair,
   type HarnessRolePolicy,
+  type HarnessTask,
+  type HarnessVerifierKind,
   type HarnessTriggerRule,
 } from "../orchestration/harness-evolution.js";
 
@@ -86,10 +95,102 @@ export type HarnessEvolveDatasetOptions = {
   json?: boolean;
 };
 
+export type HarnessEvolveVerifierOptions = {
+  verifierId?: string;
+  kind: HarnessVerifierKind;
+  summary: string;
+  command?: string[];
+  expectedFiles?: string[];
+  requiredTraceStatuses?: Array<
+    | "queued"
+    | "running"
+    | "approved"
+    | "failed"
+    | "aborted"
+    | "max_rounds"
+    | "awaiting_judge"
+    | "awaiting_approval"
+    | "awaiting_plan_approval"
+  >;
+  requiredStepNames?: string[];
+  forbiddenPaths?: string[];
+  rubric?: string;
+  json?: boolean;
+};
+
+export type HarnessEvolveTaskSetOptions = {
+  taskSetId?: string;
+  name: string;
+  description?: string;
+  tasks?: HarnessTask[];
+  traceIds?: string[];
+  verifierId?: string;
+  heldInRatio?: number;
+  leakageTerms?: string[];
+  json?: boolean;
+};
+
 export type HarnessEvolveEvaluateDatasetOptions = {
   candidateId: string;
   datasetId: string;
   candidateTraceMap: Record<string, string>;
+  json?: boolean;
+};
+
+export type HarnessEvolveEvaluateTaskSetOptions = {
+  candidateId: string;
+  taskSetId: string;
+  candidateTraceMap: Record<string, string>;
+  baselineTraceMap?: Record<string, string>;
+  runId?: string;
+  skillVersion?: string;
+  json?: boolean;
+};
+
+export type HarnessEvolveTrajectoryOptions = {
+  traceId: string;
+  taskId?: string;
+  runId?: string;
+  candidateId?: string;
+  model?: string;
+  skillVersion?: string;
+  toolsets?: string[];
+  json?: boolean;
+};
+
+export type HarnessEvolveReplayOptions = {
+  replayId?: string;
+  runId?: string;
+  taskSetId?: string;
+  candidateId?: string;
+  trajectoryIds: string[];
+  json?: boolean;
+};
+
+export type HarnessEvolveSkillPatchOptions = {
+  candidateId: string;
+  baseSkill: string;
+  candidateSkill?: string;
+  patchId?: string;
+  maxFiles?: number;
+  maxBytes?: number;
+  selectionDelta?: number;
+  regressionPassed?: boolean;
+  policyPassed?: boolean;
+  auditPassed?: boolean;
+  accepted?: boolean;
+  reason?: string;
+  json?: boolean;
+};
+
+export type HarnessEvolveRejectedOptions = {
+  candidateId?: string;
+  patchId?: string;
+  selectionDelta?: number;
+  regressionFailures?: string[];
+  rejectionReason?: string;
+  reviewNotes?: string;
+  limit?: number;
   json?: boolean;
 };
 
@@ -123,8 +224,12 @@ export type HarnessEvolveRunOptions = {
   leakageTerms?: string[];
   instructions?: string;
   candidateTraceMap?: Record<string, string>;
+  candidateTraceMapByTask?: Record<string, string>;
   rolePolicy?: HarnessRolePolicy;
   connectors?: HarnessConnectorTarget[];
+  taskSetId?: string;
+  baseSkill?: string;
+  candidateSkill?: string;
   exportOnAccept?: boolean;
   json?: boolean;
 };
@@ -171,7 +276,9 @@ export type HarnessEvolveExportOptions = {
 export function harnessEvolveList(opts: HarnessEvolveListOptions = {}): void {
   const candidates = listHarnessCandidates().slice(0, opts.limit ?? 20);
   if (opts.json) {
-    console.log(JSON.stringify({ candidates, count: candidates.length }, null, 2));
+    console.log(
+      JSON.stringify({ candidates, count: candidates.length }, null, 2),
+    );
     return;
   }
   if (!candidates.length) {
@@ -179,29 +286,43 @@ export function harnessEvolveList(opts: HarnessEvolveListOptions = {}): void {
     return;
   }
   for (const c of candidates) {
-    console.log(`${c.createdAt}  ${c.candidateId}  ${c.status}  gate=${c.gate?.accepted ?? "none"}  ${c.manifest.summary}`);
+    console.log(
+      `${c.createdAt}  ${c.candidateId}  ${c.status}  gate=${c.gate?.accepted ?? "none"}  ${c.manifest.summary}`,
+    );
   }
 }
 
-export function harnessEvolveCoreset(opts: HarnessEvolveCoresetOptions = {}): void {
+export function harnessEvolveCoreset(
+  opts: HarnessEvolveCoresetOptions = {},
+): void {
   const items = selectHarnessCoreset({ limit: opts.limit, since: opts.since });
   if (opts.json) {
     console.log(JSON.stringify({ items, count: items.length }, null, 2));
     return;
   }
   for (const item of items) {
-    console.log(`${item.traceId}  difficulty=${item.difficulty}  key=${item.diversityKey}  status=${item.finalStatus}`);
+    console.log(
+      `${item.traceId}  difficulty=${item.difficulty}  key=${item.diversityKey}  status=${item.finalStatus}`,
+    );
   }
 }
 
 export function harnessEvolveMine(opts: HarnessEvolveMineOptions = {}): void {
-  const signatures = mineHarnessFailureSignatures({ traceIds: opts.traceIds, limit: opts.limit, since: opts.since });
+  const signatures = mineHarnessFailureSignatures({
+    traceIds: opts.traceIds,
+    limit: opts.limit,
+    since: opts.since,
+  });
   if (opts.json) {
-    console.log(JSON.stringify({ signatures, count: signatures.length }, null, 2));
+    console.log(
+      JSON.stringify({ signatures, count: signatures.length }, null, 2),
+    );
     return;
   }
   for (const signature of signatures) {
-    console.log(`${signature.signatureId}  severity=${signature.severity}  traces=${signature.traceCount}  ${signature.title}`);
+    console.log(
+      `${signature.signatureId}  severity=${signature.severity}  traces=${signature.traceCount}  ${signature.title}`,
+    );
   }
 }
 
@@ -228,12 +349,22 @@ export function harnessEvolveCreate(opts: HarnessEvolveCreateOptions): void {
   console.log(`  manifest: ${candidate.manifest.summary}`);
 }
 
-export async function harnessEvolvePropose(opts: HarnessEvolveProposeOptions): Promise<void> {
+export async function harnessEvolvePropose(
+  opts: HarnessEvolveProposeOptions,
+): Promise<void> {
   const config = loadConfigFromPath(opts.configPath);
-  const providerName = opts.provider ?? config.orchestration?.plannerProvider ?? Object.keys(config.providers)[0];
-  if (!providerName || !config.providers[providerName]) throw new Error("provider is required");
-  const provider = createProvider(providerName, config.providers[providerName]!);
-  if (!provider) throw new Error(`provider "${providerName}" cannot execute proposals`);
+  const providerName =
+    opts.provider ??
+    config.orchestration?.plannerProvider ??
+    Object.keys(config.providers)[0];
+  if (!providerName || !config.providers[providerName])
+    throw new Error("provider is required");
+  const provider = createProvider(
+    providerName,
+    config.providers[providerName]!,
+  );
+  if (!provider)
+    throw new Error(`provider "${providerName}" cannot execute proposals`);
   const result = await proposeHarnessCandidate({
     candidateId: opts.candidateId,
     provider,
@@ -252,12 +383,19 @@ export async function harnessEvolvePropose(opts: HarnessEvolveProposeOptions): P
     console.log(JSON.stringify(result, null, 2));
     return;
   }
-  console.log(`${result.proposal.failed ? "FAILED" : "PROPOSED"} ${result.candidate.candidateId}`);
+  console.log(
+    `${result.proposal.failed ? "FAILED" : "PROPOSED"} ${result.candidate.candidateId}`,
+  );
   console.log(`  provider: ${result.proposal.provider}`);
   console.log(`  variant:  ${result.candidate.variant.variantDir}`);
-  console.log(`  files:    ${result.proposal.filesModified.join(", ") || "none reported"}`);
-  console.log(`  observed: ${result.proposal.observedFilesModified.join(", ") || "none"}`);
-  if (result.proposal.error) console.log(`  error:    ${result.proposal.error}`);
+  console.log(
+    `  files:    ${result.proposal.filesModified.join(", ") || "none reported"}`,
+  );
+  console.log(
+    `  observed: ${result.proposal.observedFilesModified.join(", ") || "none"}`,
+  );
+  if (result.proposal.error)
+    console.log(`  error:    ${result.proposal.error}`);
 }
 
 export function harnessEvolveDataset(opts: HarnessEvolveDatasetOptions): void {
@@ -279,7 +417,83 @@ export function harnessEvolveDataset(opts: HarnessEvolveDatasetOptions): void {
   console.log(`  held-out: ${dataset.heldOut.length}`);
 }
 
-export function harnessEvolveEvaluateDataset(opts: HarnessEvolveEvaluateDatasetOptions): void {
+export function harnessEvolveVerifier(
+  opts: HarnessEvolveVerifierOptions,
+): void {
+  const verifier = registerHarnessVerifier({
+    verifierId: opts.verifierId,
+    kind: opts.kind,
+    summary: opts.summary,
+    command: opts.command,
+    expectedFiles: opts.expectedFiles,
+    requiredTraceStatuses: opts.requiredTraceStatuses,
+    requiredStepNames: opts.requiredStepNames,
+    forbiddenPaths: opts.forbiddenPaths,
+    rubric: opts.rubric,
+  });
+  if (opts.json) {
+    console.log(JSON.stringify({ verifier }, null, 2));
+    return;
+  }
+  console.log(`VERIFIER ${verifier.verifierId}`);
+  console.log(`  kind:    ${verifier.kind}`);
+  console.log(`  summary: ${verifier.summary}`);
+}
+
+export function harnessEvolveVerifiers(
+  opts: HarnessEvolveListOptions = {},
+): void {
+  const verifiers = listHarnessVerifiers().slice(0, opts.limit ?? 20);
+  if (opts.json) {
+    console.log(
+      JSON.stringify({ verifiers, count: verifiers.length }, null, 2),
+    );
+    return;
+  }
+  for (const verifier of verifiers)
+    console.log(
+      `${verifier.createdAt}  ${verifier.verifierId}  ${verifier.kind}  ${verifier.summary}`,
+    );
+}
+
+export function harnessEvolveTaskSet(opts: HarnessEvolveTaskSetOptions): void {
+  const taskSet = createHarnessTaskSet({
+    taskSetId: opts.taskSetId,
+    name: opts.name,
+    description: opts.description,
+    tasks: opts.tasks,
+    traceIds: opts.traceIds,
+    verifierId: opts.verifierId,
+    heldInRatio: opts.heldInRatio,
+    leakageTerms: opts.leakageTerms,
+  });
+  if (opts.json) {
+    console.log(JSON.stringify({ taskSet }, null, 2));
+    return;
+  }
+  console.log(`TASKSET ${taskSet.taskSetId}`);
+  console.log(`  tasks:      ${taskSet.tasks.length}`);
+  console.log(`  selection:  ${taskSet.selectionTaskIds.length}`);
+  console.log(`  regression: ${taskSet.regressionTaskIds.length}`);
+}
+
+export function harnessEvolveTaskSets(
+  opts: HarnessEvolveListOptions = {},
+): void {
+  const taskSets = listHarnessTaskSets().slice(0, opts.limit ?? 20);
+  if (opts.json) {
+    console.log(JSON.stringify({ taskSets, count: taskSets.length }, null, 2));
+    return;
+  }
+  for (const taskSet of taskSets)
+    console.log(
+      `${taskSet.createdAt}  ${taskSet.taskSetId}  tasks=${taskSet.tasks.length}  ${taskSet.name}`,
+    );
+}
+
+export function harnessEvolveEvaluateDataset(
+  opts: HarnessEvolveEvaluateDatasetOptions,
+): void {
   const evaluation = evaluateHarnessDataset({
     candidateId: opts.candidateId,
     datasetId: opts.datasetId,
@@ -289,7 +503,125 @@ export function harnessEvolveEvaluateDataset(opts: HarnessEvolveEvaluateDatasetO
     console.log(JSON.stringify({ evaluation }, null, 2));
     return;
   }
-  console.log(`${evaluation.gate.accepted ? "ACCEPTABLE" : "REJECTED"} ${evaluation.candidateId} on ${evaluation.datasetId}: ${evaluation.gate.reason}`);
+  console.log(
+    `${evaluation.gate.accepted ? "ACCEPTABLE" : "REJECTED"} ${evaluation.candidateId} on ${evaluation.datasetId}: ${evaluation.gate.reason}`,
+  );
+}
+
+export function harnessEvolveEvaluateTaskSet(
+  opts: HarnessEvolveEvaluateTaskSetOptions,
+): void {
+  const evaluation = evaluateHarnessTaskSet({
+    candidateId: opts.candidateId,
+    taskSetId: opts.taskSetId,
+    candidateTraceIdsByTask: opts.candidateTraceMap,
+    baselineTraceIdsByTask: opts.baselineTraceMap,
+    runId: opts.runId,
+    skillVersion: opts.skillVersion,
+  });
+  if (opts.json) {
+    console.log(JSON.stringify({ evaluation }, null, 2));
+    return;
+  }
+  console.log(
+    `${evaluation.accepted ? "TASKSET ACCEPTED" : "TASKSET BLOCKED"} ${evaluation.candidateId} on ${evaluation.taskSetId}: ${evaluation.reason}`,
+  );
+}
+
+export function harnessEvolveTrajectory(
+  opts: HarnessEvolveTrajectoryOptions,
+): void {
+  const trajectory = createHarnessTrajectory({
+    traceId: opts.traceId,
+    taskId: opts.taskId,
+    runId: opts.runId,
+    candidateId: opts.candidateId,
+    model: opts.model,
+    skillVersion: opts.skillVersion,
+    toolsets: opts.toolsets,
+  });
+  if (opts.json) {
+    console.log(JSON.stringify({ trajectory }, null, 2));
+    return;
+  }
+  console.log(`TRAJECTORY ${trajectory.trajectoryId}`);
+  console.log(`  trace: ${trajectory.traceId}`);
+  console.log(`  path:  ${trajectory.trajectoryPath}`);
+}
+
+export function harnessEvolveReplay(opts: HarnessEvolveReplayOptions): void {
+  const replay = createHarnessReplayManifest({
+    replayId: opts.replayId,
+    runId: opts.runId,
+    taskSetId: opts.taskSetId,
+    candidateId: opts.candidateId,
+    trajectoryIds: opts.trajectoryIds,
+  });
+  if (opts.json) {
+    console.log(JSON.stringify({ replay }, null, 2));
+    return;
+  }
+  console.log(`REPLAY ${replay.replayId}`);
+  for (const command of replay.commands) console.log(`  ${command}`);
+}
+
+export function harnessEvolveSkillPatch(
+  opts: HarnessEvolveSkillPatchOptions,
+): void {
+  const patch = decideHarnessSkillPatch({
+    candidateId: opts.candidateId,
+    baseSkill: opts.baseSkill,
+    candidateSkill: opts.candidateSkill,
+    patchId: opts.patchId,
+    patchBudget: { maxFiles: opts.maxFiles, maxBytes: opts.maxBytes },
+    selectionDelta: opts.selectionDelta,
+    regressionPassed: opts.regressionPassed,
+    policyPassed: opts.policyPassed,
+    auditPassed: opts.auditPassed,
+    accepted: opts.accepted,
+    reason: opts.reason,
+  });
+  if (opts.json) {
+    console.log(JSON.stringify({ patch }, null, 2));
+    return;
+  }
+  console.log(
+    `${patch.accepted ? "PATCH ACCEPTED" : "PATCH REJECTED"} ${patch.patchId}`,
+  );
+  console.log(`  candidate: ${patch.candidateId}`);
+  console.log(`  reason:    ${patch.reason}`);
+}
+
+export function harnessEvolveRejected(
+  opts: HarnessEvolveRejectedOptions = {},
+): void {
+  if (opts.candidateId) {
+    const entry = recordHarnessRejectedBuffer({
+      candidateId: opts.candidateId,
+      patchId: opts.patchId,
+      selectionDelta: opts.selectionDelta,
+      regressionFailures: opts.regressionFailures,
+      rejectionReason: opts.rejectionReason ?? "manual rejected buffer entry",
+      reviewNotes: opts.reviewNotes,
+    });
+    if (opts.json) {
+      console.log(JSON.stringify({ entry }, null, 2));
+      return;
+    }
+    console.log(`REJECTED ${entry.rejectedId}`);
+    console.log(`  candidate: ${entry.candidateId}`);
+    console.log(`  reason:    ${entry.rejectionReason}`);
+    return;
+  }
+  const entries = listHarnessRejectedBuffer(opts.limit ?? 20);
+  if (opts.json) {
+    console.log(JSON.stringify({ entries, count: entries.length }, null, 2));
+    return;
+  }
+  for (const entry of entries)
+    console.log(
+      `${entry.createdAt}  ${entry.rejectedId}  candidate=${entry.candidateId}  ${entry.rejectionReason}`,
+    );
 }
 
 export function harnessEvolveAudit(opts: HarnessEvolveAuditOptions): void {
@@ -302,11 +634,16 @@ export function harnessEvolveAudit(opts: HarnessEvolveAuditOptions): void {
     console.log(JSON.stringify({ audit }, null, 2));
     return;
   }
-  console.log(`${audit.passed ? "AUDIT PASSED" : "AUDIT BLOCKED"} ${audit.candidateId}`);
-  for (const finding of audit.findings) console.log(`  ${finding.severity} ${finding.rule}: ${finding.message}`);
+  console.log(
+    `${audit.passed ? "AUDIT PASSED" : "AUDIT BLOCKED"} ${audit.candidateId}`,
+  );
+  for (const finding of audit.findings)
+    console.log(`  ${finding.severity} ${finding.rule}: ${finding.message}`);
 }
 
-export function harnessEvolveFrontier(opts: HarnessEvolveFrontierOptions = {}): void {
+export function harnessEvolveFrontier(
+  opts: HarnessEvolveFrontierOptions = {},
+): void {
   const frontier = updateHarnessFrontier({
     frontierId: opts.frontierId,
     candidateIds: opts.candidateIds,
@@ -317,16 +654,30 @@ export function harnessEvolveFrontier(opts: HarnessEvolveFrontierOptions = {}): 
   }
   console.log(`FRONTIER ${frontier.frontierId}`);
   for (const entry of frontier.entries) {
-    console.log(`  ${entry.candidateId} score=${entry.score} accepted=${entry.accepted} audit=${entry.auditPassed}`);
+    console.log(
+      `  ${entry.candidateId} score=${entry.score} accepted=${entry.accepted} audit=${entry.auditPassed}`,
+    );
   }
 }
 
-export async function harnessEvolveRun(opts: HarnessEvolveRunOptions): Promise<void> {
+export async function harnessEvolveRun(
+  opts: HarnessEvolveRunOptions,
+): Promise<void> {
   const config = loadConfigFromPath(opts.configPath);
-  const providerName = opts.provider ?? config.orchestration?.plannerProvider ?? Object.keys(config.providers)[0];
-  if (!providerName || !config.providers[providerName]) throw new Error("provider is required");
-  const provider = createProvider(providerName, config.providers[providerName]!);
-  if (!provider) throw new Error(`provider "${providerName}" cannot execute harness evolution runs`);
+  const providerName =
+    opts.provider ??
+    config.orchestration?.plannerProvider ??
+    Object.keys(config.providers)[0];
+  if (!providerName || !config.providers[providerName])
+    throw new Error("provider is required");
+  const provider = createProvider(
+    providerName,
+    config.providers[providerName]!,
+  );
+  if (!provider)
+    throw new Error(
+      `provider "${providerName}" cannot execute harness evolution runs`,
+    );
   const run = await runHarnessEvolution({
     runId: opts.runId,
     summary: opts.summary,
@@ -334,6 +685,7 @@ export async function harnessEvolveRun(opts: HarnessEvolveRunOptions): Promise<v
     traceIds: opts.traceIds,
     failureSignatureIds: opts.failureSignatureIds,
     datasetId: opts.datasetId,
+    taskSetId: opts.taskSetId,
     candidateId: opts.candidateId,
     frontierId: opts.frontierId,
     sourceDir: opts.sourceDir,
@@ -343,8 +695,11 @@ export async function harnessEvolveRun(opts: HarnessEvolveRunOptions): Promise<v
     leakageTerms: opts.leakageTerms,
     instructions: opts.instructions,
     candidateTraceIdsByBaseline: opts.candidateTraceMap,
+    candidateTraceIdsByTask: opts.candidateTraceMapByTask,
     rolePolicy: opts.rolePolicy,
     connectors: opts.connectors,
+    baseSkill: opts.baseSkill,
+    candidateSkill: opts.candidateSkill,
     exportOnAccept: opts.exportOnAccept,
   });
   if (opts.json) {
@@ -380,38 +735,64 @@ export function harnessEvolveRuns(opts: HarnessEvolveRunsOptions = {}): void {
     return;
   }
   for (const run of runs) {
-    console.log(`${run.startedAt}  ${run.runId}  ${run.status}  candidate=${run.plan.candidateId}  ${run.plan.summary}`);
+    console.log(
+      `${run.startedAt}  ${run.runId}  ${run.status}  candidate=${run.plan.candidateId}  ${run.plan.summary}`,
+    );
   }
 }
 
-export function harnessEvolveTriggerScan(opts: HarnessEvolveTriggerScanOptions): void {
+export function harnessEvolveTriggerScan(
+  opts: HarnessEvolveTriggerScanOptions,
+): void {
   const scan = scanHarnessTriggers({ rules: opts.rules, scanId: opts.scanId });
   if (opts.json) {
     console.log(JSON.stringify({ scan }, null, 2));
     return;
   }
   console.log(`TRIGGER_SCAN ${scan.scanId} events=${scan.events.length}`);
-  for (const event of scan.events) console.log(`  ${event.eventId} kind=${event.kind} action=${event.allowedAction}`);
+  for (const event of scan.events)
+    console.log(
+      `  ${event.eventId} kind=${event.kind} action=${event.allowedAction}`,
+    );
 }
 
-export function harnessEvolveWriteback(opts: HarnessEvolveWritebackOptions): void {
-  const writebacks = writeHarnessConnectorReport({ runId: opts.runId, targets: opts.targets });
+export function harnessEvolveWriteback(
+  opts: HarnessEvolveWritebackOptions,
+): void {
+  const writebacks = writeHarnessConnectorReport({
+    runId: opts.runId,
+    targets: opts.targets,
+  });
   if (opts.json) {
-    console.log(JSON.stringify({ writebacks, count: writebacks.length }, null, 2));
+    console.log(
+      JSON.stringify({ writebacks, count: writebacks.length }, null, 2),
+    );
     return;
   }
-  for (const writeback of writebacks) console.log(`WRITEBACK ${writeback.kind} ${writeback.path}`);
+  for (const writeback of writebacks)
+    console.log(`WRITEBACK ${writeback.kind} ${writeback.path}`);
 }
 
-export function harnessEvolveEvaluate(opts: HarnessEvolveEvaluateOptions): void {
-  const gate = evaluateHarnessCandidate({ candidateId: opts.candidateId, pairs: opts.pairs });
+export function harnessEvolveEvaluate(
+  opts: HarnessEvolveEvaluateOptions,
+): void {
+  const gate = evaluateHarnessCandidate({
+    candidateId: opts.candidateId,
+    pairs: opts.pairs,
+  });
   if (opts.json) {
     console.log(JSON.stringify({ gate }, null, 2));
     return;
   }
-  console.log(`${gate.accepted ? "ACCEPTABLE" : "REJECTED"} ${gate.candidateId}: ${gate.reason}`);
-  console.log(`  held-in:  ${gate.heldIn.passed}/${gate.heldIn.total} passed, regressions=${gate.heldIn.regressions.length}`);
-  console.log(`  held-out: ${gate.heldOut.passed}/${gate.heldOut.total} passed, regressions=${gate.heldOut.regressions.length}`);
+  console.log(
+    `${gate.accepted ? "ACCEPTABLE" : "REJECTED"} ${gate.candidateId}: ${gate.reason}`,
+  );
+  console.log(
+    `  held-in:  ${gate.heldIn.passed}/${gate.heldIn.total} passed, regressions=${gate.heldIn.regressions.length}`,
+  );
+  console.log(
+    `  held-out: ${gate.heldOut.passed}/${gate.heldOut.total} passed, regressions=${gate.heldOut.regressions.length}`,
+  );
 }
 
 export function harnessEvolveRank(opts: HarnessEvolveRankOptions = {}): void {
@@ -421,27 +802,41 @@ export function harnessEvolveRank(opts: HarnessEvolveRankOptions = {}): void {
     return;
   }
   for (const rank of ranks) {
-    console.log(`#${rank.rank} ${rank.candidateId} score=${rank.score} wins=${rank.preferenceWins} losses=${rank.preferenceLosses}`);
+    console.log(
+      `#${rank.rank} ${rank.candidateId} score=${rank.score} wins=${rank.preferenceWins} losses=${rank.preferenceLosses}`,
+    );
   }
 }
 
 export function harnessEvolveDecide(opts: HarnessEvolveDecideOptions): void {
-  const decision = decideHarnessCandidate({ candidateId: opts.candidateId, decision: opts.decision, reason: opts.reason });
+  const decision = decideHarnessCandidate({
+    candidateId: opts.candidateId,
+    decision: opts.decision,
+    reason: opts.reason,
+  });
   if (opts.json) {
     console.log(JSON.stringify({ decision }, null, 2));
     return;
   }
-  console.log(`${decision.decision.toUpperCase()} ${decision.candidateId}: ${decision.reason}`);
-  console.log(`  acceptance: ${decision.acceptanceChecks.accepted ? "pass" : "blocked"}`);
+  console.log(
+    `${decision.decision.toUpperCase()} ${decision.candidateId}: ${decision.reason}`,
+  );
+  console.log(
+    `  acceptance: ${decision.acceptanceChecks.accepted ? "pass" : "blocked"}`,
+  );
 }
 
 export function harnessEvolveExport(opts: HarnessEvolveExportOptions): void {
-  const bundle = exportHarnessPromotionBundle({ candidateId: opts.candidateId });
+  const bundle = exportHarnessPromotionBundle({
+    candidateId: opts.candidateId,
+  });
   if (opts.json) {
     console.log(JSON.stringify({ bundle }, null, 2));
     return;
   }
   console.log(`EXPORTED ${bundle.candidateId}`);
   console.log(`  bundle: ${bundle.bundleDir}`);
-  console.log(`  files:  ${bundle.files.filter((file) => file.copied).length}/${bundle.files.length} copied`);
+  console.log(
+    `  files:  ${bundle.files.filter((file) => file.copied).length}/${bundle.files.length} copied`,
+  );
 }

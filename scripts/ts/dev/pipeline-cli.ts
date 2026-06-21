@@ -12,16 +12,26 @@ import { cpSync, existsSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { clearConfigCache, loadConfigFromPath, validateConfig } from "../../../src/core/config.js";
+import {
+  clearConfigCache,
+  loadConfigFromPath,
+  validateConfig,
+} from "../../../src/core/config.js";
 import { executePipelineRun } from "../../../src/orchestration/pipeline-mcp-run.js";
 import { getPipelineHomeDir } from "../../../src/core/paths.js";
 import {
   openInBrowser,
   startConfigEditorServer,
 } from "../../../src/pipeline/config-editor-server.js";
-import { formatDoctorReport, runDoctor } from "../../../src/pipeline/pipeline-doctor.js";
+import {
+  formatDoctorReport,
+  runDoctor,
+} from "../../../src/pipeline/pipeline-doctor.js";
 import { formatPipelineRunOutcomeHints } from "../../../src/pipeline/run-outcome-hints.js";
-import { pipelineInit, type InitProfile } from "../../../src/pipeline/pipeline-init.js";
+import {
+  pipelineInit,
+  type InitProfile,
+} from "../../../src/pipeline/pipeline-init.js";
 import {
   applyRaceSession,
   abortRaceSession,
@@ -36,26 +46,45 @@ import {
   harnessEvolveDecide,
   harnessEvolveEvaluate,
   harnessEvolveEvaluateDataset,
+  harnessEvolveEvaluateTaskSet,
   harnessEvolveExport,
   harnessEvolveFrontier,
   harnessEvolveList,
   harnessEvolveMine,
   harnessEvolvePropose,
   harnessEvolveRank,
+  harnessEvolveRejected,
+  harnessEvolveReplay,
   harnessEvolveReport,
   harnessEvolveRun,
   harnessEvolveRuns,
+  harnessEvolveSkillPatch,
+  harnessEvolveTaskSet,
+  harnessEvolveTaskSets,
   harnessEvolveTriggerScan,
+  harnessEvolveTrajectory,
+  harnessEvolveVerifier,
+  harnessEvolveVerifiers,
   harnessEvolveWriteback,
 } from "../../../src/pipeline/harness-evolve-cli.js";
 import { runsList, runsShow } from "../../../src/pipeline/run-control-cli.js";
-import { tracesList, tracesShow, tracesTail } from "../../../src/pipeline/trace-cli.js";
+import {
+  tracesList,
+  tracesShow,
+  tracesTail,
+} from "../../../src/pipeline/trace-cli.js";
 import type { PipelineStatus } from "../../../src/core/state.js";
 import type { RunStatus } from "../../../src/orchestration/run-store.js";
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), "../../..");
 
-const INIT_PROFILES = ["mock", "feature", "bugfix", "refactor", "cli-detected"] as const;
+const INIT_PROFILES = [
+  "mock",
+  "feature",
+  "bugfix",
+  "refactor",
+  "cli-detected",
+] as const;
 
 function printHelp(): void {
   console.log(`runoff CLI
@@ -72,17 +101,26 @@ Usage:
   pipeline runs list [--status <status>] [--session-id <id>] [--limit <n>] [--json]
   pipeline runs show <runId> [--json]
   pipeline harness coreset [--limit <n>] [--since <iso>] [--json]
-  pipeline harness mine [--trace-ids-json <json>] [--limit <n>] [--since <iso>] [--json]
-  pipeline harness dataset --summary <name> [--dataset-id <id>] [--trace-ids-json <json>] [--failure-signature-ids-json <json>] [--held-in-ratio <n>] [--leakage-terms-json <json>] [--json]
-  pipeline harness create --summary <text> [--candidate-id <id>] [--source-dir <dir>] [--parent-candidate-ids-json <json>] [--dataset-ids-json <json>] [--json]
+	  pipeline harness mine [--trace-ids-json <json>] [--limit <n>] [--since <iso>] [--json]
+	  pipeline harness dataset --summary <name> [--dataset-id <id>] [--trace-ids-json <json>] [--failure-signature-ids-json <json>] [--held-in-ratio <n>] [--leakage-terms-json <json>] [--json]
+	  pipeline harness verifier --verifier-kind <kind> --summary <text> [--verifier-id <id>] [--json]
+	  pipeline harness verifiers [--limit <n>] [--json]
+	  pipeline harness taskset --summary <name> [--taskset-id <id>] [--tasks-json <json>] [--trace-ids-json <json>] [--verifier-id <id>] [--json]
+	  pipeline harness tasksets [--limit <n>] [--json]
+	  pipeline harness trajectory --trace-id <id> [--candidate-id <id>] [--run-id <id>] [--json]
+	  pipeline harness replay --trajectory-ids-json <json> [--replay-id <id>] [--json]
+	  pipeline harness skill-patch <candidateId> --base-skill <version> [--candidate-skill <version>] [--json]
+	  pipeline harness rejected [<candidateId>] [--reason <text>] [--limit <n>] [--json]
+	  pipeline harness create --summary <text> [--candidate-id <id>] [--source-dir <dir>] [--parent-candidate-ids-json <json>] [--dataset-ids-json <json>] [--json]
   pipeline harness propose --summary <text> [--candidate-id <id>] [--provider <name>] [--source-dir <dir>] [--instructions <text>] [--parent-candidate-ids-json <json>] [--dataset-ids-json <json>] [--json]
   pipeline harness run --summary <text> [--run-id <id>] [--candidate-id <id>] [--dataset-id <id>] [--frontier-id <id>] [--trace-ids-json <json>] [--candidate-trace-map-json <json>] [--export-on-accept] [--json]
   pipeline harness report <runId> [--json]
   pipeline harness runs [--limit <n>] [--json]
   pipeline harness trigger-scan --rules-json <json> [--scan-id <id>] [--json]
   pipeline harness writeback <runId> [--connectors-json <json>] [--json]
-  pipeline harness evaluate <candidateId> --pairs-json <json> [--json]
-  pipeline harness evaluate-dataset <candidateId> --dataset-id <id> --candidate-trace-map-json <json> [--json]
+	  pipeline harness evaluate <candidateId> --pairs-json <json> [--json]
+	  pipeline harness evaluate-dataset <candidateId> --dataset-id <id> --candidate-trace-map-json <json> [--json]
+	  pipeline harness evaluate-taskset <candidateId> --taskset-id <id> --candidate-trace-map-by-task-json <json> [--json]
   pipeline harness audit <candidateId> [--dataset-id <id>] [--leakage-terms-json <json>] [--json]
   pipeline harness rank [--candidate-ids-json <json>] [--json]
   pipeline harness frontier [--frontier-id <id>] [--candidate-ids-json <json>] [--json]
@@ -123,6 +161,9 @@ type CliArgs = {
   reason?: string;
   summary?: string;
   datasetId?: string;
+  taskSetId?: string;
+  verifierId?: string;
+  replayId?: string;
   frontierId?: string;
   sourceDir?: string;
   provider?: string;
@@ -139,6 +180,35 @@ type CliArgs = {
   rolePolicyJson?: string;
   connectorsJson?: string;
   rulesJson?: string;
+  tasksJson?: string;
+  verifierKind?:
+    | "command"
+    | "file_diff"
+    | "json_schema"
+    | "trace_process"
+    | "policy"
+    | "llm_judge";
+  verifierCommandJson?: string;
+  expectedFilesJson?: string;
+  requiredTraceStatusesJson?: string;
+  requiredStepNamesJson?: string;
+  forbiddenPathsJson?: string;
+  rubric?: string;
+  candidateTraceMapByTaskJson?: string;
+  baselineTraceMapByTaskJson?: string;
+  trajectoryIdsJson?: string;
+  baseSkill?: string;
+  candidateSkill?: string;
+  patchId?: string;
+  maxFiles?: number;
+  maxBytes?: number;
+  selectionDelta?: number;
+  regressionPassed?: boolean;
+  policyPassed?: boolean;
+  auditPassed?: boolean;
+  accepted?: boolean;
+  regressionFailuresJson?: string;
+  reviewNotes?: string;
   pairsJson?: string;
   candidateIdsJson?: string;
   traceIdsJson?: string;
@@ -158,31 +228,65 @@ type CliArgs = {
 
 function parseArgs(argv: string[]): CliArgs {
   const out: CliArgs = { command: argv[0] ?? "help" };
-  if (out.command === "config" || out.command === "race" || out.command === "runs" || out.command === "harness" || out.command === "traces" || out.command === "observability") {
+  if (
+    out.command === "config" ||
+    out.command === "race" ||
+    out.command === "runs" ||
+    out.command === "harness" ||
+    out.command === "traces" ||
+    out.command === "observability"
+  ) {
     out.sub = argv[1] ?? "help";
   }
   const multiSub =
-    out.command === "config" || out.command === "race" || out.command === "runs" || out.command === "harness" || out.command === "traces" || out.command === "observability";
+    out.command === "config" ||
+    out.command === "race" ||
+    out.command === "runs" ||
+    out.command === "harness" ||
+    out.command === "traces" ||
+    out.command === "observability";
   const start = multiSub ? 2 : 1;
   let positionalConsumed = 0;
-  if (out.command === "runs" && out.sub === "show" && argv[2] && !argv[2].startsWith("-")) {
-    out.traceId = argv[2];
-    positionalConsumed = 1;
-  }
   if (
-    out.command === "harness" &&
-    (out.sub === "evaluate" || out.sub === "evaluate-dataset" || out.sub === "audit" || out.sub === "decide" || out.sub === "export") &&
+    out.command === "runs" &&
+    out.sub === "show" &&
     argv[2] &&
     !argv[2].startsWith("-")
   ) {
     out.traceId = argv[2];
     positionalConsumed = 1;
   }
-  if (out.command === "harness" && (out.sub === "report" || out.sub === "writeback") && argv[2] && !argv[2].startsWith("-")) {
+  if (
+    out.command === "harness" &&
+    (out.sub === "evaluate" ||
+      out.sub === "evaluate-dataset" ||
+      out.sub === "evaluate-taskset" ||
+      out.sub === "audit" ||
+      out.sub === "decide" ||
+      out.sub === "export" ||
+      out.sub === "skill-patch" ||
+      out.sub === "rejected") &&
+    argv[2] &&
+    !argv[2].startsWith("-")
+  ) {
+    out.traceId = argv[2];
+    positionalConsumed = 1;
+  }
+  if (
+    out.command === "harness" &&
+    (out.sub === "report" || out.sub === "writeback") &&
+    argv[2] &&
+    !argv[2].startsWith("-")
+  ) {
     out.runId = argv[2];
     positionalConsumed = 1;
   }
-  if (out.command === "traces" && out.sub === "show" && argv[2] && !argv[2].startsWith("-")) {
+  if (
+    out.command === "traces" &&
+    out.sub === "show" &&
+    argv[2] &&
+    !argv[2].startsWith("-")
+  ) {
     out.traceId = argv[2];
     positionalConsumed = 1;
   }
@@ -199,7 +303,9 @@ function parseArgs(argv: string[]): CliArgs {
     else if (a === "--profile") {
       const p = next();
       if (!INIT_PROFILES.includes(p as InitProfile)) {
-        throw new Error(`--profile must be one of: ${INIT_PROFILES.join(", ")}`);
+        throw new Error(
+          `--profile must be one of: ${INIT_PROFILES.join(", ")}`,
+        );
       }
       out.profile = p as InitProfile;
     } else if (a === "--max-rounds") out.maxRounds = Number(next());
@@ -211,22 +317,73 @@ function parseArgs(argv: string[]): CliArgs {
     else if (a === "--scan-id") out.scanId = next();
     else if (a === "--candidate-id") out.traceId = next();
     else if (a === "--dataset-id") out.datasetId = next();
+    else if (a === "--taskset-id" || a === "--task-set-id")
+      out.taskSetId = next();
+    else if (a === "--verifier-id") out.verifierId = next();
+    else if (a === "--replay-id") out.replayId = next();
     else if (a === "--frontier-id") out.frontierId = next();
     else if (a === "--source-dir") out.sourceDir = next();
     else if (a === "--provider") out.provider = next();
     else if (a === "--instructions") out.instructions = next();
     else if (a === "--editable-surface-json") out.editableSurfaceJson = next();
     else if (a === "--expected-fixes-json") out.expectedFixesJson = next();
-    else if (a === "--possible-regressions-json") out.possibleRegressionsJson = next();
-    else if (a === "--evidence-trace-ids-json") out.evidenceTraceIdsJson = next();
-    else if (a === "--failure-signature-ids-json") out.failureSignatureIdsJson = next();
-    else if (a === "--parent-candidate-ids-json") out.parentCandidateIdsJson = next();
+    else if (a === "--possible-regressions-json")
+      out.possibleRegressionsJson = next();
+    else if (a === "--evidence-trace-ids-json")
+      out.evidenceTraceIdsJson = next();
+    else if (a === "--failure-signature-ids-json")
+      out.failureSignatureIdsJson = next();
+    else if (a === "--parent-candidate-ids-json")
+      out.parentCandidateIdsJson = next();
     else if (a === "--dataset-ids-json") out.datasetIdsJson = next();
     else if (a === "--leakage-terms-json") out.leakageTermsJson = next();
-    else if (a === "--candidate-trace-map-json") out.candidateTraceMapJson = next();
+    else if (a === "--candidate-trace-map-json")
+      out.candidateTraceMapJson = next();
     else if (a === "--role-policy-json") out.rolePolicyJson = next();
     else if (a === "--connectors-json") out.connectorsJson = next();
     else if (a === "--rules-json") out.rulesJson = next();
+    else if (a === "--tasks-json") out.tasksJson = next();
+    else if (a === "--verifier-kind") {
+      const kind = next();
+      if (
+        ![
+          "command",
+          "file_diff",
+          "json_schema",
+          "trace_process",
+          "policy",
+          "llm_judge",
+        ].includes(kind)
+      )
+        throw new Error("--verifier-kind is invalid");
+      out.verifierKind = kind as CliArgs["verifierKind"];
+    } else if (a === "--verifier-command-json")
+      out.verifierCommandJson = next();
+    else if (a === "--expected-files-json") out.expectedFilesJson = next();
+    else if (a === "--required-trace-statuses-json")
+      out.requiredTraceStatusesJson = next();
+    else if (a === "--required-step-names-json")
+      out.requiredStepNamesJson = next();
+    else if (a === "--forbidden-paths-json") out.forbiddenPathsJson = next();
+    else if (a === "--rubric") out.rubric = next();
+    else if (a === "--candidate-trace-map-by-task-json")
+      out.candidateTraceMapByTaskJson = next();
+    else if (a === "--baseline-trace-map-by-task-json")
+      out.baselineTraceMapByTaskJson = next();
+    else if (a === "--trajectory-ids-json") out.trajectoryIdsJson = next();
+    else if (a === "--base-skill") out.baseSkill = next();
+    else if (a === "--candidate-skill") out.candidateSkill = next();
+    else if (a === "--patch-id") out.patchId = next();
+    else if (a === "--max-files") out.maxFiles = Number(next());
+    else if (a === "--max-bytes") out.maxBytes = Number(next());
+    else if (a === "--selection-delta") out.selectionDelta = Number(next());
+    else if (a === "--regression-passed") out.regressionPassed = true;
+    else if (a === "--policy-passed") out.policyPassed = true;
+    else if (a === "--audit-passed") out.auditPassed = true;
+    else if (a === "--accepted") out.accepted = true;
+    else if (a === "--regression-failures-json")
+      out.regressionFailuresJson = next();
+    else if (a === "--review-notes") out.reviewNotes = next();
     else if (a === "--summary") out.summary = next();
     else if (a === "--pairs-json") out.pairsJson = next();
     else if (a === "--candidate-ids-json") out.candidateIdsJson = next();
@@ -235,10 +392,10 @@ function parseArgs(argv: string[]): CliArgs {
     else if (a === "--since") out.since = next();
     else if (a === "--decision") {
       const decision = next();
-      if (decision !== "accept" && decision !== "rollback") throw new Error("--decision must be accept or rollback");
+      if (decision !== "accept" && decision !== "rollback")
+        throw new Error("--decision must be accept or rollback");
       out.decision = decision;
-    }
-    else if (a === "--session") out.sessionId = next();
+    } else if (a === "--session") out.sessionId = next();
     else if (a === "--winner") out.winner = Number(next());
     else if (a === "--reason") out.reason = next();
     else if (a === "--cleanup-orphans") out.cleanupOrphans = true;
@@ -250,8 +407,7 @@ function parseArgs(argv: string[]): CliArgs {
       const status = next();
       if (out.command === "runs") out.runStatus = status as RunStatus;
       else out.status = status as PipelineStatus;
-    }
-    else if (a === "--session-id") out.sessionFilter = next();
+    } else if (a === "--session-id") out.sessionFilter = next();
     else if (a === "--session") out.sessionFilter = next();
     else if (a === "--limit") out.limit = Number(next());
     else if (a === "--help" || a === "-h") out.command = "help";
@@ -269,9 +425,13 @@ async function cmdRun(args: CliArgs): Promise<void> {
 
   if (args.home) process.env.RUNOFF_HOME = resolve(args.home);
 
-  const configPath = resolve(args.config ?? join(workDir, "pipeline.config.json"));
+  const configPath = resolve(
+    args.config ?? join(workDir, "pipeline.config.json"),
+  );
   if (!existsSync(configPath)) {
-    throw new Error(`Config not found: ${configPath}\nRun: npm run pipeline:init -- --work-dir ${workDir}`);
+    throw new Error(
+      `Config not found: ${configPath}\nRun: npm run pipeline:init -- --work-dir ${workDir}`,
+    );
   }
 
   const runDir = mkdtempSync(join(tmpdir(), "runoff-cli-cwd-"));
@@ -290,7 +450,9 @@ async function cmdRun(args: CliArgs): Promise<void> {
     maxRounds: args.maxRounds,
   });
 
-  console.log(formatPipelineRunOutcomeHints(result, { sessionId: result.checkpointFile }));
+  console.log(
+    formatPipelineRunOutcomeHints(result, { sessionId: result.checkpointFile }),
+  );
   process.exit(result.status === "approved" ? 0 : 1);
 }
 
@@ -302,7 +464,9 @@ function cmdInit(args: CliArgs): void {
   console.log(`  path:    ${result.configPath}`);
   console.log(`  profile: ${result.profile}`);
   console.log("\nNext:");
-  console.log(`  npm run pipeline:config:edit -- --config ${result.configPath}`);
+  console.log(
+    `  npm run pipeline:config:edit -- --config ${result.configPath}`,
+  );
   console.log(`  npm run pipeline:doctor -- --config ${result.configPath}`);
 }
 
@@ -314,7 +478,9 @@ function cmdDoctor(args: CliArgs): void {
 }
 
 function cmdConfigValidate(args: CliArgs): void {
-  const configPath = resolve(args.config ?? join(process.cwd(), "pipeline.config.json"));
+  const configPath = resolve(
+    args.config ?? join(process.cwd(), "pipeline.config.json"),
+  );
   if (!existsSync(configPath)) {
     console.error(`Config not found: ${configPath}`);
     process.exit(1);
@@ -364,7 +530,8 @@ function cmdTraces(args: CliArgs): void {
   }
   if (args.sub === "show") {
     const id = args.traceId;
-    if (!id) throw new Error("trace id required: pipeline traces show <traceId>");
+    if (!id)
+      throw new Error("trace id required: pipeline traces show <traceId>");
     tracesShow(id, { postmortem: args.postmortem, json: args.json });
     return;
   }
@@ -376,8 +543,11 @@ function cmdTraces(args: CliArgs): void {
 }
 
 function cmdRuns(args: CliArgs): void {
-  const configPath = resolve(args.config ?? join(process.cwd(), "pipeline.config.json"));
-  if (!existsSync(configPath)) throw new Error(`Config not found: ${configPath}`);
+  const configPath = resolve(
+    args.config ?? join(process.cwd(), "pipeline.config.json"),
+  );
+  if (!existsSync(configPath))
+    throw new Error(`Config not found: ${configPath}`);
   if (args.home) process.env.RUNOFF_HOME = resolve(args.home);
 
   if (args.sub === "list") {
@@ -391,7 +561,8 @@ function cmdRuns(args: CliArgs): void {
     return;
   }
   if (args.sub === "show") {
-    if (!args.traceId) throw new Error("run id required: pipeline runs show <runId>");
+    if (!args.traceId)
+      throw new Error("run id required: pipeline runs show <runId>");
     runsShow({ configPath, runId: args.traceId, json: args.json });
     return;
   }
@@ -405,17 +576,25 @@ function parseJsonArray<T>(raw: string | undefined, name: string): T[] {
   return parsed as T[];
 }
 
-function parseJsonObject<T>(raw: string | undefined, name: string): T | undefined {
+function parseJsonObject<T>(
+  raw: string | undefined,
+  name: string,
+): T | undefined {
   if (!raw?.trim()) return undefined;
   const parsed = JSON.parse(raw) as unknown;
-  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error(`${name} must be a JSON object`);
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed))
+    throw new Error(`${name} must be a JSON object`);
   return parsed as T;
 }
 
 async function cmdHarness(args: CliArgs): Promise<void> {
   if (args.home) process.env.RUNOFF_HOME = resolve(args.home);
   if (args.sub === "coreset") {
-    harnessEvolveCoreset({ limit: args.limit, since: args.since, json: args.json });
+    harnessEvolveCoreset({
+      limit: args.limit,
+      since: args.since,
+      json: args.json,
+    });
     return;
   }
   if (args.sub === "mine") {
@@ -433,9 +612,135 @@ async function cmdHarness(args: CliArgs): Promise<void> {
       datasetId: args.datasetId,
       name: args.summary,
       traceIds: parseJsonArray(args.traceIdsJson, "--trace-ids-json"),
-      failureSignatureIds: parseJsonArray(args.failureSignatureIdsJson, "--failure-signature-ids-json"),
+      failureSignatureIds: parseJsonArray(
+        args.failureSignatureIdsJson,
+        "--failure-signature-ids-json",
+      ),
       heldInRatio: args.heldInRatio,
-      leakageTerms: parseJsonArray(args.leakageTermsJson, "--leakage-terms-json"),
+      leakageTerms: parseJsonArray(
+        args.leakageTermsJson,
+        "--leakage-terms-json",
+      ),
+      json: args.json,
+    });
+    return;
+  }
+  if (args.sub === "verifier") {
+    if (!args.verifierKind) throw new Error("--verifier-kind is required");
+    if (!args.summary?.trim()) throw new Error("--summary is required");
+    harnessEvolveVerifier({
+      verifierId: args.verifierId,
+      kind: args.verifierKind,
+      summary: args.summary,
+      command: parseJsonArray(
+        args.verifierCommandJson,
+        "--verifier-command-json",
+      ),
+      expectedFiles: parseJsonArray(
+        args.expectedFilesJson,
+        "--expected-files-json",
+      ),
+      requiredTraceStatuses: parseJsonArray(
+        args.requiredTraceStatusesJson,
+        "--required-trace-statuses-json",
+      ),
+      requiredStepNames: parseJsonArray(
+        args.requiredStepNamesJson,
+        "--required-step-names-json",
+      ),
+      forbiddenPaths: parseJsonArray(
+        args.forbiddenPathsJson,
+        "--forbidden-paths-json",
+      ),
+      rubric: args.rubric,
+      json: args.json,
+    });
+    return;
+  }
+  if (args.sub === "verifiers") {
+    harnessEvolveVerifiers({ limit: args.limit, json: args.json });
+    return;
+  }
+  if (args.sub === "taskset") {
+    if (!args.summary?.trim()) throw new Error("--summary is required");
+    harnessEvolveTaskSet({
+      taskSetId: args.taskSetId,
+      name: args.summary,
+      tasks: parseJsonArray(args.tasksJson, "--tasks-json"),
+      traceIds: parseJsonArray(args.traceIdsJson, "--trace-ids-json"),
+      verifierId: args.verifierId,
+      heldInRatio: args.heldInRatio,
+      leakageTerms: parseJsonArray(
+        args.leakageTermsJson,
+        "--leakage-terms-json",
+      ),
+      json: args.json,
+    });
+    return;
+  }
+  if (args.sub === "tasksets") {
+    harnessEvolveTaskSets({ limit: args.limit, json: args.json });
+    return;
+  }
+  if (args.sub === "trajectory") {
+    if (!args.traceId) throw new Error("--trace-id is required");
+    harnessEvolveTrajectory({
+      traceId: args.traceId,
+      runId: args.runId,
+      skillVersion: args.baseSkill,
+      json: args.json,
+    });
+    return;
+  }
+  if (args.sub === "replay") {
+    harnessEvolveReplay({
+      replayId: args.replayId,
+      runId: args.runId,
+      taskSetId: args.taskSetId,
+      candidateId: args.traceId,
+      trajectoryIds: parseJsonArray(
+        args.trajectoryIdsJson,
+        "--trajectory-ids-json",
+      ),
+      json: args.json,
+    });
+    return;
+  }
+  if (args.sub === "skill-patch") {
+    if (!args.traceId)
+      throw new Error(
+        "candidate id required: pipeline harness skill-patch <candidateId>",
+      );
+    if (!args.baseSkill?.trim()) throw new Error("--base-skill is required");
+    harnessEvolveSkillPatch({
+      candidateId: args.traceId,
+      baseSkill: args.baseSkill,
+      candidateSkill: args.candidateSkill,
+      patchId: args.patchId,
+      maxFiles: args.maxFiles,
+      maxBytes: args.maxBytes,
+      selectionDelta: args.selectionDelta,
+      regressionPassed: args.regressionPassed,
+      policyPassed: args.policyPassed,
+      auditPassed: args.auditPassed,
+      accepted: args.accepted,
+      reason: args.reason,
+      json: args.json,
+    });
+    return;
+  }
+  if (args.sub === "rejected") {
+    harnessEvolveRejected({
+      candidateId: args.traceId,
+      patchId: args.patchId,
+      selectionDelta: args.selectionDelta,
+      regressionFailures: parseJsonArray(
+        args.regressionFailuresJson,
+        "--regression-failures-json",
+      ),
+      rejectionReason: args.reason,
+      reviewNotes: args.reviewNotes,
+      limit: args.limit,
       json: args.json,
     });
     return;
@@ -446,21 +751,45 @@ async function cmdHarness(args: CliArgs): Promise<void> {
       candidateId: args.traceId,
       summary: args.summary,
       sourceDir: args.sourceDir,
-      editableSurface: parseJsonArray(args.editableSurfaceJson, "--editable-surface-json"),
-      expectedFixes: parseJsonArray(args.expectedFixesJson, "--expected-fixes-json"),
-      possibleRegressions: parseJsonArray(args.possibleRegressionsJson, "--possible-regressions-json"),
-      evidenceTraceIds: parseJsonArray(args.evidenceTraceIdsJson, "--evidence-trace-ids-json"),
-      failureSignatureIds: parseJsonArray(args.failureSignatureIdsJson, "--failure-signature-ids-json"),
-      parentCandidateIds: parseJsonArray(args.parentCandidateIdsJson, "--parent-candidate-ids-json"),
+      editableSurface: parseJsonArray(
+        args.editableSurfaceJson,
+        "--editable-surface-json",
+      ),
+      expectedFixes: parseJsonArray(
+        args.expectedFixesJson,
+        "--expected-fixes-json",
+      ),
+      possibleRegressions: parseJsonArray(
+        args.possibleRegressionsJson,
+        "--possible-regressions-json",
+      ),
+      evidenceTraceIds: parseJsonArray(
+        args.evidenceTraceIdsJson,
+        "--evidence-trace-ids-json",
+      ),
+      failureSignatureIds: parseJsonArray(
+        args.failureSignatureIdsJson,
+        "--failure-signature-ids-json",
+      ),
+      parentCandidateIds: parseJsonArray(
+        args.parentCandidateIdsJson,
+        "--parent-candidate-ids-json",
+      ),
       datasetIds: parseJsonArray(args.datasetIdsJson, "--dataset-ids-json"),
       json: args.json,
     });
     return;
   }
   if (args.sub === "propose") {
-    if (!args.summary?.trim() && !args.traceId) throw new Error("--summary is required unless --candidate-id targets an existing candidate");
-    const configPath = resolve(args.config ?? join(process.cwd(), "pipeline.config.json"));
-    if (!existsSync(configPath)) throw new Error(`Config not found: ${configPath}`);
+    if (!args.summary?.trim() && !args.traceId)
+      throw new Error(
+        "--summary is required unless --candidate-id targets an existing candidate",
+      );
+    const configPath = resolve(
+      args.config ?? join(process.cwd(), "pipeline.config.json"),
+    );
+    if (!existsSync(configPath))
+      throw new Error(`Config not found: ${configPath}`);
     await harnessEvolvePropose({
       configPath,
       candidateId: args.traceId,
@@ -468,12 +797,30 @@ async function cmdHarness(args: CliArgs): Promise<void> {
       sourceDir: args.sourceDir,
       provider: args.provider,
       instructions: args.instructions,
-      editableSurface: parseJsonArray(args.editableSurfaceJson, "--editable-surface-json"),
-      expectedFixes: parseJsonArray(args.expectedFixesJson, "--expected-fixes-json"),
-      possibleRegressions: parseJsonArray(args.possibleRegressionsJson, "--possible-regressions-json"),
-      evidenceTraceIds: parseJsonArray(args.evidenceTraceIdsJson, "--evidence-trace-ids-json"),
-      failureSignatureIds: parseJsonArray(args.failureSignatureIdsJson, "--failure-signature-ids-json"),
-      parentCandidateIds: parseJsonArray(args.parentCandidateIdsJson, "--parent-candidate-ids-json"),
+      editableSurface: parseJsonArray(
+        args.editableSurfaceJson,
+        "--editable-surface-json",
+      ),
+      expectedFixes: parseJsonArray(
+        args.expectedFixesJson,
+        "--expected-fixes-json",
+      ),
+      possibleRegressions: parseJsonArray(
+        args.possibleRegressionsJson,
+        "--possible-regressions-json",
+      ),
+      evidenceTraceIds: parseJsonArray(
+        args.evidenceTraceIdsJson,
+        "--evidence-trace-ids-json",
+      ),
+      failureSignatureIds: parseJsonArray(
+        args.failureSignatureIdsJson,
+        "--failure-signature-ids-json",
+      ),
+      parentCandidateIds: parseJsonArray(
+        args.parentCandidateIdsJson,
+        "--parent-candidate-ids-json",
+      ),
       datasetIds: parseJsonArray(args.datasetIdsJson, "--dataset-ids-json"),
       json: args.json,
     });
@@ -481,35 +828,63 @@ async function cmdHarness(args: CliArgs): Promise<void> {
   }
   if (args.sub === "run") {
     if (!args.summary?.trim()) throw new Error("--summary is required");
-    const configPath = resolve(args.config ?? join(process.cwd(), "pipeline.config.json"));
-    if (!existsSync(configPath)) throw new Error(`Config not found: ${configPath}`);
-    const candidateTraceMap = args.candidateTraceMapJson ? JSON.parse(args.candidateTraceMapJson) as Record<string, string> : undefined;
+    const configPath = resolve(
+      args.config ?? join(process.cwd(), "pipeline.config.json"),
+    );
+    if (!existsSync(configPath))
+      throw new Error(`Config not found: ${configPath}`);
+    const candidateTraceMap = args.candidateTraceMapJson
+      ? (JSON.parse(args.candidateTraceMapJson) as Record<string, string>)
+      : undefined;
+    const candidateTraceMapByTask = args.candidateTraceMapByTaskJson
+      ? (JSON.parse(args.candidateTraceMapByTaskJson) as Record<string, string>)
+      : undefined;
     await harnessEvolveRun({
       runId: args.runId,
       configPath,
       candidateId: args.traceId,
       datasetId: args.datasetId,
+      taskSetId: args.taskSetId,
       frontierId: args.frontierId,
       summary: args.summary,
       sourceDir: args.sourceDir,
       provider: args.provider,
       instructions: args.instructions,
-      editableSurface: parseJsonArray(args.editableSurfaceJson, "--editable-surface-json"),
-      expectedFixes: parseJsonArray(args.expectedFixesJson, "--expected-fixes-json"),
-      possibleRegressions: parseJsonArray(args.possibleRegressionsJson, "--possible-regressions-json"),
+      editableSurface: parseJsonArray(
+        args.editableSurfaceJson,
+        "--editable-surface-json",
+      ),
+      expectedFixes: parseJsonArray(
+        args.expectedFixesJson,
+        "--expected-fixes-json",
+      ),
+      possibleRegressions: parseJsonArray(
+        args.possibleRegressionsJson,
+        "--possible-regressions-json",
+      ),
       traceIds: parseJsonArray(args.traceIdsJson, "--trace-ids-json"),
-      failureSignatureIds: parseJsonArray(args.failureSignatureIdsJson, "--failure-signature-ids-json"),
-      leakageTerms: parseJsonArray(args.leakageTermsJson, "--leakage-terms-json"),
+      failureSignatureIds: parseJsonArray(
+        args.failureSignatureIdsJson,
+        "--failure-signature-ids-json",
+      ),
+      leakageTerms: parseJsonArray(
+        args.leakageTermsJson,
+        "--leakage-terms-json",
+      ),
       candidateTraceMap,
+      candidateTraceMapByTask,
       rolePolicy: parseJsonObject(args.rolePolicyJson, "--role-policy-json"),
       connectors: parseJsonArray(args.connectorsJson, "--connectors-json"),
+      baseSkill: args.baseSkill,
+      candidateSkill: args.candidateSkill,
       exportOnAccept: args.exportOnAccept,
       json: args.json,
     });
     return;
   }
   if (args.sub === "report") {
-    if (!args.runId) throw new Error("run id required: pipeline harness report <runId>");
+    if (!args.runId)
+      throw new Error("run id required: pipeline harness report <runId>");
     harnessEvolveReport({ runId: args.runId, json: args.json });
     return;
   }
@@ -526,7 +901,8 @@ async function cmdHarness(args: CliArgs): Promise<void> {
     return;
   }
   if (args.sub === "writeback") {
-    if (!args.runId) throw new Error("run id required: pipeline harness writeback <runId>");
+    if (!args.runId)
+      throw new Error("run id required: pipeline harness writeback <runId>");
     harnessEvolveWriteback({
       runId: args.runId,
       targets: parseJsonArray(args.connectorsJson, "--connectors-json"),
@@ -535,7 +911,10 @@ async function cmdHarness(args: CliArgs): Promise<void> {
     return;
   }
   if (args.sub === "evaluate") {
-    if (!args.traceId) throw new Error("candidate id required: pipeline harness evaluate <candidateId>");
+    if (!args.traceId)
+      throw new Error(
+        "candidate id required: pipeline harness evaluate <candidateId>",
+      );
     harnessEvolveEvaluate({
       candidateId: args.traceId,
       pairs: parseJsonArray(args.pairsJson, "--pairs-json"),
@@ -544,9 +923,14 @@ async function cmdHarness(args: CliArgs): Promise<void> {
     return;
   }
   if (args.sub === "evaluate-dataset") {
-    if (!args.traceId) throw new Error("candidate id required: pipeline harness evaluate-dataset <candidateId>");
+    if (!args.traceId)
+      throw new Error(
+        "candidate id required: pipeline harness evaluate-dataset <candidateId>",
+      );
     if (!args.datasetId) throw new Error("--dataset-id is required");
-    const candidateTraceMap = args.candidateTraceMapJson ? JSON.parse(args.candidateTraceMapJson) as Record<string, string> : {};
+    const candidateTraceMap = args.candidateTraceMapJson
+      ? (JSON.parse(args.candidateTraceMapJson) as Record<string, string>)
+      : {};
     harnessEvolveEvaluateDataset({
       candidateId: args.traceId,
       datasetId: args.datasetId,
@@ -555,19 +939,51 @@ async function cmdHarness(args: CliArgs): Promise<void> {
     });
     return;
   }
+  if (args.sub === "evaluate-taskset") {
+    if (!args.traceId)
+      throw new Error(
+        "candidate id required: pipeline harness evaluate-taskset <candidateId>",
+      );
+    if (!args.taskSetId) throw new Error("--taskset-id is required");
+    const candidateTraceMap = args.candidateTraceMapByTaskJson
+      ? (JSON.parse(args.candidateTraceMapByTaskJson) as Record<string, string>)
+      : {};
+    const baselineTraceMap = args.baselineTraceMapByTaskJson
+      ? (JSON.parse(args.baselineTraceMapByTaskJson) as Record<string, string>)
+      : undefined;
+    harnessEvolveEvaluateTaskSet({
+      candidateId: args.traceId,
+      taskSetId: args.taskSetId,
+      candidateTraceMap,
+      baselineTraceMap,
+      runId: args.runId,
+      skillVersion: args.baseSkill,
+      json: args.json,
+    });
+    return;
+  }
   if (args.sub === "audit") {
-    if (!args.traceId) throw new Error("candidate id required: pipeline harness audit <candidateId>");
+    if (!args.traceId)
+      throw new Error(
+        "candidate id required: pipeline harness audit <candidateId>",
+      );
     harnessEvolveAudit({
       candidateId: args.traceId,
       datasetId: args.datasetId,
-      leakageTerms: parseJsonArray(args.leakageTermsJson, "--leakage-terms-json"),
+      leakageTerms: parseJsonArray(
+        args.leakageTermsJson,
+        "--leakage-terms-json",
+      ),
       json: args.json,
     });
     return;
   }
   if (args.sub === "rank") {
     harnessEvolveRank({
-      candidateIds: parseJsonArray(args.candidateIdsJson, "--candidate-ids-json"),
+      candidateIds: parseJsonArray(
+        args.candidateIdsJson,
+        "--candidate-ids-json",
+      ),
       json: args.json,
     });
     return;
@@ -575,13 +991,19 @@ async function cmdHarness(args: CliArgs): Promise<void> {
   if (args.sub === "frontier") {
     harnessEvolveFrontier({
       frontierId: args.frontierId,
-      candidateIds: parseJsonArray(args.candidateIdsJson, "--candidate-ids-json"),
+      candidateIds: parseJsonArray(
+        args.candidateIdsJson,
+        "--candidate-ids-json",
+      ),
       json: args.json,
     });
     return;
   }
   if (args.sub === "decide") {
-    if (!args.traceId) throw new Error("candidate id required: pipeline harness decide <candidateId>");
+    if (!args.traceId)
+      throw new Error(
+        "candidate id required: pipeline harness decide <candidateId>",
+      );
     harnessEvolveDecide({
       candidateId: args.traceId,
       decision: args.decision,
@@ -591,7 +1013,10 @@ async function cmdHarness(args: CliArgs): Promise<void> {
     return;
   }
   if (args.sub === "export") {
-    if (!args.traceId) throw new Error("candidate id required: pipeline harness export <candidateId>");
+    if (!args.traceId)
+      throw new Error(
+        "candidate id required: pipeline harness export <candidateId>",
+      );
     harnessEvolveExport({
       candidateId: args.traceId,
       json: args.json,
@@ -602,7 +1027,9 @@ async function cmdHarness(args: CliArgs): Promise<void> {
     harnessEvolveList({ limit: args.limit, json: args.json });
     return;
   }
-  throw new Error("Usage: pipeline harness coreset|mine|dataset|create|propose|run|report|runs|trigger-scan|writeback|evaluate|evaluate-dataset|audit|rank|frontier|decide|export|list");
+  throw new Error(
+    "Usage: pipeline harness coreset|mine|dataset|create|propose|run|report|runs|trigger-scan|writeback|evaluate|evaluate-dataset|audit|rank|frontier|decide|export|list",
+  );
 }
 
 async function cmdObservabilityUi(args: CliArgs): Promise<void> {
@@ -620,7 +1047,9 @@ async function cmdObservabilityUi(args: CliArgs): Promise<void> {
 }
 
 async function cmdConfigEdit(args: CliArgs): Promise<void> {
-  const configPath = resolve(args.config ?? join(process.cwd(), "pipeline.config.json"));
+  const configPath = resolve(
+    args.config ?? join(process.cwd(), "pipeline.config.json"),
+  );
   if (!existsSync(configPath)) {
     throw new Error(
       `Config not found: ${configPath}\nRun: npm run pipeline:init -- --work-dir <dir> --profile feature`,

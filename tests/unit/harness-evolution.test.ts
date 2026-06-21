@@ -1,28 +1,48 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import type { PipelineTrace } from "../../src/observability/trace.ts";
 import { recordTrace } from "../../src/observability/trace.ts";
-import type { LLMProvider, LLMRequest, LLMResponse, ProviderMode } from "../../src/providers/types.ts";
+import type {
+  LLMProvider,
+  LLMRequest,
+  LLMResponse,
+  ProviderMode,
+} from "../../src/providers/types.ts";
 import {
   auditHarnessCandidate,
   createHarnessCandidate,
   createHarnessDataset,
+  createHarnessReplayManifest,
+  createHarnessTaskSet,
+  createHarnessTrajectory,
   decideHarnessCandidate,
+  decideHarnessSkillPatch,
   evaluateHarnessCandidate,
   evaluateHarnessDataset,
+  evaluateHarnessTaskSet,
   exportHarnessPromotionBundle,
   loadHarnessCandidate,
   loadHarnessDataset,
   loadHarnessEvolutionRun,
   listHarnessCandidates,
+  listHarnessRejectedBuffer,
   listHarnessEvolutionRuns,
   mineHarnessFailureSignatures,
   proposeHarnessCandidate,
   queryHarnessEvolutionReport,
   rankHarnessCandidates,
+  recordHarnessRejectedBuffer,
+  registerHarnessVerifier,
   runHarnessEvolution,
   scanHarnessTriggers,
   selectHarnessCoreset,
@@ -30,7 +50,10 @@ import {
   writeHarnessConnectorReport,
 } from "../../src/orchestration/harness-evolution.ts";
 
-function trace(id: string, overrides: Partial<PipelineTrace> = {}): PipelineTrace {
+function trace(
+  id: string,
+  overrides: Partial<PipelineTrace> = {},
+): PipelineTrace {
   return {
     id,
     prompt: `fix task ${id}`,
@@ -53,7 +76,10 @@ class ProposalProvider implements LLMProvider {
 
   constructor(
     public name: string,
-    private response: Omit<Extract<LLMResponse, { kind: "agent" }>, "kind" | "model">,
+    private response: Omit<
+      Extract<LLMResponse, { kind: "agent" }>,
+      "kind" | "model"
+    >,
     private onExecute?: (req: LLMRequest) => void,
   ) {}
 
@@ -103,15 +129,23 @@ test("harness evolution proposer writes proposal inside isolated variant", async
   const oldHome = process.env.RUNOFF_HOME;
   try {
     process.env.RUNOFF_HOME = join(dir, "home");
-    const provider = new ProposalProvider("agent-proposer", {
-      summary: "Added a stricter observation hint check",
-      changes: "diff --git a/skill/SKILL.md b/skill/SKILL.md\n",
-      filesModified: ["skill/SKILL.md"],
-      diffStat: "1 file changed, 2 insertions(+)",
-    }, (req) => {
-      mkdirSync(join(req.workDir!, "skill"), { recursive: true });
-      writeFileSync(join(req.workDir!, "skill", "SKILL.md"), "updated", "utf-8");
-    });
+    const provider = new ProposalProvider(
+      "agent-proposer",
+      {
+        summary: "Added a stricter observation hint check",
+        changes: "diff --git a/skill/SKILL.md b/skill/SKILL.md\n",
+        filesModified: ["skill/SKILL.md"],
+        diffStat: "1 file changed, 2 insertions(+)",
+      },
+      (req) => {
+        mkdirSync(join(req.workDir!, "skill"), { recursive: true });
+        writeFileSync(
+          join(req.workDir!, "skill", "SKILL.md"),
+          "updated",
+          "utf-8",
+        );
+      },
+    );
 
     const result = await proposeHarnessCandidate({
       candidateId: "candidate-propose",
@@ -129,16 +163,33 @@ test("harness evolution proposer writes proposal inside isolated variant", async
     assert.equal(result.proposal.observedDiffStat, "1 files changed (1 added)");
     assert.deepEqual(result.proposal.unreportedFilesModified, []);
     assert.deepEqual(result.proposal.reportedButUnchangedFiles, []);
-    assert.equal(provider.lastRequest?.workDir, result.candidate.variant.variantDir);
+    assert.equal(
+      provider.lastRequest?.workDir,
+      result.candidate.variant.variantDir,
+    );
     assert.equal(provider.lastRequest?.stepName, "harness-propose");
-    assert.match(provider.lastRequest?.prompt ?? "", /Keep nextHint tool names current/);
-    assert.match(provider.lastRequest?.prompt ?? "", /Update the skill guidance only/);
+    assert.match(
+      provider.lastRequest?.prompt ?? "",
+      /Keep nextHint tool names current/,
+    );
+    assert.match(
+      provider.lastRequest?.prompt ?? "",
+      /Update the skill guidance only/,
+    );
 
     const persisted = loadHarnessCandidate("candidate-propose");
     assert.equal(persisted?.proposal?.provider, "agent-proposer");
-    const proposalPath = join(process.env.RUNOFF_HOME, "harness-evolution", "candidates", "candidate-propose", "proposal.json");
+    const proposalPath = join(
+      process.env.RUNOFF_HOME,
+      "harness-evolution",
+      "candidates",
+      "candidate-propose",
+      "proposal.json",
+    );
     assert.equal(existsSync(proposalPath), true);
-    const proposal = JSON.parse(readFileSync(proposalPath, "utf-8")) as { surfaceViolations: string[] };
+    const proposal = JSON.parse(readFileSync(proposalPath, "utf-8")) as {
+      surfaceViolations: string[];
+    };
     assert.deepEqual(proposal.surfaceViolations, []);
   } finally {
     if (oldHome === undefined) delete process.env.RUNOFF_HOME;
@@ -152,33 +203,73 @@ test("harness evolution mines failure signatures and proposer receives history c
   const oldHome = process.env.RUNOFF_HOME;
   try {
     process.env.RUNOFF_HOME = join(dir, "home");
-    recordTrace(trace("mine-a", {
-      finalStatus: "failed",
-      steps: [{ name: "implement", provider: "mock", durationMs: 10, round: 1, error: "missing verification command" }],
-      hasVerifyResults: false,
-    }));
-    recordTrace(trace("mine-b", {
-      finalStatus: "failed",
-      steps: [{ name: "implement", provider: "mock", durationMs: 12, round: 1, error: "missing verification command" }],
-      hasVerifyResults: false,
-    }));
+    recordTrace(
+      trace("mine-a", {
+        finalStatus: "failed",
+        steps: [
+          {
+            name: "implement",
+            provider: "mock",
+            durationMs: 10,
+            round: 1,
+            error: "missing verification command",
+          },
+        ],
+        hasVerifyResults: false,
+      }),
+    );
+    recordTrace(
+      trace("mine-b", {
+        finalStatus: "failed",
+        steps: [
+          {
+            name: "implement",
+            provider: "mock",
+            durationMs: 12,
+            round: 1,
+            error: "missing verification command",
+          },
+        ],
+        hasVerifyResults: false,
+      }),
+    );
 
-    const signatures = mineHarnessFailureSignatures({ traceIds: ["mine-a", "mine-b"] });
+    const signatures = mineHarnessFailureSignatures({
+      traceIds: ["mine-a", "mine-b"],
+    });
 
     assert.equal(signatures.length, 1);
     assert.equal(signatures[0]?.category, "step_error");
     assert.deepEqual(signatures[0]?.evidenceTraceIds, ["mine-a", "mine-b"]);
-    assert.equal(existsSync(join(process.env.RUNOFF_HOME, "harness-evolution", "failure-signatures", `${signatures[0]!.signatureId}.json`)), true);
+    assert.equal(
+      existsSync(
+        join(
+          process.env.RUNOFF_HOME,
+          "harness-evolution",
+          "failure-signatures",
+          `${signatures[0]!.signatureId}.json`,
+        ),
+      ),
+      true,
+    );
 
-    const provider = new ProposalProvider("agent-proposer", {
-      summary: "Uses mined failure signature",
-      changes: "diff --git a/skill/SKILL.md b/skill/SKILL.md\n",
-      filesModified: ["skill/SKILL.md"],
-      diffStat: "1 file changed",
-    }, (req) => {
-      mkdirSync(join(req.workDir!, "skill"), { recursive: true });
-      writeFileSync(join(req.workDir!, "skill", "SKILL.md"), "updated", "utf-8");
-    });
+    const provider = new ProposalProvider(
+      "agent-proposer",
+      {
+        summary: "Uses mined failure signature",
+        changes: "diff --git a/skill/SKILL.md b/skill/SKILL.md\n",
+        filesModified: ["skill/SKILL.md"],
+        diffStat: "1 file changed",
+      },
+      (req) => {
+        mkdirSync(join(req.workDir!, "skill"), { recursive: true });
+        writeFileSync(
+          join(req.workDir!, "skill", "SKILL.md"),
+          "updated",
+          "utf-8",
+        );
+      },
+    );
     const result = await proposeHarnessCandidate({
       candidateId: "candidate-mined",
       provider,
@@ -187,11 +278,16 @@ test("harness evolution mines failure signatures and proposer receives history c
       failureSignatureIds: [signatures[0]!.signatureId],
     });
 
-    assert.deepEqual(result.proposal.failureSignatureIds, [signatures[0]!.signatureId]);
+    assert.deepEqual(result.proposal.failureSignatureIds, [
+      signatures[0]!.signatureId,
+    ]);
     assert.ok(result.proposal.historyContextPath);
     assert.equal(existsSync(result.proposal.historyContextPath!), true);
     assert.match(provider.lastRequest?.prompt ?? "", /Failure signatures/);
-    assert.match(provider.lastRequest?.prompt ?? "", new RegExp(signatures[0]!.signatureId));
+    assert.match(
+      provider.lastRequest?.prompt ?? "",
+      new RegExp(signatures[0]!.signatureId),
+    );
   } finally {
     if (oldHome === undefined) delete process.env.RUNOFF_HOME;
     else process.env.RUNOFF_HOME = oldHome;
@@ -209,15 +305,23 @@ test("harness evolution proposer flags files outside editable surface", async ()
       summary: "Restrict proposer edits",
       editableSurface: ["skill/SKILL.md"],
     });
-    const provider = new ProposalProvider("agent-proposer", {
-      summary: "Changed skill plus source registration",
-      changes: "diff --git a/src/index.ts b/src/index.ts\n",
-      filesModified: ["skill/SKILL.md", "src/index.ts"],
-      diffStat: "2 files changed",
-    }, (req) => {
-      mkdirSync(join(req.workDir!, "skill"), { recursive: true });
-      writeFileSync(join(req.workDir!, "skill", "SKILL.md"), "updated", "utf-8");
-    });
+    const provider = new ProposalProvider(
+      "agent-proposer",
+      {
+        summary: "Changed skill plus source registration",
+        changes: "diff --git a/src/index.ts b/src/index.ts\n",
+        filesModified: ["skill/SKILL.md", "src/index.ts"],
+        diffStat: "2 files changed",
+      },
+      (req) => {
+        mkdirSync(join(req.workDir!, "skill"), { recursive: true });
+        writeFileSync(
+          join(req.workDir!, "skill", "SKILL.md"),
+          "updated",
+          "utf-8",
+        );
+      },
+    );
 
     const result = await proposeHarnessCandidate({
       candidateId: "candidate-violation",
@@ -227,8 +331,13 @@ test("harness evolution proposer flags files outside editable surface", async ()
     assert.equal(result.proposal.failed, true);
     assert.deepEqual(result.proposal.surfaceViolations, ["src/index.ts"]);
     assert.match(result.proposal.error ?? "", /outside editable surface/);
-    assert.deepEqual(result.proposal.reportedButUnchangedFiles, ["src/index.ts"]);
-    assert.equal(loadHarnessCandidate("candidate-violation")?.proposal?.failed, true);
+    assert.deepEqual(result.proposal.reportedButUnchangedFiles, [
+      "src/index.ts",
+    ]);
+    assert.equal(
+      loadHarnessCandidate("candidate-violation")?.proposal?.failed,
+      true,
+    );
   } finally {
     if (oldHome === undefined) delete process.env.RUNOFF_HOME;
     else process.env.RUNOFF_HOME = oldHome;
@@ -241,17 +350,29 @@ test("harness evolution proposer detects unreported variant edits", async () => 
   const oldHome = process.env.RUNOFF_HOME;
   try {
     process.env.RUNOFF_HOME = join(dir, "home");
-    const provider = new ProposalProvider("agent-proposer", {
-      summary: "Changed files but forgot to report them",
-      changes: "",
-      filesModified: [],
-      diffStat: "0 files changed",
-    }, (req) => {
-      mkdirSync(join(req.workDir!, "skill"), { recursive: true });
-      writeFileSync(join(req.workDir!, "skill", "SKILL.md"), "updated", "utf-8");
-      mkdirSync(join(req.workDir!, "src"), { recursive: true });
-      writeFileSync(join(req.workDir!, "src", "index.ts"), "export const changed = true;\n", "utf-8");
-    });
+    const provider = new ProposalProvider(
+      "agent-proposer",
+      {
+        summary: "Changed files but forgot to report them",
+        changes: "",
+        filesModified: [],
+        diffStat: "0 files changed",
+      },
+      (req) => {
+        mkdirSync(join(req.workDir!, "skill"), { recursive: true });
+        writeFileSync(
+          join(req.workDir!, "skill", "SKILL.md"),
+          "updated",
+          "utf-8",
+        );
+        mkdirSync(join(req.workDir!, "src"), { recursive: true });
+        writeFileSync(
+          join(req.workDir!, "src", "index.ts"),
+          "export const changed = true;\n",
+          "utf-8",
+        );
+      },
+    );
 
     const result = await proposeHarnessCandidate({
       candidateId: "candidate-unreported",
@@ -262,8 +383,14 @@ test("harness evolution proposer detects unreported variant edits", async () => 
 
     assert.equal(result.proposal.failed, true);
     assert.deepEqual(result.proposal.filesModified, []);
-    assert.deepEqual(result.proposal.observedFilesModified, ["skill/SKILL.md", "src/index.ts"]);
-    assert.deepEqual(result.proposal.unreportedFilesModified, ["skill/SKILL.md", "src/index.ts"]);
+    assert.deepEqual(result.proposal.observedFilesModified, [
+      "skill/SKILL.md",
+      "src/index.ts",
+    ]);
+    assert.deepEqual(result.proposal.unreportedFilesModified, [
+      "skill/SKILL.md",
+      "src/index.ts",
+    ]);
     assert.deepEqual(result.proposal.surfaceViolations, ["src/index.ts"]);
     assert.match(result.proposal.observedDiffStat, /2 files changed/);
   } finally {
@@ -278,9 +405,23 @@ test("harness evolution selects difficult diverse coreset", () => {
   const oldHome = process.env.RUNOFF_HOME;
   try {
     process.env.RUNOFF_HOME = join(dir, "home");
-    recordTrace(trace("t1", { finalStatus: "approved", prompt: "simple docs update" }));
-    recordTrace(trace("t2", { finalStatus: "failed", totalRounds: 3, prompt: "database migration failure" }));
-    recordTrace(trace("t3", { finalStatus: "max_rounds", totalRounds: 4, prompt: "frontend state failure" }));
+    recordTrace(
+      trace("t1", { finalStatus: "approved", prompt: "simple docs update" }),
+    );
+    recordTrace(
+      trace("t2", {
+        finalStatus: "failed",
+        totalRounds: 3,
+        prompt: "database migration failure",
+      }),
+    );
+    recordTrace(
+      trace("t3", {
+        finalStatus: "max_rounds",
+        totalRounds: 4,
+        prompt: "frontend state failure",
+      }),
+    );
 
     const items = selectHarnessCoreset({ limit: 2 });
 
@@ -299,7 +440,10 @@ test("harness evolution gates require held-in and held-out with improvement", ()
   const oldHome = process.env.RUNOFF_HOME;
   try {
     process.env.RUNOFF_HOME = join(dir, "home");
-    createHarnessCandidate({ candidateId: "candidate-b", summary: "Improve recovery" });
+    createHarnessCandidate({
+      candidateId: "candidate-b",
+      summary: "Improve recovery",
+    });
     recordTrace(trace("base-in", { finalStatus: "failed" }));
     recordTrace(trace("cand-in", { finalStatus: "approved" }));
     recordTrace(trace("base-out", { totalDurationMs: 2000 }));
@@ -308,8 +452,16 @@ test("harness evolution gates require held-in and held-out with improvement", ()
     const gate = evaluateHarnessCandidate({
       candidateId: "candidate-b",
       pairs: [
-        { split: "held-in", baselineTraceId: "base-in", candidateTraceId: "cand-in" },
-        { split: "held-out", baselineTraceId: "base-out", candidateTraceId: "cand-out" },
+        {
+          split: "held-in",
+          baselineTraceId: "base-in",
+          candidateTraceId: "cand-in",
+        },
+        {
+          split: "held-out",
+          baselineTraceId: "base-out",
+          candidateTraceId: "cand-out",
+        },
       ],
     });
 
@@ -329,10 +481,30 @@ test("harness evolution persists dataset split and evaluates it as candidate gat
   const oldHome = process.env.RUNOFF_HOME;
   try {
     process.env.RUNOFF_HOME = join(dir, "home");
-    recordTrace(trace("dataset-base-a", { finalStatus: "failed", timestamp: "2026-06-20T00:00:01.000Z" }));
-    recordTrace(trace("dataset-base-b", { totalDurationMs: 2000, timestamp: "2026-06-20T00:00:02.000Z" }));
-    recordTrace(trace("dataset-cand-a", { finalStatus: "approved", timestamp: "2026-06-20T00:00:03.000Z" }));
-    recordTrace(trace("dataset-cand-b", { totalDurationMs: 1000, timestamp: "2026-06-20T00:00:04.000Z" }));
+    recordTrace(
+      trace("dataset-base-a", {
+        finalStatus: "failed",
+        timestamp: "2026-06-20T00:00:01.000Z",
+      }),
+    );
+    recordTrace(
+      trace("dataset-base-b", {
+        totalDurationMs: 2000,
+        timestamp: "2026-06-20T00:00:02.000Z",
+      }),
+    );
+    recordTrace(
+      trace("dataset-cand-a", {
+        finalStatus: "approved",
+        timestamp: "2026-06-20T00:00:03.000Z",
+      }),
+    );
+    recordTrace(
+      trace("dataset-cand-b", {
+        totalDurationMs: 1000,
+        timestamp: "2026-06-20T00:00:04.000Z",
+      }),
+    );
     createHarnessCandidate({
       candidateId: "candidate-dataset",
       summary: "Dataset-backed candidate",
@@ -357,14 +529,239 @@ test("harness evolution persists dataset split and evaluates it as candidate gat
 
     assert.equal(dataset.heldIn.length, 1);
     assert.equal(dataset.heldOut.length, 1);
-    assert.deepEqual(loadHarnessDataset("dataset-main")?.leakageTerms, ["heldout-secret"]);
+    assert.deepEqual(loadHarnessDataset("dataset-main")?.leakageTerms, [
+      "heldout-secret",
+    ]);
     assert.equal(evaluation.gate.accepted, true);
-    assert.deepEqual(evaluation.pairs.map((pair) => pair.split), ["held-in", "held-out"]);
-    assert.deepEqual(loadHarnessCandidate("candidate-dataset")?.lineage?.datasetIds, ["dataset-main"]);
+    assert.deepEqual(
+      evaluation.pairs.map((pair) => pair.split),
+      ["held-in", "held-out"],
+    );
+    assert.deepEqual(
+      loadHarnessCandidate("candidate-dataset")?.lineage?.datasetIds,
+      ["dataset-main"],
+    );
     assert.equal(
-      existsSync(join(process.env.RUNOFF_HOME, "harness-evolution", "datasets", "dataset-main", "evaluations", "candidate-dataset.json")),
+      existsSync(
+        join(
+          process.env.RUNOFF_HOME,
+          "harness-evolution",
+          "datasets",
+          "dataset-main",
+          "evaluations",
+          "candidate-dataset.json",
+        ),
+      ),
       true,
     );
+  } finally {
+    if (oldHome === undefined) delete process.env.RUNOFF_HOME;
+    else process.env.RUNOFF_HOME = oldHome;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("harness taskset verifier trajectory replay and skill patch gate are persisted", () => {
+  const dir = mkdtempSync(join(tmpdir(), "runoff-harness-eval-core-"));
+  const oldHome = process.env.RUNOFF_HOME;
+  try {
+    process.env.RUNOFF_HOME = join(dir, "home");
+    recordTrace(
+      trace("task-base-a", {
+        finalStatus: "failed",
+        timestamp: "2026-06-20T00:00:01.000Z",
+      }),
+    );
+    recordTrace(
+      trace("task-cand-a", {
+        finalStatus: "approved",
+        timestamp: "2026-06-20T00:00:02.000Z",
+        steps: [
+          {
+            name: "implement",
+            provider: "mock",
+            durationMs: 10,
+            round: 1,
+            filesModified: ["skill/SKILL.md"],
+            observation: {
+              schemaVersion: 1,
+              action: "implement",
+              purpose: "test",
+              status: "success",
+              summary: "updated skill",
+              evidence: ["ok"],
+              coverageGaps: [],
+              artifactRefs: [
+                {
+                  stepName: "implement",
+                  artifactIndex: 0,
+                  kind: "file",
+                  ref: "skill/SKILL.md",
+                },
+              ],
+            },
+          },
+        ],
+      }),
+    );
+    const verifier = registerHarnessVerifier({
+      verifierId: "trace-ok",
+      kind: "trace_process",
+      summary: "requires approved trace",
+      requiredTraceStatuses: ["approved"],
+      requiredStepNames: ["implement"],
+    });
+    createHarnessCandidate({
+      candidateId: "candidate-taskset",
+      summary: "TaskSet candidate",
+      editableSurface: ["skill/"],
+      evidenceTraceIds: ["task-base-a"],
+    });
+    const taskSet = createHarnessTaskSet({
+      taskSetId: "taskset-main",
+      name: "main eval taskset",
+      tasks: [
+        {
+          taskId: "task-main",
+          prompt: "fix task",
+          toolsets: ["files"],
+          verifierId: verifier.verifierId,
+          timeoutSec: 60,
+          forbiddenPaths: [],
+          expectedArtifacts: [],
+          criticality: "selection",
+          sourceTraceId: "task-base-a",
+        },
+      ],
+    });
+    const evaluation = evaluateHarnessTaskSet({
+      candidateId: "candidate-taskset",
+      taskSetId: taskSet.taskSetId,
+      candidateTraceIdsByTask: { "task-main": "task-cand-a" },
+      runId: "run-taskset",
+      skillVersion: "skill@v1",
+    });
+    const trajectory = createHarnessTrajectory({
+      traceId: "task-cand-a",
+      taskId: "task-main",
+      runId: "run-taskset",
+      candidateId: "candidate-taskset",
+      skillVersion: "skill@v1",
+    });
+    const replay = createHarnessReplayManifest({
+      replayId: "replay-main",
+      runId: "run-taskset",
+      taskSetId: taskSet.taskSetId,
+      candidateId: "candidate-taskset",
+      trajectoryIds: [trajectory.trajectoryId],
+    });
+    const patch = decideHarnessSkillPatch({
+      candidateId: "candidate-taskset",
+      baseSkill: "skill@v1",
+      candidateSkill: "skill@v2-candidate",
+      selectionDelta: evaluation.selectionDelta || 1,
+      regressionPassed: true,
+      policyPassed: true,
+      auditPassed: true,
+    });
+
+    assert.equal(evaluation.accepted, true);
+    assert.equal(evaluation.results[0]?.replayId?.startsWith("replay-"), true);
+    assert.equal(trajectory.steps[0]?.artifactRefs[0], "skill/SKILL.md");
+    assert.match(replay.commands[0] ?? "", /traces -- show task-cand-a/);
+    assert.equal(patch.accepted, true);
+    assert.equal(
+      existsSync(
+        join(
+          process.env.RUNOFF_HOME,
+          "harness-evolution",
+          "tasksets",
+          "taskset-main.json",
+        ),
+      ),
+      true,
+    );
+    assert.equal(
+      existsSync(
+        join(
+          process.env.RUNOFF_HOME,
+          "harness-evolution",
+          "trajectories",
+          `${trajectory.trajectoryId}.json`,
+        ),
+      ),
+      true,
+    );
+    assert.equal(
+      existsSync(
+        join(
+          process.env.RUNOFF_HOME,
+          "harness-evolution",
+          "candidates",
+          "candidate-taskset",
+          "skill-patch.json",
+        ),
+      ),
+      true,
+    );
+  } finally {
+    if (oldHome === undefined) delete process.env.RUNOFF_HOME;
+    else process.env.RUNOFF_HOME = oldHome;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("harness rejected buffer is optimizer-only and included in proposer history", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "runoff-harness-rejected-buffer-"));
+  const oldHome = process.env.RUNOFF_HOME;
+  try {
+    process.env.RUNOFF_HOME = join(dir, "home");
+    createHarnessCandidate({
+      candidateId: "candidate-rejected",
+      summary: "Rejected candidate",
+      editableSurface: ["skill/"],
+      failureSignatureIds: ["sig-known"],
+    });
+    const entry = recordHarnessRejectedBuffer({
+      candidateId: "candidate-rejected",
+      rejectionReason: "selection delta is not positive",
+      reviewNotes: "avoid repeating broad rewrite",
+    });
+    assert.equal(entry.optimizerOnly, true);
+    assert.equal(
+      listHarnessRejectedBuffer()[0]?.candidateId,
+      "candidate-rejected",
+    );
+
+    const provider = new ProposalProvider(
+      "agent-proposer",
+      {
+        summary: "Uses rejected history",
+        changes: "diff --git a/skill/SKILL.md b/skill/SKILL.md\n",
+        filesModified: ["skill/SKILL.md"],
+        diffStat: "1 file changed",
+      },
+      (req) => {
+        mkdirSync(join(req.workDir!, "skill"), { recursive: true });
+        writeFileSync(
+          join(req.workDir!, "skill", "SKILL.md"),
+          "updated",
+          "utf-8",
+        );
+      },
+    );
+    const proposed = await proposeHarnessCandidate({
+      candidateId: "candidate-next",
+      provider,
+      summary: "Next candidate",
+      editableSurface: ["skill/"],
+    });
+    const historyPath = proposed.proposal.historyContextPath!;
+    const history = JSON.parse(readFileSync(historyPath, "utf-8")) as {
+      rejectedBuffer: Array<{ rejectedId: string; optimizerOnly: boolean }>;
+    };
+    assert.equal(history.rejectedBuffer[0]?.rejectedId, entry.rejectedId);
+    assert.equal(history.rejectedBuffer[0]?.optimizerOnly, true);
   } finally {
     if (oldHome === undefined) delete process.env.RUNOFF_HOME;
     else process.env.RUNOFF_HOME = oldHome;
@@ -377,7 +774,11 @@ test("harness evolution ranks candidates and records rollback decision", () => {
   const oldHome = process.env.RUNOFF_HOME;
   try {
     process.env.RUNOFF_HOME = join(dir, "home");
-    createHarnessCandidate({ candidateId: "good", summary: "Good candidate", expectedFixes: ["fix"] });
+    createHarnessCandidate({
+      candidateId: "good",
+      summary: "Good candidate",
+      expectedFixes: ["fix"],
+    });
     createHarnessCandidate({ candidateId: "bad", summary: "Bad candidate" });
     recordTrace(trace("base-in", { finalStatus: "failed" }));
     recordTrace(trace("cand-in", { finalStatus: "approved" }));
@@ -387,15 +788,31 @@ test("harness evolution ranks candidates and records rollback decision", () => {
     evaluateHarnessCandidate({
       candidateId: "good",
       pairs: [
-        { split: "held-in", baselineTraceId: "base-in", candidateTraceId: "cand-in" },
-        { split: "held-out", baselineTraceId: "base-out", candidateTraceId: "cand-out" },
+        {
+          split: "held-in",
+          baselineTraceId: "base-in",
+          candidateTraceId: "cand-in",
+        },
+        {
+          split: "held-out",
+          baselineTraceId: "base-out",
+          candidateTraceId: "cand-out",
+        },
       ],
     });
     evaluateHarnessCandidate({
       candidateId: "bad",
       pairs: [
-        { split: "held-in", baselineTraceId: "base-in", candidateTraceId: "cand-in" },
-        { split: "held-out", baselineTraceId: "base-out", candidateTraceId: "bad-out" },
+        {
+          split: "held-in",
+          baselineTraceId: "base-in",
+          candidateTraceId: "cand-in",
+        },
+        {
+          split: "held-out",
+          baselineTraceId: "base-out",
+          candidateTraceId: "bad-out",
+        },
       ],
     });
 
@@ -405,7 +822,10 @@ test("harness evolution ranks candidates and records rollback decision", () => {
 
     const decision = decideHarnessCandidate({ candidateId: "bad" });
     assert.equal(decision.decision, "rollback");
-    assert.equal(listHarnessCandidates().find((c) => c.candidateId === "bad")?.status, "rolled_back");
+    assert.equal(
+      listHarnessCandidates().find((c) => c.candidateId === "bad")?.status,
+      "rolled_back",
+    );
   } finally {
     if (oldHome === undefined) delete process.env.RUNOFF_HOME;
     else process.env.RUNOFF_HOME = oldHome;
@@ -418,15 +838,23 @@ test("harness evolution accepts only clean proposal with observed diff and passi
   const oldHome = process.env.RUNOFF_HOME;
   try {
     process.env.RUNOFF_HOME = join(dir, "home");
-    const provider = new ProposalProvider("agent-proposer", {
-      summary: "Clean harness proposal",
-      changes: "diff --git a/skill/SKILL.md b/skill/SKILL.md\n",
-      filesModified: ["skill/SKILL.md"],
-      diffStat: "1 file changed",
-    }, (req) => {
-      mkdirSync(join(req.workDir!, "skill"), { recursive: true });
-      writeFileSync(join(req.workDir!, "skill", "SKILL.md"), "updated", "utf-8");
-    });
+    const provider = new ProposalProvider(
+      "agent-proposer",
+      {
+        summary: "Clean harness proposal",
+        changes: "diff --git a/skill/SKILL.md b/skill/SKILL.md\n",
+        filesModified: ["skill/SKILL.md"],
+        diffStat: "1 file changed",
+      },
+      (req) => {
+        mkdirSync(join(req.workDir!, "skill"), { recursive: true });
+        writeFileSync(
+          join(req.workDir!, "skill", "SKILL.md"),
+          "updated",
+          "utf-8",
+        );
+      },
+    );
     await proposeHarnessCandidate({
       candidateId: "candidate-accept",
       provider,
@@ -440,13 +868,23 @@ test("harness evolution accepts only clean proposal with observed diff and passi
     evaluateHarnessCandidate({
       candidateId: "candidate-accept",
       pairs: [
-        { split: "held-in", baselineTraceId: "accept-base-in", candidateTraceId: "accept-cand-in" },
-        { split: "held-out", baselineTraceId: "accept-base-out", candidateTraceId: "accept-cand-out" },
+        {
+          split: "held-in",
+          baselineTraceId: "accept-base-in",
+          candidateTraceId: "accept-cand-in",
+        },
+        {
+          split: "held-out",
+          baselineTraceId: "accept-base-out",
+          candidateTraceId: "accept-cand-out",
+        },
       ],
     });
     const audit = auditHarnessCandidate({ candidateId: "candidate-accept" });
 
-    const decision = decideHarnessCandidate({ candidateId: "candidate-accept" });
+    const decision = decideHarnessCandidate({
+      candidateId: "candidate-accept",
+    });
 
     assert.equal(audit.passed, true);
     assert.equal(decision.decision, "accept");
@@ -466,15 +904,23 @@ test("harness evolution blocks forced accept when proposal audit is not clean", 
   const oldHome = process.env.RUNOFF_HOME;
   try {
     process.env.RUNOFF_HOME = join(dir, "home");
-    const provider = new ProposalProvider("agent-proposer", {
-      summary: "Unreported outside edit",
-      changes: "",
-      filesModified: [],
-      diffStat: "0 files changed",
-    }, (req) => {
-      mkdirSync(join(req.workDir!, "src"), { recursive: true });
-      writeFileSync(join(req.workDir!, "src", "index.ts"), "export const changed = true;\n", "utf-8");
-    });
+    const provider = new ProposalProvider(
+      "agent-proposer",
+      {
+        summary: "Unreported outside edit",
+        changes: "",
+        filesModified: [],
+        diffStat: "0 files changed",
+      },
+      (req) => {
+        mkdirSync(join(req.workDir!, "src"), { recursive: true });
+        writeFileSync(
+          join(req.workDir!, "src", "index.ts"),
+          "export const changed = true;\n",
+          "utf-8",
+        );
+      },
+    );
     await proposeHarnessCandidate({
       candidateId: "candidate-blocked",
       provider,
@@ -488,22 +934,39 @@ test("harness evolution blocks forced accept when proposal audit is not clean", 
     evaluateHarnessCandidate({
       candidateId: "candidate-blocked",
       pairs: [
-        { split: "held-in", baselineTraceId: "blocked-base-in", candidateTraceId: "blocked-cand-in" },
-        { split: "held-out", baselineTraceId: "blocked-base-out", candidateTraceId: "blocked-cand-out" },
+        {
+          split: "held-in",
+          baselineTraceId: "blocked-base-in",
+          candidateTraceId: "blocked-cand-in",
+        },
+        {
+          split: "held-out",
+          baselineTraceId: "blocked-base-out",
+          candidateTraceId: "blocked-cand-out",
+        },
       ],
     });
     const audit = auditHarnessCandidate({ candidateId: "candidate-blocked" });
 
     assert.equal(audit.passed, false);
     assert.throws(
-      () => decideHarnessCandidate({ candidateId: "candidate-blocked", decision: "accept" }),
+      () =>
+        decideHarnessCandidate({
+          candidateId: "candidate-blocked",
+          decision: "accept",
+        }),
       /cannot be accepted/,
     );
-    const rollback = decideHarnessCandidate({ candidateId: "candidate-blocked" });
+    const rollback = decideHarnessCandidate({
+      candidateId: "candidate-blocked",
+    });
     assert.equal(rollback.decision, "rollback");
     assert.equal(rollback.acceptanceChecks.accepted, false);
     assert.equal(rollback.acceptanceChecks.noSurfaceViolations, false);
-    assert.equal(loadHarnessCandidate("candidate-blocked")?.status, "rolled_back");
+    assert.equal(
+      loadHarnessCandidate("candidate-blocked")?.status,
+      "rolled_back",
+    );
   } finally {
     if (oldHome === undefined) delete process.env.RUNOFF_HOME;
     else process.env.RUNOFF_HOME = oldHome;
@@ -516,15 +979,23 @@ test("harness evolution exports promotion bundle only after accepted decision", 
   const oldHome = process.env.RUNOFF_HOME;
   try {
     process.env.RUNOFF_HOME = join(dir, "home");
-    const provider = new ProposalProvider("agent-proposer", {
-      summary: "Exportable harness proposal",
-      changes: "diff --git a/skill/SKILL.md b/skill/SKILL.md\n",
-      filesModified: ["skill/SKILL.md"],
-      diffStat: "1 file changed",
-    }, (req) => {
-      mkdirSync(join(req.workDir!, "skill"), { recursive: true });
-      writeFileSync(join(req.workDir!, "skill", "SKILL.md"), "updated", "utf-8");
-    });
+    const provider = new ProposalProvider(
+      "agent-proposer",
+      {
+        summary: "Exportable harness proposal",
+        changes: "diff --git a/skill/SKILL.md b/skill/SKILL.md\n",
+        filesModified: ["skill/SKILL.md"],
+        diffStat: "1 file changed",
+      },
+      (req) => {
+        mkdirSync(join(req.workDir!, "skill"), { recursive: true });
+        writeFileSync(
+          join(req.workDir!, "skill", "SKILL.md"),
+          "updated",
+          "utf-8",
+        );
+      },
+    );
     await proposeHarnessCandidate({
       candidateId: "candidate-export",
       provider,
@@ -542,14 +1013,24 @@ test("harness evolution exports promotion bundle only after accepted decision", 
     evaluateHarnessCandidate({
       candidateId: "candidate-export",
       pairs: [
-        { split: "held-in", baselineTraceId: "export-base-in", candidateTraceId: "export-cand-in" },
-        { split: "held-out", baselineTraceId: "export-base-out", candidateTraceId: "export-cand-out" },
+        {
+          split: "held-in",
+          baselineTraceId: "export-base-in",
+          candidateTraceId: "export-cand-in",
+        },
+        {
+          split: "held-out",
+          baselineTraceId: "export-base-out",
+          candidateTraceId: "export-cand-out",
+        },
       ],
     });
     auditHarnessCandidate({ candidateId: "candidate-export" });
     decideHarnessCandidate({ candidateId: "candidate-export" });
 
-    const bundle = exportHarnessPromotionBundle({ candidateId: "candidate-export" });
+    const bundle = exportHarnessPromotionBundle({
+      candidateId: "candidate-export",
+    });
 
     assert.equal(bundle.candidateId, "candidate-export");
     assert.equal(bundle.decision.acceptanceChecks.accepted, true);
@@ -558,7 +1039,9 @@ test("harness evolution exports promotion bundle only after accepted decision", 
     assert.equal(bundle.files[0]?.copied, true);
     assert.equal(existsSync(join(bundle.filesDir, "skill", "SKILL.md")), true);
     assert.equal(existsSync(join(bundle.bundleDir, "bundle.json")), true);
-    const persisted = JSON.parse(readFileSync(join(bundle.bundleDir, "bundle.json"), "utf-8")) as { candidateId: string };
+    const persisted = JSON.parse(
+      readFileSync(join(bundle.bundleDir, "bundle.json"), "utf-8"),
+    ) as { candidateId: string };
     assert.equal(persisted.candidateId, "candidate-export");
   } finally {
     if (oldHome === undefined) delete process.env.RUNOFF_HOME;
@@ -572,8 +1055,18 @@ test("harness evolution audit blocks leakage terms from held-out dataset", async
   const oldHome = process.env.RUNOFF_HOME;
   try {
     process.env.RUNOFF_HOME = join(dir, "home");
-    recordTrace(trace("leak-base-in", { finalStatus: "failed", timestamp: "2026-06-20T00:00:01.000Z" }));
-    recordTrace(trace("leak-base-out", { totalDurationMs: 2000, timestamp: "2026-06-20T00:00:02.000Z" }));
+    recordTrace(
+      trace("leak-base-in", {
+        finalStatus: "failed",
+        timestamp: "2026-06-20T00:00:01.000Z",
+      }),
+    );
+    recordTrace(
+      trace("leak-base-out", {
+        totalDurationMs: 2000,
+        timestamp: "2026-06-20T00:00:02.000Z",
+      }),
+    );
     const dataset = createHarnessDataset({
       datasetId: "leak-dataset",
       name: "leakage split",
@@ -581,15 +1074,23 @@ test("harness evolution audit blocks leakage terms from held-out dataset", async
       heldInRatio: 0.5,
       leakageTerms: ["heldout-answer"],
     });
-    const provider = new ProposalProvider("agent-proposer", {
-      summary: "Leaks held-out answer",
-      changes: "diff --git a/skill/SKILL.md b/skill/SKILL.md\n",
-      filesModified: ["skill/SKILL.md"],
-      diffStat: "1 file changed",
-    }, (req) => {
-      mkdirSync(join(req.workDir!, "skill"), { recursive: true });
-      writeFileSync(join(req.workDir!, "skill", "SKILL.md"), `updated ${dataset.heldOut[0]!.baselineTraceId} heldout-answer`, "utf-8");
-    });
+    const provider = new ProposalProvider(
+      "agent-proposer",
+      {
+        summary: "Leaks held-out answer",
+        changes: "diff --git a/skill/SKILL.md b/skill/SKILL.md\n",
+        filesModified: ["skill/SKILL.md"],
+        diffStat: "1 file changed",
+      },
+      (req) => {
+        mkdirSync(join(req.workDir!, "skill"), { recursive: true });
+        writeFileSync(
+          join(req.workDir!, "skill", "SKILL.md"),
+          `updated ${dataset.heldOut[0]!.baselineTraceId} heldout-answer`,
+          "utf-8",
+        );
+      },
+    );
 
     await proposeHarnessCandidate({
       candidateId: "candidate-leak",
@@ -598,13 +1099,25 @@ test("harness evolution audit blocks leakage terms from held-out dataset", async
       editableSurface: ["skill/"],
       datasetIds: ["leak-dataset"],
     });
-    const audit = auditHarnessCandidate({ candidateId: "candidate-leak", datasetId: "leak-dataset" });
+    const audit = auditHarnessCandidate({
+      candidateId: "candidate-leak",
+      datasetId: "leak-dataset",
+    });
 
     assert.equal(audit.passed, false);
     assert.equal(audit.datasetId, "leak-dataset");
-    assert.ok(audit.findings.some((finding) => finding.rule === "leakage-term" && finding.severity === "blocker"));
+    assert.ok(
+      audit.findings.some(
+        (finding) =>
+          finding.rule === "leakage-term" && finding.severity === "blocker",
+      ),
+    );
     assert.throws(
-      () => decideHarnessCandidate({ candidateId: "candidate-leak", decision: "accept" }),
+      () =>
+        decideHarnessCandidate({
+          candidateId: "candidate-leak",
+          decision: "accept",
+        }),
       /cannot be accepted/,
     );
   } finally {
@@ -623,15 +1136,23 @@ test("harness evolution frontier records lineage, gate, audit, and rejected cand
     recordTrace(trace("frontier-cand-in", { finalStatus: "approved" }));
     recordTrace(trace("frontier-base-out", { totalDurationMs: 2000 }));
     recordTrace(trace("frontier-cand-out", { totalDurationMs: 1000 }));
-    const provider = new ProposalProvider("agent-proposer", {
-      summary: "Frontier candidate",
-      changes: "diff --git a/skill/SKILL.md b/skill/SKILL.md\n",
-      filesModified: ["skill/SKILL.md"],
-      diffStat: "1 file changed",
-    }, (req) => {
-      mkdirSync(join(req.workDir!, "skill"), { recursive: true });
-      writeFileSync(join(req.workDir!, "skill", "SKILL.md"), "updated", "utf-8");
-    });
+    const provider = new ProposalProvider(
+      "agent-proposer",
+      {
+        summary: "Frontier candidate",
+        changes: "diff --git a/skill/SKILL.md b/skill/SKILL.md\n",
+        filesModified: ["skill/SKILL.md"],
+        diffStat: "1 file changed",
+      },
+      (req) => {
+        mkdirSync(join(req.workDir!, "skill"), { recursive: true });
+        writeFileSync(
+          join(req.workDir!, "skill", "SKILL.md"),
+          "updated",
+          "utf-8",
+        );
+      },
+    );
     await proposeHarnessCandidate({
       candidateId: "candidate-frontier-good",
       provider,
@@ -640,12 +1161,23 @@ test("harness evolution frontier records lineage, gate, audit, and rejected cand
       parentCandidateIds: ["candidate-parent"],
       datasetIds: ["frontier-dataset"],
     });
-    createHarnessCandidate({ candidateId: "candidate-frontier-rejected", summary: "No audit candidate" });
+    createHarnessCandidate({
+      candidateId: "candidate-frontier-rejected",
+      summary: "No audit candidate",
+    });
     evaluateHarnessCandidate({
       candidateId: "candidate-frontier-good",
       pairs: [
-        { split: "held-in", baselineTraceId: "frontier-base-in", candidateTraceId: "frontier-cand-in" },
-        { split: "held-out", baselineTraceId: "frontier-base-out", candidateTraceId: "frontier-cand-out" },
+        {
+          split: "held-in",
+          baselineTraceId: "frontier-base-in",
+          candidateTraceId: "frontier-cand-in",
+        },
+        {
+          split: "held-out",
+          baselineTraceId: "frontier-base-out",
+          candidateTraceId: "frontier-cand-out",
+        },
       ],
     });
     auditHarnessCandidate({ candidateId: "candidate-frontier-good" });
@@ -655,16 +1187,32 @@ test("harness evolution frontier records lineage, gate, audit, and rejected cand
       frontierId: "main",
       candidateIds: ["candidate-frontier-good", "candidate-frontier-rejected"],
     });
-    const accepted = frontier.entries.find((entry) => entry.candidateId === "candidate-frontier-good")!;
-    const rejected = frontier.entries.find((entry) => entry.candidateId === "candidate-frontier-rejected")!;
+    const accepted = frontier.entries.find(
+      (entry) => entry.candidateId === "candidate-frontier-good",
+    )!;
+    const rejected = frontier.entries.find(
+      (entry) => entry.candidateId === "candidate-frontier-rejected",
+    )!;
 
     assert.equal(accepted.accepted, true);
     assert.equal(accepted.gateAccepted, true);
     assert.equal(accepted.auditPassed, true);
     assert.deepEqual(accepted.parentCandidateIds, ["candidate-parent"]);
     assert.equal(rejected.auditPassed, false);
-    assert.ok(frontier.rejectedCandidateIds.includes("candidate-frontier-rejected"));
-    assert.equal(existsSync(join(process.env.RUNOFF_HOME, "harness-evolution", "frontiers", "main.json")), true);
+    assert.ok(
+      frontier.rejectedCandidateIds.includes("candidate-frontier-rejected"),
+    );
+    assert.equal(
+      existsSync(
+        join(
+          process.env.RUNOFF_HOME,
+          "harness-evolution",
+          "frontiers",
+          "main.json",
+        ),
+      ),
+      true,
+    );
   } finally {
     if (oldHome === undefined) delete process.env.RUNOFF_HOME;
     else process.env.RUNOFF_HOME = oldHome;
@@ -677,19 +1225,47 @@ test("harness evolution run persists complete accepted report and promotion bund
   const oldHome = process.env.RUNOFF_HOME;
   try {
     process.env.RUNOFF_HOME = join(dir, "home");
-    recordTrace(trace("run-base-in", { finalStatus: "failed", timestamp: "2026-06-20T00:00:01.000Z" }));
-    recordTrace(trace("run-base-out", { totalDurationMs: 2000, timestamp: "2026-06-20T00:00:02.000Z" }));
-    recordTrace(trace("run-cand-in", { finalStatus: "approved", timestamp: "2026-06-20T00:00:03.000Z" }));
-    recordTrace(trace("run-cand-out", { totalDurationMs: 1000, timestamp: "2026-06-20T00:00:04.000Z" }));
-    const provider = new ProposalProvider("agent-proposer", {
-      summary: "Complete run candidate",
-      changes: "diff --git a/skill/SKILL.md b/skill/SKILL.md\n",
-      filesModified: ["skill/SKILL.md"],
-      diffStat: "1 file changed",
-    }, (req) => {
-      mkdirSync(join(req.workDir!, "skill"), { recursive: true });
-      writeFileSync(join(req.workDir!, "skill", "SKILL.md"), "updated", "utf-8");
-    });
+    recordTrace(
+      trace("run-base-in", {
+        finalStatus: "failed",
+        timestamp: "2026-06-20T00:00:01.000Z",
+      }),
+    );
+    recordTrace(
+      trace("run-base-out", {
+        totalDurationMs: 2000,
+        timestamp: "2026-06-20T00:00:02.000Z",
+      }),
+    );
+    recordTrace(
+      trace("run-cand-in", {
+        finalStatus: "approved",
+        timestamp: "2026-06-20T00:00:03.000Z",
+      }),
+    );
+    recordTrace(
+      trace("run-cand-out", {
+        totalDurationMs: 1000,
+        timestamp: "2026-06-20T00:00:04.000Z",
+      }),
+    );
+    const provider = new ProposalProvider(
+      "agent-proposer",
+      {
+        summary: "Complete run candidate",
+        changes: "diff --git a/skill/SKILL.md b/skill/SKILL.md\n",
+        filesModified: ["skill/SKILL.md"],
+        diffStat: "1 file changed",
+      },
+      (req) => {
+        mkdirSync(join(req.workDir!, "skill"), { recursive: true });
+        writeFileSync(
+          join(req.workDir!, "skill", "SKILL.md"),
+          "updated",
+          "utf-8",
+        );
+      },
+    );
 
     const run = await runHarnessEvolution({
       runId: "run-complete",
@@ -717,9 +1293,23 @@ test("harness evolution run persists complete accepted report and promotion bund
     assert.equal(report.auditPassed, true);
     assert.equal(report.gateAccepted, true);
     assert.deepEqual(report.missingCandidateTraceIds, []);
-    assert.equal(loadHarnessEvolutionRun("run-complete")?.runId, "run-complete");
+    assert.equal(
+      loadHarnessEvolutionRun("run-complete")?.runId,
+      "run-complete",
+    );
     assert.equal(listHarnessEvolutionRuns()[0]?.runId, "run-complete");
-    assert.equal(existsSync(join(process.env.RUNOFF_HOME, "harness-evolution", "runs", "run-complete", "report.json")), true);
+    assert.equal(
+      existsSync(
+        join(
+          process.env.RUNOFF_HOME,
+          "harness-evolution",
+          "runs",
+          "run-complete",
+          "report.json",
+        ),
+      ),
+      true,
+    );
   } finally {
     if (oldHome === undefined) delete process.env.RUNOFF_HOME;
     else process.env.RUNOFF_HOME = oldHome;
@@ -732,17 +1322,35 @@ test("harness evolution run stops with next action when candidate trace map is m
   const oldHome = process.env.RUNOFF_HOME;
   try {
     process.env.RUNOFF_HOME = join(dir, "home");
-    recordTrace(trace("await-base-in", { finalStatus: "failed", timestamp: "2026-06-20T00:00:01.000Z" }));
-    recordTrace(trace("await-base-out", { totalDurationMs: 2000, timestamp: "2026-06-20T00:00:02.000Z" }));
-    const provider = new ProposalProvider("agent-proposer", {
-      summary: "Awaiting candidate traces",
-      changes: "diff --git a/skill/SKILL.md b/skill/SKILL.md\n",
-      filesModified: ["skill/SKILL.md"],
-      diffStat: "1 file changed",
-    }, (req) => {
-      mkdirSync(join(req.workDir!, "skill"), { recursive: true });
-      writeFileSync(join(req.workDir!, "skill", "SKILL.md"), "updated", "utf-8");
-    });
+    recordTrace(
+      trace("await-base-in", {
+        finalStatus: "failed",
+        timestamp: "2026-06-20T00:00:01.000Z",
+      }),
+    );
+    recordTrace(
+      trace("await-base-out", {
+        totalDurationMs: 2000,
+        timestamp: "2026-06-20T00:00:02.000Z",
+      }),
+    );
+    const provider = new ProposalProvider(
+      "agent-proposer",
+      {
+        summary: "Awaiting candidate traces",
+        changes: "diff --git a/skill/SKILL.md b/skill/SKILL.md\n",
+        filesModified: ["skill/SKILL.md"],
+        diffStat: "1 file changed",
+      },
+      (req) => {
+        mkdirSync(join(req.workDir!, "skill"), { recursive: true });
+        writeFileSync(
+          join(req.workDir!, "skill", "SKILL.md"),
+          "updated",
+          "utf-8",
+        );
+      },
+    );
 
     const run = await runHarnessEvolution({
       runId: "run-awaiting",
@@ -756,11 +1364,17 @@ test("harness evolution run stops with next action when candidate trace map is m
     const report = queryHarnessEvolutionReport("run-awaiting");
 
     assert.equal(run.status, "awaiting_candidate_traces");
-    assert.deepEqual(run.missingCandidateTraceIds, ["await-base-in", "await-base-out"]);
+    assert.deepEqual(run.missingCandidateTraceIds, [
+      "await-base-in",
+      "await-base-out",
+    ]);
     assert.match(run.nextAction, /provide candidateTraceIdsByBaseline/);
     assert.equal(run.evaluation, undefined);
     assert.equal(report.status, "awaiting_candidate_traces");
-    assert.deepEqual(report.missingCandidateTraceIds, ["await-base-in", "await-base-out"]);
+    assert.deepEqual(report.missingCandidateTraceIds, [
+      "await-base-in",
+      "await-base-out",
+    ]);
   } finally {
     if (oldHome === undefined) delete process.env.RUNOFF_HOME;
     else process.env.RUNOFF_HOME = oldHome;
@@ -773,10 +1387,20 @@ test("harness trigger scan emits report-only and proposed pending plans from dur
   const oldHome = process.env.RUNOFF_HOME;
   try {
     process.env.RUNOFF_HOME = join(dir, "home");
-    recordTrace(trace("trigger-failed", {
-      finalStatus: "failed",
-      steps: [{ name: "implement", provider: "mock", durationMs: 10, round: 1, error: "verify failed" }],
-    }));
+    recordTrace(
+      trace("trigger-failed", {
+        finalStatus: "failed",
+        steps: [
+          {
+            name: "implement",
+            provider: "mock",
+            durationMs: 10,
+            round: 1,
+            error: "verify failed",
+          },
+        ],
+      }),
+    );
 
     const scan = scanHarnessTriggers({
       scanId: "scan-main",
@@ -806,7 +1430,18 @@ test("harness trigger scan emits report-only and proposed pending plans from dur
     assert.equal(scan.events[0]?.plan, undefined);
     assert.equal(scan.events[1]?.plan?.triggerEventId, scan.events[1]?.eventId);
     assert.deepEqual(scan.events[1]?.traceIds, ["trigger-failed"]);
-    assert.equal(existsSync(join(process.env.RUNOFF_HOME, "harness-evolution", "triggers", "scans", "scan-main.json")), true);
+    assert.equal(
+      existsSync(
+        join(
+          process.env.RUNOFF_HOME,
+          "harness-evolution",
+          "triggers",
+          "scans",
+          "scan-main.json",
+        ),
+      ),
+      true,
+    );
   } finally {
     if (oldHome === undefined) delete process.env.RUNOFF_HOME;
     else process.env.RUNOFF_HOME = oldHome;
@@ -819,19 +1454,47 @@ test("harness evolution run blocks acceptance when role policy lacks independent
   const oldHome = process.env.RUNOFF_HOME;
   try {
     process.env.RUNOFF_HOME = join(dir, "home");
-    recordTrace(trace("role-base-in", { finalStatus: "failed", timestamp: "2026-06-20T00:00:01.000Z" }));
-    recordTrace(trace("role-base-out", { totalDurationMs: 2000, timestamp: "2026-06-20T00:00:02.000Z" }));
-    recordTrace(trace("role-cand-in", { finalStatus: "approved", timestamp: "2026-06-20T00:00:03.000Z" }));
-    recordTrace(trace("role-cand-out", { totalDurationMs: 1000, timestamp: "2026-06-20T00:00:04.000Z" }));
-    const provider = new ProposalProvider("builder", {
-      summary: "Role policy candidate",
-      changes: "diff --git a/skill/SKILL.md b/skill/SKILL.md\n",
-      filesModified: ["skill/SKILL.md"],
-      diffStat: "1 file changed",
-    }, (req) => {
-      mkdirSync(join(req.workDir!, "skill"), { recursive: true });
-      writeFileSync(join(req.workDir!, "skill", "SKILL.md"), "updated", "utf-8");
-    });
+    recordTrace(
+      trace("role-base-in", {
+        finalStatus: "failed",
+        timestamp: "2026-06-20T00:00:01.000Z",
+      }),
+    );
+    recordTrace(
+      trace("role-base-out", {
+        totalDurationMs: 2000,
+        timestamp: "2026-06-20T00:00:02.000Z",
+      }),
+    );
+    recordTrace(
+      trace("role-cand-in", {
+        finalStatus: "approved",
+        timestamp: "2026-06-20T00:00:03.000Z",
+      }),
+    );
+    recordTrace(
+      trace("role-cand-out", {
+        totalDurationMs: 1000,
+        timestamp: "2026-06-20T00:00:04.000Z",
+      }),
+    );
+    const provider = new ProposalProvider(
+      "builder",
+      {
+        summary: "Role policy candidate",
+        changes: "diff --git a/skill/SKILL.md b/skill/SKILL.md\n",
+        filesModified: ["skill/SKILL.md"],
+        diffStat: "1 file changed",
+      },
+      (req) => {
+        mkdirSync(join(req.workDir!, "skill"), { recursive: true });
+        writeFileSync(
+          join(req.workDir!, "skill", "SKILL.md"),
+          "updated",
+          "utf-8",
+        );
+      },
+    );
 
     const run = await runHarnessEvolution({
       runId: "run-role-blocked",
@@ -856,8 +1519,14 @@ test("harness evolution run blocks acceptance when role policy lacks independent
     assert.equal(run.status, "blocked");
     assert.equal(run.roleEvidence?.passed, false);
     assert.match(run.nextAction, /fix role policy/);
-    assert.equal(loadHarnessCandidate("candidate-role-blocked")?.status, "proposed");
-    assert.equal(queryHarnessEvolutionReport("run-role-blocked").rolePolicyPassed, false);
+    assert.equal(
+      loadHarnessCandidate("candidate-role-blocked")?.status,
+      "proposed",
+    );
+    assert.equal(
+      queryHarnessEvolutionReport("run-role-blocked").rolePolicyPassed,
+      false,
+    );
   } finally {
     if (oldHome === undefined) delete process.env.RUNOFF_HOME;
     else process.env.RUNOFF_HOME = oldHome;
@@ -870,17 +1539,35 @@ test("harness connector writeback emits markdown and jsonl reports", async () =>
   const oldHome = process.env.RUNOFF_HOME;
   try {
     process.env.RUNOFF_HOME = join(dir, "home");
-    recordTrace(trace("write-base-in", { finalStatus: "failed", timestamp: "2026-06-20T00:00:01.000Z" }));
-    recordTrace(trace("write-base-out", { totalDurationMs: 2000, timestamp: "2026-06-20T00:00:02.000Z" }));
-    const provider = new ProposalProvider("builder", {
-      summary: "Writeback candidate",
-      changes: "diff --git a/skill/SKILL.md b/skill/SKILL.md\n",
-      filesModified: ["skill/SKILL.md"],
-      diffStat: "1 file changed",
-    }, (req) => {
-      mkdirSync(join(req.workDir!, "skill"), { recursive: true });
-      writeFileSync(join(req.workDir!, "skill", "SKILL.md"), "updated", "utf-8");
-    });
+    recordTrace(
+      trace("write-base-in", {
+        finalStatus: "failed",
+        timestamp: "2026-06-20T00:00:01.000Z",
+      }),
+    );
+    recordTrace(
+      trace("write-base-out", {
+        totalDurationMs: 2000,
+        timestamp: "2026-06-20T00:00:02.000Z",
+      }),
+    );
+    const provider = new ProposalProvider(
+      "builder",
+      {
+        summary: "Writeback candidate",
+        changes: "diff --git a/skill/SKILL.md b/skill/SKILL.md\n",
+        filesModified: ["skill/SKILL.md"],
+        diffStat: "1 file changed",
+      },
+      (req) => {
+        mkdirSync(join(req.workDir!, "skill"), { recursive: true });
+        writeFileSync(
+          join(req.workDir!, "skill", "SKILL.md"),
+          "updated",
+          "utf-8",
+        );
+      },
+    );
     await runHarnessEvolution({
       runId: "run-writeback",
       provider,
@@ -902,9 +1589,15 @@ test("harness connector writeback emits markdown and jsonl reports", async () =>
     });
 
     assert.equal(writebacks.length, 2);
-    assert.match(readFileSync(markdownPath, "utf-8"), /Harness Evolution Report: run-writeback/);
+    assert.match(
+      readFileSync(markdownPath, "utf-8"),
+      /Harness Evolution Report: run-writeback/,
+    );
     assert.match(readFileSync(jsonlPath, "utf-8"), /"runId":"run-writeback"/);
-    assert.equal(loadHarnessEvolutionRun("run-writeback")?.connectorWritebacks?.length, 2);
+    assert.equal(
+      loadHarnessEvolutionRun("run-writeback")?.connectorWritebacks?.length,
+      2,
+    );
   } finally {
     if (oldHome === undefined) delete process.env.RUNOFF_HOME;
     else process.env.RUNOFF_HOME = oldHome;

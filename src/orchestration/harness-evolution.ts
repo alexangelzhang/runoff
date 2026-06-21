@@ -7,15 +7,33 @@
  * pairwise self-preference ranking, and auditable accept/rollback records.
  */
 
-import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import {
+  cpSync,
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  renameSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { dirname, join, normalize, resolve } from "node:path";
 import { createHash, randomUUID } from "node:crypto";
 import type { LLMProvider, LLMResponse } from "../providers/types.js";
-import { getHarnessEvolutionDir } from "../core/paths.js";
+import { getHarnessEvolutionDir, getTracesDir } from "../core/paths.js";
 import type { PipelineTrace } from "../observability/trace.js";
 import { loadTraceById, queryTraces } from "../observability/trace.js";
-import { atomicWriteJson, readJsonFile, safePathSegment } from "./durable-io.js";
-import { compareRegression, evaluatePipelineTrace, type RegressionTolerance } from "./harness.js";
+import {
+  atomicWriteJson,
+  readJsonFile,
+  safePathSegment,
+} from "./durable-io.js";
+import {
+  compareRegression,
+  evaluatePipelineTrace,
+  type RegressionTolerance,
+} from "./harness.js";
 
 export const HARNESS_EVOLUTION_SCHEMA = "runoff-harness-evolution-v1" as const;
 
@@ -95,12 +113,106 @@ export interface HarnessDatasetEvaluation {
   gate: HarnessGateResult;
 }
 
+export type HarnessVerifierKind =
+  | "command"
+  | "file_diff"
+  | "json_schema"
+  | "trace_process"
+  | "policy"
+  | "llm_judge";
+
+export interface HarnessVerifier {
+  schema: typeof HARNESS_EVOLUTION_SCHEMA;
+  verifierId: string;
+  createdAt: string;
+  kind: HarnessVerifierKind;
+  summary: string;
+  command?: string[];
+  expectedFiles?: string[];
+  requiredTraceStatuses?: PipelineTrace["finalStatus"][];
+  requiredStepNames?: string[];
+  forbiddenPaths?: string[];
+  rubric?: string;
+}
+
+export interface HarnessTask {
+  taskId: string;
+  prompt: string;
+  fixture?: string;
+  toolsets: string[];
+  verifierId: string;
+  timeoutSec: number;
+  budget?: {
+    maxRounds?: number;
+    maxToolCalls?: number;
+    maxCostUsd?: number;
+  };
+  forbiddenPaths: string[];
+  expectedArtifacts: string[];
+  criticality: "selection" | "critical-regression" | "exploratory";
+  policyBoundary?: string;
+  sourceTraceId?: string;
+}
+
+export interface HarnessTaskSet {
+  schema: typeof HARNESS_EVOLUTION_SCHEMA;
+  taskSetId: string;
+  createdAt: string;
+  name: string;
+  description?: string;
+  tasks: HarnessTask[];
+  selectionTaskIds: string[];
+  regressionTaskIds: string[];
+  leakageTerms: string[];
+}
+
+export interface HarnessVerifierResult {
+  verifierId: string;
+  kind: HarnessVerifierKind;
+  passed: boolean;
+  score: number;
+  reason: string;
+  evidence: string[];
+}
+
+export interface HarnessTaskRunResult {
+  taskId: string;
+  baselineTraceId?: string;
+  candidateTraceId?: string;
+  completed: boolean;
+  score: number;
+  verifier: HarnessVerifierResult;
+  trajectoryId?: string;
+  replayId?: string;
+}
+
+export interface HarnessTaskSetEvaluation {
+  schema: typeof HARNESS_EVOLUTION_SCHEMA;
+  taskSetId: string;
+  candidateId: string;
+  evaluatedAt: string;
+  results: HarnessTaskRunResult[];
+  selectionDelta: number;
+  regressionPassed: boolean;
+  policyPassed: boolean;
+  accepted: boolean;
+  reason: string;
+}
+
 export interface HarnessSplitGate {
   split: "held-in" | "held-out";
   total: number;
   passed: number;
-  regressions: Array<{ baselineTraceId: string; candidateTraceId: string; message: string }>;
-  improvements: Array<{ baselineTraceId: string; candidateTraceId: string; reason: string }>;
+  regressions: Array<{
+    baselineTraceId: string;
+    candidateTraceId: string;
+    message: string;
+  }>;
+  improvements: Array<{
+    baselineTraceId: string;
+    candidateTraceId: string;
+    reason: string;
+  }>;
 }
 
 export interface HarnessGateResult {
@@ -205,6 +317,7 @@ export interface HarnessEvolutionPlan {
   traceIds: string[];
   failureSignatureIds: string[];
   datasetId: string;
+  taskSetId?: string;
   candidateId: string;
   frontierId: string;
   sourceDir?: string;
@@ -231,6 +344,8 @@ export interface HarnessEvolutionRun {
   coresetTraceIds: string[];
   failureSignatureIds: string[];
   dataset?: HarnessDataset;
+  taskSet?: HarnessTaskSet;
+  taskSetEvaluation?: HarnessTaskSetEvaluation;
   candidate?: HarnessCandidateRecord;
   evaluation?: HarnessDatasetEvaluation;
   audit?: HarnessAuditReport;
@@ -240,7 +355,10 @@ export interface HarnessEvolutionRun {
   roleEvidence?: HarnessRoleEvidence;
   connectorWritebacks?: HarnessConnectorWriteback[];
   decision?: HarnessDecisionRecord;
+  skillPatch?: HarnessSkillPatchDecision;
   bundle?: HarnessPromotionBundle;
+  trajectories?: HarnessTrajectory[];
+  replay?: HarnessReplayManifest;
   missingCandidateTraceIds: string[];
   artifactRefs: string[];
   nextAction: string;
@@ -256,19 +374,25 @@ export interface HarnessEvolutionReport {
   planId: string;
   candidateId: string;
   datasetId: string;
+  taskSetId?: string;
   frontierId: string;
   triggerEventId?: string;
   gateAccepted?: boolean;
   auditPassed?: boolean;
   rolePolicyPassed?: boolean;
+  taskSetAccepted?: boolean;
   connectorWritebacks: HarnessConnectorWriteback[];
   decision?: "accept" | "rollback";
+  skillPatchId?: string;
   exportedBundleDir?: string;
   missingCandidateTraceIds: string[];
   artifactRefs: string[];
 }
 
-export type HarnessTriggerKind = "trace_failure" | "audit_blocker" | "frontier_stagnation";
+export type HarnessTriggerKind =
+  | "trace_failure"
+  | "audit_blocker"
+  | "frontier_stagnation";
 export type HarnessTriggerAllowedAction = "report" | "propose" | "export";
 
 export interface HarnessTriggerRule {
@@ -421,7 +545,93 @@ export interface HarnessPromotionBundle {
   proposal: HarnessProposalResult;
   gate: HarnessGateResult;
   decision: HarnessDecisionRecord;
+  skillPatch?: HarnessSkillPatchDecision;
   instructions: string[];
+}
+
+export interface HarnessTrajectoryStep {
+  index: number;
+  name: string;
+  provider: string;
+  round: number;
+  durationMs: number;
+  verdict?: StepTraceVerdict;
+  filesModified: string[];
+  error?: string;
+  observationSummary?: string;
+  artifactRefs: string[];
+  toolStats: Record<string, number>;
+}
+
+type StepTraceVerdict = NonNullable<PipelineTrace["steps"][number]["verdict"]>;
+
+export interface HarnessTrajectory {
+  schema: typeof HARNESS_EVOLUTION_SCHEMA;
+  trajectoryId: string;
+  createdAt: string;
+  traceId: string;
+  taskId?: string;
+  runId?: string;
+  candidateId?: string;
+  model?: string;
+  skillVersion?: string;
+  toolsets: string[];
+  completed: boolean;
+  score: number;
+  tracePath?: string;
+  trajectoryPath: string;
+  artifactHashes: Array<{ path: string; sha256: string; size: number }>;
+  steps: HarnessTrajectoryStep[];
+}
+
+export interface HarnessReplayManifest {
+  schema: typeof HARNESS_EVOLUTION_SCHEMA;
+  replayId: string;
+  createdAt: string;
+  runId?: string;
+  taskSetId?: string;
+  candidateId?: string;
+  trajectoryIds: string[];
+  commands: string[];
+  artifactRefs: string[];
+}
+
+export interface HarnessSkillPatchDecision {
+  schema: typeof HARNESS_EVOLUTION_SCHEMA;
+  patchId: string;
+  createdAt: string;
+  candidateId: string;
+  baseSkill: string;
+  candidateSkill: string;
+  touchedSurfaces: string[];
+  patchBudget: {
+    maxFiles: number;
+    maxBytes?: number;
+  };
+  selectionDelta: number;
+  regressionPassed: boolean;
+  policyPassed: boolean;
+  auditPassed: boolean;
+  accepted: boolean;
+  decision: "accept" | "reject" | "rollback";
+  reason: string;
+  rollbackRef?: string;
+}
+
+export interface HarnessRejectedBufferEntry {
+  schema: typeof HARNESS_EVOLUTION_SCHEMA;
+  rejectedId: string;
+  createdAt: string;
+  candidateId: string;
+  patchId?: string;
+  sourceFailureSignatureIds: string[];
+  sourceTraceIds: string[];
+  selectionDelta?: number;
+  regressionFailures: string[];
+  rejectionReason: string;
+  reviewNotes?: string;
+  similarityKeys: string[];
+  optimizerOnly: true;
 }
 
 interface FileSnapshotEntry {
@@ -453,12 +663,32 @@ function datasetsDir(): string {
   return join(evolutionDir(), "datasets");
 }
 
+function taskSetsDir(): string {
+  return join(evolutionDir(), "tasksets");
+}
+
+function verifiersDir(): string {
+  return join(evolutionDir(), "verifiers");
+}
+
 function frontiersDir(): string {
   return join(evolutionDir(), "frontiers");
 }
 
 function runsDir(): string {
   return join(evolutionDir(), "runs");
+}
+
+function trajectoriesDir(): string {
+  return join(evolutionDir(), "trajectories");
+}
+
+function replayDir(): string {
+  return join(evolutionDir(), "replay");
+}
+
+function rejectedBufferDir(): string {
+  return join(evolutionDir(), "rejected-buffer");
 }
 
 function triggersDir(): string {
@@ -486,7 +716,29 @@ function datasetPath(datasetId: string): string {
 }
 
 function datasetEvaluationPath(datasetId: string, candidateId: string): string {
-  return join(datasetsDir(), safePathSegment(datasetId), "evaluations", `${safePathSegment(candidateId)}.json`);
+  return join(
+    datasetsDir(),
+    safePathSegment(datasetId),
+    "evaluations",
+    `${safePathSegment(candidateId)}.json`,
+  );
+}
+
+function verifierPath(verifierId: string): string {
+  return join(verifiersDir(), `${safePathSegment(verifierId)}.json`);
+}
+
+function taskSetPath(taskSetId: string): string {
+  return join(taskSetsDir(), `${safePathSegment(taskSetId)}.json`);
+}
+
+function taskSetEvaluationPath(taskSetId: string, candidateId: string): string {
+  return join(
+    taskSetsDir(),
+    safePathSegment(taskSetId),
+    "evaluations",
+    `${safePathSegment(candidateId)}.json`,
+  );
 }
 
 function frontierPath(frontierId = "default"): string {
@@ -509,6 +761,14 @@ function runReportPath(runId: string): string {
   return join(runDir(runId), "report.json");
 }
 
+function trajectoryPath(trajectoryId: string): string {
+  return join(trajectoriesDir(), `${safePathSegment(trajectoryId)}.json`);
+}
+
+function replayManifestPath(replayId: string): string {
+  return join(replayDir(), `${safePathSegment(replayId)}.json`);
+}
+
 function triggerEventPath(eventId: string): string {
   return join(triggersDir(), "events", `${safePathSegment(eventId)}.json`);
 }
@@ -517,7 +777,10 @@ function triggerScanPath(scanId: string): string {
   return join(triggersDir(), "scans", `${safePathSegment(scanId)}.json`);
 }
 
-function connectorDefaultPath(runId: string, kind: HarnessConnectorKind): string {
+function connectorDefaultPath(
+  runId: string,
+  kind: HarnessConnectorKind,
+): string {
   const extension = kind === "markdown" ? "md" : "jsonl";
   return join(connectorsDir(), `${safePathSegment(runId)}.${extension}`);
 }
@@ -534,6 +797,10 @@ function decisionPath(candidateId: string): string {
   return join(candidateDir(candidateId), "decision.json");
 }
 
+function skillPatchPath(candidateId: string): string {
+  return join(candidateDir(candidateId), "skill-patch.json");
+}
+
 function proposalPath(candidateId: string): string {
   return join(candidateDir(candidateId), "proposal.json");
 }
@@ -546,6 +813,10 @@ function auditPath(candidateId: string): string {
   return join(candidateDir(candidateId), "audit.json");
 }
 
+function rejectedEntryPath(rejectedId: string): string {
+  return join(rejectedBufferDir(), `${safePathSegment(rejectedId)}.json`);
+}
+
 function variantDir(candidateId: string): string {
   return join(candidateDir(candidateId), "variant");
 }
@@ -554,7 +825,10 @@ function normalizeSurfacePath(path: string): string {
   return normalize(path).replace(/\\/g, "/").replace(/^\.\//, "");
 }
 
-function snapshotVariantFiles(dir: string, prefix = ""): Map<string, FileSnapshotEntry> {
+function snapshotVariantFiles(
+  dir: string,
+  prefix = "",
+): Map<string, FileSnapshotEntry> {
   const out = new Map<string, FileSnapshotEntry>();
   if (!existsSync(dir)) return out;
   for (const name of readdirSync(dir)) {
@@ -562,7 +836,8 @@ function snapshotVariantFiles(dir: string, prefix = ""): Map<string, FileSnapsho
     const rel = normalizeSurfacePath(prefix ? join(prefix, name) : name);
     const stat = statSync(abs);
     if (stat.isDirectory()) {
-      for (const [child, entry] of snapshotVariantFiles(abs, rel)) out.set(child, entry);
+      for (const [child, entry] of snapshotVariantFiles(abs, rel))
+        out.set(child, entry);
       continue;
     }
     if (!stat.isFile()) continue;
@@ -575,11 +850,18 @@ function snapshotVariantFiles(dir: string, prefix = ""): Map<string, FileSnapsho
   return out;
 }
 
-function copyPromotionFile(variantRoot: string, filesRoot: string, file: string): HarnessPromotionBundle["files"][number] {
+function copyPromotionFile(
+  variantRoot: string,
+  filesRoot: string,
+  file: string,
+): HarnessPromotionBundle["files"][number] {
   const normalized = normalizeSurfacePath(file);
   const source = resolve(variantRoot, normalized);
   const variantRootResolved = resolve(variantRoot);
-  if (!source.startsWith(`${variantRootResolved}/`) && source !== variantRootResolved) {
+  if (
+    !source.startsWith(`${variantRootResolved}/`) &&
+    source !== variantRootResolved
+  ) {
     throw new Error(`Refusing to export file outside variant: ${file}`);
   }
   if (!existsSync(source)) return { path: normalized, copied: false };
@@ -597,14 +879,18 @@ function copyPromotionFile(variantRoot: string, filesRoot: string, file: string)
   };
 }
 
-function diffVariantSnapshots(before: Map<string, FileSnapshotEntry>, after: Map<string, FileSnapshotEntry>): VariantDiff {
+function diffVariantSnapshots(
+  before: Map<string, FileSnapshotEntry>,
+  after: Map<string, FileSnapshotEntry>,
+): VariantDiff {
   const added: string[] = [];
   const modified: string[] = [];
   const deleted: string[] = [];
   for (const [file, entry] of after) {
     const previous = before.get(file);
     if (!previous) added.push(file);
-    else if (previous.hash !== entry.hash || previous.size !== entry.size) modified.push(file);
+    else if (previous.hash !== entry.hash || previous.size !== entry.size)
+      modified.push(file);
   }
   for (const file of before.keys()) {
     if (!after.has(file)) deleted.push(file);
@@ -624,7 +910,9 @@ function diffVariantSnapshots(before: Map<string, FileSnapshotEntry>, after: Map
     modified,
     deleted,
     filesModified,
-    diffStat: parts.length ? `${filesModified.length} files changed (${parts.join(", ")})` : "0 files changed",
+    diffStat: parts.length
+      ? `${filesModified.length} files changed (${parts.join(", ")})`
+      : "0 files changed",
   };
 }
 
@@ -633,8 +921,12 @@ function isAllowedByEditableSurface(file: string, surface: string[]): boolean {
   const normalizedFile = normalizeSurfacePath(file);
   return surface.some((entry) => {
     const normalizedEntry = normalizeSurfacePath(entry);
-    if (normalizedEntry.endsWith("/")) return normalizedFile.startsWith(normalizedEntry);
-    return normalizedFile === normalizedEntry || normalizedFile.startsWith(`${normalizedEntry}/`);
+    if (normalizedEntry.endsWith("/"))
+      return normalizedFile.startsWith(normalizedEntry);
+    return (
+      normalizedFile === normalizedEntry ||
+      normalizedFile.startsWith(`${normalizedEntry}/`)
+    );
   });
 }
 
@@ -678,7 +970,8 @@ export function createHarnessCandidate(input: {
   sourceDir?: string;
   author?: string;
 }): HarnessCandidateRecord {
-  const candidateId = input.candidateId?.trim() || `harness-${randomUUID().slice(0, 8)}`;
+  const candidateId =
+    input.candidateId?.trim() || `harness-${randomUUID().slice(0, 8)}`;
   const now = new Date().toISOString();
   const dir = candidateDir(candidateId);
   const vDir = variantDir(candidateId);
@@ -720,7 +1013,11 @@ export function createHarnessCandidate(input: {
       parentCandidateIds: input.parentCandidateIds ?? [],
       failureSignatureIds: manifest.failureSignatureIds,
       datasetIds: input.datasetIds ?? [],
-      source: manifest.failureSignatureIds.length ? "mined-signature" : input.parentCandidateIds?.length ? "derived-candidate" : "manual",
+      source: manifest.failureSignatureIds.length
+        ? "mined-signature"
+        : input.parentCandidateIds?.length
+          ? "derived-candidate"
+          : "manual",
     },
   };
   atomicWriteJson(candidatePath(candidateId), record);
@@ -728,18 +1025,28 @@ export function createHarnessCandidate(input: {
   return record;
 }
 
-function buildCandidateLineage(record: HarnessCandidateRecord, parentCandidateIds: string[] = [], datasetIds: string[] = []): HarnessCandidateLineage {
+function buildCandidateLineage(
+  record: HarnessCandidateRecord,
+  parentCandidateIds: string[] = [],
+  datasetIds: string[] = [],
+): HarnessCandidateLineage {
   return {
     candidateId: record.candidateId,
     createdAt: record.createdAt,
     parentCandidateIds,
     failureSignatureIds: record.manifest.failureSignatureIds,
     datasetIds,
-    source: record.manifest.failureSignatureIds.length ? "mined-signature" : parentCandidateIds.length ? "derived-candidate" : "manual",
+    source: record.manifest.failureSignatureIds.length
+      ? "mined-signature"
+      : parentCandidateIds.length
+        ? "derived-candidate"
+        : "manual",
   };
 }
 
-export function loadHarnessCandidate(candidateId: string): HarnessCandidateRecord | undefined {
+export function loadHarnessCandidate(
+  candidateId: string,
+): HarnessCandidateRecord | undefined {
   return readJsonFile<HarnessCandidateRecord>(candidatePath(candidateId));
 }
 
@@ -747,13 +1054,17 @@ export function listHarnessCandidates(): HarnessCandidateRecord[] {
   if (!existsSync(candidatesDir())) return [];
   return readdirSync(candidatesDir())
     .flatMap((name) => {
-      const record = readJsonFile<HarnessCandidateRecord>(join(candidatesDir(), name, "candidate.json"));
+      const record = readJsonFile<HarnessCandidateRecord>(
+        join(candidatesDir(), name, "candidate.json"),
+      );
       return record ? [record] : [];
     })
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 }
 
-function buildHarnessHistoryContext(record: HarnessCandidateRecord): string | undefined {
+function buildHarnessHistoryContext(
+  record: HarnessCandidateRecord,
+): string | undefined {
   const signatures = record.manifest.failureSignatureIds.flatMap((id) => {
     const signature = loadHarnessFailureSignature(id);
     return signature ? [signature] : [];
@@ -770,19 +1081,34 @@ function buildHarnessHistoryContext(record: HarnessCandidateRecord): string | un
       decision: candidate.decision?.decision,
       observedFilesModified: candidate.proposal?.observedFilesModified ?? [],
     }));
+  const rejectedBuffer = listHarnessRejectedBuffer(10).map((entry) => ({
+    rejectedId: entry.rejectedId,
+    candidateId: entry.candidateId,
+    patchId: entry.patchId,
+    selectionDelta: entry.selectionDelta,
+    regressionFailures: entry.regressionFailures,
+    rejectionReason: entry.rejectionReason,
+    similarityKeys: entry.similarityKeys,
+    optimizerOnly: entry.optimizerOnly,
+  }));
   const context = {
     schema: HARNESS_EVOLUTION_SCHEMA,
     candidateId: record.candidateId,
     generatedAt: new Date().toISOString(),
     failureSignatures: signatures,
     priorCandidates,
+    rejectedBuffer,
   };
   const path = join(candidateDir(record.candidateId), "history-context.json");
   atomicWriteJson(path, context);
   return path;
 }
 
-function buildProposalPrompt(record: HarnessCandidateRecord, historyContextPath: string | undefined, extraInstructions?: string): string {
+function buildProposalPrompt(
+  record: HarnessCandidateRecord,
+  historyContextPath: string | undefined,
+  extraInstructions?: string,
+): string {
   const signatures = record.manifest.failureSignatureIds.flatMap((id) => {
     const signature = loadHarnessFailureSignature(id);
     return signature ? [signature] : [];
@@ -804,7 +1130,8 @@ function buildProposalPrompt(record: HarnessCandidateRecord, historyContextPath:
     historyContextPath ?? "(none)",
     "",
     "Additional instructions:",
-    extraInstructions?.trim() || "Make the smallest harness change that satisfies the manifest.",
+    extraInstructions?.trim() ||
+      "Make the smallest harness change that satisfies the manifest.",
   ].join("\n");
 }
 
@@ -821,24 +1148,35 @@ export async function proposeHarnessCandidate(input: {
   parentCandidateIds?: string[];
   datasetIds?: string[];
   instructions?: string;
-}): Promise<{ candidate: HarnessCandidateRecord; proposal: HarnessProposalResult }> {
-  const existing = input.candidateId ? loadHarnessCandidate(input.candidateId) : undefined;
-  const candidate = existing ?? createHarnessCandidate({
-    candidateId: input.candidateId,
-    summary: input.summary ?? "Harness proposer candidate",
-    sourceDir: input.sourceDir,
-    editableSurface: input.editableSurface,
-    expectedFixes: input.expectedFixes,
-    possibleRegressions: input.possibleRegressions,
-    evidenceTraceIds: input.evidenceTraceIds,
-    failureSignatureIds: input.failureSignatureIds,
-    parentCandidateIds: input.parentCandidateIds,
-    datasetIds: input.datasetIds,
-    author: "harness-proposer",
-  });
+}): Promise<{
+  candidate: HarnessCandidateRecord;
+  proposal: HarnessProposalResult;
+}> {
+  const existing = input.candidateId
+    ? loadHarnessCandidate(input.candidateId)
+    : undefined;
+  const candidate =
+    existing ??
+    createHarnessCandidate({
+      candidateId: input.candidateId,
+      summary: input.summary ?? "Harness proposer candidate",
+      sourceDir: input.sourceDir,
+      editableSurface: input.editableSurface,
+      expectedFixes: input.expectedFixes,
+      possibleRegressions: input.possibleRegressions,
+      evidenceTraceIds: input.evidenceTraceIds,
+      failureSignatureIds: input.failureSignatureIds,
+      parentCandidateIds: input.parentCandidateIds,
+      datasetIds: input.datasetIds,
+      author: "harness-proposer",
+    });
 
   const historyContextPath = buildHarnessHistoryContext(candidate);
-  const prompt = buildProposalPrompt(candidate, historyContextPath, input.instructions);
+  const prompt = buildProposalPrompt(
+    candidate,
+    historyContextPath,
+    input.instructions,
+  );
   const beforeSnapshot = snapshotVariantFiles(candidate.variant.variantDir);
   const response = await input.provider.execute({
     prompt,
@@ -846,18 +1184,30 @@ export async function proposeHarnessCandidate(input: {
     stepName: "harness-propose",
     round: 1,
   });
-  const observedDiff = diffVariantSnapshots(beforeSnapshot, snapshotVariantFiles(candidate.variant.variantDir));
+  const observedDiff = diffVariantSnapshots(
+    beforeSnapshot,
+    snapshotVariantFiles(candidate.variant.variantDir),
+  );
   const summary = summarizeProviderResponse(response);
-  const reportedFiles = [...new Set(summary.filesModified.map(normalizeSurfacePath))].sort((a, b) => a.localeCompare(b));
+  const reportedFiles = [
+    ...new Set(summary.filesModified.map(normalizeSurfacePath)),
+  ].sort((a, b) => a.localeCompare(b));
   const observedFiles = observedDiff.filesModified;
   const changedFileSet = new Set([...reportedFiles, ...observedFiles]);
-  const surfaceViolations = [...changedFileSet].filter(
-    (file) => !isAllowedByEditableSurface(file, candidate.manifest.editableSurface),
-  ).sort((a, b) => a.localeCompare(b));
+  const surfaceViolations = [...changedFileSet]
+    .filter(
+      (file) =>
+        !isAllowedByEditableSurface(file, candidate.manifest.editableSurface),
+    )
+    .sort((a, b) => a.localeCompare(b));
   const observedFileSet = new Set(observedFiles);
   const reportedFileSet = new Set(reportedFiles);
-  const unreportedFilesModified = observedFiles.filter((file) => !reportedFileSet.has(file));
-  const reportedButUnchangedFiles = reportedFiles.filter((file) => !observedFileSet.has(file));
+  const unreportedFilesModified = observedFiles.filter(
+    (file) => !reportedFileSet.has(file),
+  );
+  const reportedButUnchangedFiles = reportedFiles.filter(
+    (file) => !observedFileSet.has(file),
+  );
   const proposal: HarnessProposalResult = {
     schema: HARNESS_EVOLUTION_SCHEMA,
     candidateId: candidate.candidateId,
@@ -889,7 +1239,8 @@ export async function proposeHarnessCandidate(input: {
 
 function traceDifficulty(trace: PipelineTrace): number {
   let score = 0;
-  if (trace.finalStatus === "failed" || trace.finalStatus === "max_rounds") score += 5;
+  if (trace.finalStatus === "failed" || trace.finalStatus === "max_rounds")
+    score += 5;
   if (trace.finalStatus === "aborted") score += 3;
   score += Math.min(3, trace.totalRounds);
   score += Math.min(3, trace.steps.filter((s) => s.error).length);
@@ -898,27 +1249,41 @@ function traceDifficulty(trace: PipelineTrace): number {
 }
 
 function diversityKey(trace: PipelineTrace): string {
-  const providers = [...new Set(trace.steps.map((s) => s.provider))].sort().join("+") || "none";
+  const providers =
+    [...new Set(trace.steps.map((s) => s.provider))].sort().join("+") || "none";
   const words = trace.prompt.toLowerCase().match(/[a-z0-9_-]{4,}/g) ?? [];
   return `${trace.finalStatus}:${providers}:${words.slice(0, 3).join("-")}`;
 }
 
 function firstFailureStep(trace: PipelineTrace) {
-  return trace.steps.find((step) => step.error || step.verdict === "needs_revision") ?? trace.steps.at(-1);
+  return (
+    trace.steps.find(
+      (step) => step.error || step.verdict === "needs_revision",
+    ) ?? trace.steps.at(-1)
+  );
 }
 
-function failureCategory(trace: PipelineTrace): HarnessFailureCategory | undefined {
+function failureCategory(
+  trace: PipelineTrace,
+): HarnessFailureCategory | undefined {
   if (trace.steps.some((step) => step.error)) return "step_error";
-  if (trace.candidates?.some((candidate) => candidate.failed || candidate.error)) return "race_failure";
-  if (trace.steps.some((step) => step.verdict === "needs_revision")) return "approval_rejected";
+  if (
+    trace.candidates?.some((candidate) => candidate.failed || candidate.error)
+  )
+    return "race_failure";
+  if (trace.steps.some((step) => step.verdict === "needs_revision"))
+    return "approval_rejected";
   if (trace.finalStatus === "max_rounds") return "max_rounds";
   if (trace.finalStatus === "aborted") return "aborted";
-  if (!trace.hasVerifyResults && trace.finalStatus !== "approved") return "missing_verification";
+  if (!trace.hasVerifyResults && trace.finalStatus !== "approved")
+    return "missing_verification";
   if (trace.finalStatus === "failed") return "terminal_failure";
   return undefined;
 }
 
-function suggestedSurfaceForCategory(category: HarnessFailureCategory): string[] {
+function suggestedSurfaceForCategory(
+  category: HarnessFailureCategory,
+): string[] {
   switch (category) {
     case "step_error":
     case "terminal_failure":
@@ -936,23 +1301,33 @@ function suggestedSurfaceForCategory(category: HarnessFailureCategory): string[]
   }
 }
 
-function signatureTitle(category: HarnessFailureCategory, trace: PipelineTrace): string {
+function signatureTitle(
+  category: HarnessFailureCategory,
+  trace: PipelineTrace,
+): string {
   const step = firstFailureStep(trace);
   return `${category} in ${step?.name ?? trace.mode}`;
 }
 
-function signatureKey(category: HarnessFailureCategory, trace: PipelineTrace): string {
+function signatureKey(
+  category: HarnessFailureCategory,
+  trace: PipelineTrace,
+): string {
   const step = firstFailureStep(trace);
-  const providers = [...new Set(trace.steps.map((s) => s.provider))].sort().join("+") || "none";
+  const providers =
+    [...new Set(trace.steps.map((s) => s.provider))].sort().join("+") || "none";
   return `${category}:${step?.name ?? "run"}:${providers}`;
 }
 
-function buildFailureSignature(key: string, traces: PipelineTrace[]): HarnessFailureSignature {
+function buildFailureSignature(
+  key: string,
+  traces: PipelineTrace[],
+): HarnessFailureSignature {
   const first = traces[0]!;
   const category = failureCategory(first) ?? "terminal_failure";
   const step = firstFailureStep(first);
   const errors = traces
-    .flatMap((trace) => trace.steps.flatMap((s) => s.error ? [s.error] : []))
+    .flatMap((trace) => trace.steps.flatMap((s) => (s.error ? [s.error] : [])))
     .slice(0, 3);
   const signatureId = `sig-${createHash("sha256").update(key).digest("hex").slice(0, 10)}`;
   const surface = suggestedSurfaceForCategory(category);
@@ -968,23 +1343,35 @@ function buildFailureSignature(key: string, traces: PipelineTrace[]): HarnessFai
       `rounds=${first.totalRounds}`,
       `step=${step?.name ?? "unknown"}`,
       errors.length ? `errors=${errors.join(" | ")}` : "",
-    ].filter(Boolean).join("; "),
+    ]
+      .filter(Boolean)
+      .join("; "),
     agentActionPattern: `providers=${[...new Set(traces.flatMap((trace) => trace.steps.map((s) => s.provider)))].sort().join("+") || "none"}`,
     suspectedHarnessSurface: surface,
     evidenceTraceIds: traces.map((trace) => trace.id),
     suggestedEditableSurface: surface,
-    suggestedExpectedFixes: [`Reduce ${category} recurrence for ${step?.name ?? first.mode}`],
-    suggestedPossibleRegressions: ["overfitting to mined failure traces", "extra prompt or runtime overhead"],
-    severity: Math.min(10, Math.max(...traces.map(traceDifficulty)) + traces.length),
+    suggestedExpectedFixes: [
+      `Reduce ${category} recurrence for ${step?.name ?? first.mode}`,
+    ],
+    suggestedPossibleRegressions: [
+      "overfitting to mined failure traces",
+      "extra prompt or runtime overhead",
+    ],
+    severity: Math.min(
+      10,
+      Math.max(...traces.map(traceDifficulty)) + traces.length,
+    ),
     traceCount: traces.length,
   };
 }
 
-export function mineHarnessFailureSignatures(input: {
-  traceIds?: string[];
-  limit?: number;
-  since?: string;
-} = {}): HarnessFailureSignature[] {
+export function mineHarnessFailureSignatures(
+  input: {
+    traceIds?: string[];
+    limit?: number;
+    since?: string;
+  } = {},
+): HarnessFailureSignature[] {
   const limit = Math.max(1, input.limit ?? 10);
   const traces = input.traceIds?.length
     ? input.traceIds.flatMap((id) => {
@@ -1006,16 +1393,351 @@ export function mineHarnessFailureSignatures(input: {
     .sort((a, b) => b.severity - a.severity || b.traceCount - a.traceCount)
     .slice(0, limit);
   mkdirSync(signaturesDir(), { recursive: true });
-  for (const signature of signatures) atomicWriteJson(signaturePath(signature.signatureId), signature);
+  for (const signature of signatures)
+    atomicWriteJson(signaturePath(signature.signatureId), signature);
   return signatures;
 }
 
-export function loadHarnessFailureSignature(signatureId: string): HarnessFailureSignature | undefined {
+export function loadHarnessFailureSignature(
+  signatureId: string,
+): HarnessFailureSignature | undefined {
   return readJsonFile<HarnessFailureSignature>(signaturePath(signatureId));
 }
 
-function datasetItem(trace: PipelineTrace, split: "held-in" | "held-out", signatures: HarnessFailureSignature[]): HarnessDatasetItem {
-  const matching = signatures.filter((signature) => signature.evidenceTraceIds.includes(trace.id));
+function defaultVerifier(kind: HarnessVerifierKind): HarnessVerifier {
+  return {
+    schema: HARNESS_EVOLUTION_SCHEMA,
+    verifierId: kind,
+    createdAt: new Date().toISOString(),
+    kind,
+    summary: `Built-in ${kind} verifier`,
+  };
+}
+
+export function registerHarnessVerifier(input: {
+  verifierId?: string;
+  kind: HarnessVerifierKind;
+  summary: string;
+  command?: string[];
+  expectedFiles?: string[];
+  requiredTraceStatuses?: PipelineTrace["finalStatus"][];
+  requiredStepNames?: string[];
+  forbiddenPaths?: string[];
+  rubric?: string;
+}): HarnessVerifier {
+  const verifierId =
+    input.verifierId?.trim() ||
+    `verifier-${input.kind}-${randomUUID().slice(0, 8)}`;
+  const verifier: HarnessVerifier = {
+    schema: HARNESS_EVOLUTION_SCHEMA,
+    verifierId,
+    createdAt: new Date().toISOString(),
+    kind: input.kind,
+    summary: input.summary,
+    command: input.command,
+    expectedFiles: input.expectedFiles,
+    requiredTraceStatuses: input.requiredTraceStatuses,
+    requiredStepNames: input.requiredStepNames,
+    forbiddenPaths: input.forbiddenPaths,
+    rubric: input.rubric,
+  };
+  mkdirSync(verifiersDir(), { recursive: true });
+  atomicWriteJson(verifierPath(verifierId), verifier);
+  return verifier;
+}
+
+export function loadHarnessVerifier(
+  verifierId: string,
+): HarnessVerifier | undefined {
+  return readJsonFile<HarnessVerifier>(verifierPath(verifierId));
+}
+
+export function listHarnessVerifiers(): HarnessVerifier[] {
+  if (!existsSync(verifiersDir())) return [];
+  return readdirSync(verifiersDir())
+    .flatMap((name) => {
+      const verifier = readJsonFile<HarnessVerifier>(
+        join(verifiersDir(), name),
+      );
+      return verifier ? [verifier] : [];
+    })
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+}
+
+function taskFromTrace(
+  trace: PipelineTrace,
+  verifierId: string,
+  criticality: HarnessTask["criticality"],
+): HarnessTask {
+  return {
+    taskId: `task-${trace.id}`,
+    prompt: trace.prompt,
+    toolsets: [
+      ...new Set(
+        trace.steps.map(
+          (step) => step.mode ?? (step.isAgent ? "agent" : "text"),
+        ),
+      ),
+    ].sort(),
+    verifierId,
+    timeoutSec: Math.max(60, Math.ceil(trace.totalDurationMs / 1000) * 2),
+    budget: { maxRounds: Math.max(1, trace.totalRounds + 1) },
+    forbiddenPaths: [],
+    expectedArtifacts: [],
+    criticality,
+    sourceTraceId: trace.id,
+  };
+}
+
+export function createHarnessTaskSet(input: {
+  taskSetId?: string;
+  name: string;
+  description?: string;
+  tasks?: HarnessTask[];
+  traceIds?: string[];
+  verifierId?: string;
+  heldInRatio?: number;
+  leakageTerms?: string[];
+}): HarnessTaskSet {
+  const taskSetId =
+    input.taskSetId?.trim() || `taskset-${randomUUID().slice(0, 8)}`;
+  const verifierId = input.verifierId?.trim() || "trace_process";
+  const traces = input.traceIds?.length
+    ? input.traceIds.flatMap((id) => {
+        const trace = loadTraceById(id);
+        return trace ? [trace] : [];
+      })
+    : [];
+  const traceTasks = traces.map((trace, index) =>
+    taskFromTrace(
+      trace,
+      verifierId,
+      index === traces.length - 1 ? "critical-regression" : "selection",
+    ),
+  );
+  const tasks = [...(input.tasks ?? []), ...traceTasks];
+  if (!tasks.length)
+    throw new Error("Harness task set requires at least one task or trace");
+  const heldInRatio = Math.min(0.8, Math.max(0.2, input.heldInRatio ?? 0.6));
+  const selectionCount =
+    tasks.length === 1
+      ? 1
+      : Math.max(
+          1,
+          Math.min(tasks.length - 1, Math.ceil(tasks.length * heldInRatio)),
+        );
+  const selectionTaskIds = tasks
+    .filter(
+      (task, index) =>
+        task.criticality === "selection" ||
+        (task.criticality === "exploratory" && index < selectionCount),
+    )
+    .map((task) => task.taskId);
+  const regressionTaskIds = tasks
+    .filter(
+      (task, index) =>
+        task.criticality === "critical-regression" ||
+        (!selectionTaskIds.includes(task.taskId) && index >= selectionCount),
+    )
+    .map((task) => task.taskId);
+  const taskSet: HarnessTaskSet = {
+    schema: HARNESS_EVOLUTION_SCHEMA,
+    taskSetId,
+    createdAt: new Date().toISOString(),
+    name: input.name,
+    description: input.description,
+    tasks,
+    selectionTaskIds: [
+      ...new Set(
+        selectionTaskIds.length
+          ? selectionTaskIds
+          : tasks.slice(0, selectionCount).map((task) => task.taskId),
+      ),
+    ],
+    regressionTaskIds: [
+      ...new Set(
+        regressionTaskIds.length
+          ? regressionTaskIds
+          : tasks.slice(selectionCount).map((task) => task.taskId),
+      ),
+    ],
+    leakageTerms: input.leakageTerms ?? [],
+  };
+  mkdirSync(taskSetsDir(), { recursive: true });
+  atomicWriteJson(taskSetPath(taskSetId), taskSet);
+  return taskSet;
+}
+
+export function loadHarnessTaskSet(
+  taskSetId: string,
+): HarnessTaskSet | undefined {
+  return readJsonFile<HarnessTaskSet>(taskSetPath(taskSetId));
+}
+
+export function listHarnessTaskSets(): HarnessTaskSet[] {
+  if (!existsSync(taskSetsDir())) return [];
+  return readdirSync(taskSetsDir())
+    .flatMap((name) => {
+      const taskSet = readJsonFile<HarnessTaskSet>(join(taskSetsDir(), name));
+      return taskSet ? [taskSet] : [];
+    })
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+}
+
+function locateTraceFile(traceId: string): string | undefined {
+  const trace = loadTraceById(traceId);
+  if (!trace) return undefined;
+  return join(
+    getTracesDir(),
+    `${trace.timestamp.slice(0, 10)}_${traceId}.json`,
+  );
+}
+
+function runHarnessVerifier(
+  verifier: HarnessVerifier,
+  task: HarnessTask,
+  candidateTrace: PipelineTrace | null,
+): HarnessVerifierResult {
+  const evidence: string[] = [];
+  if (!candidateTrace) {
+    return {
+      verifierId: verifier.verifierId,
+      kind: verifier.kind,
+      passed: false,
+      score: 0,
+      reason: "candidate trace missing",
+      evidence: [task.taskId],
+    };
+  }
+  if (verifier.kind === "command") {
+    if (!verifier.command?.length)
+      return {
+        verifierId: verifier.verifierId,
+        kind: verifier.kind,
+        passed: false,
+        score: 0,
+        reason: "command verifier missing command",
+        evidence,
+      };
+    const result = spawnSync(verifier.command[0]!, verifier.command.slice(1), {
+      cwd: task.fixture ? resolve(task.fixture) : undefined,
+      encoding: "utf-8",
+      timeout: task.timeoutSec * 1000,
+    });
+    const passed = result.status === 0;
+    evidence.push(`status=${result.status ?? "null"}`);
+    if (result.stdout) evidence.push(result.stdout.slice(0, 500));
+    if (result.stderr) evidence.push(result.stderr.slice(0, 500));
+    return {
+      verifierId: verifier.verifierId,
+      kind: verifier.kind,
+      passed,
+      score: passed ? 1 : 0,
+      reason: passed ? "command passed" : "command failed",
+      evidence,
+    };
+  }
+  if (verifier.kind === "file_diff") {
+    const expected = verifier.expectedFiles ?? task.expectedArtifacts;
+    const touched = new Set(
+      candidateTrace.steps.flatMap((step) => step.filesModified ?? []),
+    );
+    const missing = expected.filter((file) => !touched.has(file));
+    return {
+      verifierId: verifier.verifierId,
+      kind: verifier.kind,
+      passed: missing.length === 0,
+      score: expected.length
+        ? (expected.length - missing.length) / expected.length
+        : 1,
+      reason: missing.length
+        ? `missing expected files: ${missing.join(", ")}`
+        : "expected files touched",
+      evidence: [...touched],
+    };
+  }
+  if (verifier.kind === "policy") {
+    const forbidden = [
+      ...(verifier.forbiddenPaths ?? []),
+      ...task.forbiddenPaths,
+    ].map(normalizeSurfacePath);
+    const touched = candidateTrace.steps
+      .flatMap((step) => step.filesModified ?? [])
+      .map(normalizeSurfacePath);
+    const violations = touched.filter((file) =>
+      forbidden.some((path) => file === path || file.startsWith(`${path}/`)),
+    );
+    return {
+      verifierId: verifier.verifierId,
+      kind: verifier.kind,
+      passed: violations.length === 0,
+      score: violations.length ? 0 : 1,
+      reason: violations.length
+        ? `forbidden paths touched: ${violations.join(", ")}`
+        : "policy boundary passed",
+      evidence: violations.length ? violations : touched,
+    };
+  }
+  if (verifier.kind === "trace_process") {
+    const requiredStatuses = verifier.requiredTraceStatuses ?? ["approved"];
+    const requiredStepNames = verifier.requiredStepNames ?? [];
+    const missingSteps = requiredStepNames.filter(
+      (name) => !candidateTrace.steps.some((step) => step.name === name),
+    );
+    const passed =
+      requiredStatuses.includes(candidateTrace.finalStatus) &&
+      missingSteps.length === 0;
+    evidence.push(
+      `status=${candidateTrace.finalStatus}`,
+      `rounds=${candidateTrace.totalRounds}`,
+    );
+    return {
+      verifierId: verifier.verifierId,
+      kind: verifier.kind,
+      passed,
+      score: passed ? 1 : 0,
+      reason: passed
+        ? "trace process passed"
+        : missingSteps.length
+          ? `missing required steps: ${missingSteps.join(", ")}`
+          : `unexpected status: ${candidateTrace.finalStatus}`,
+      evidence,
+    };
+  }
+  if (verifier.kind === "json_schema") {
+    const passed =
+      candidateTrace.finalStatus === "approved" &&
+      candidateTrace.steps.length > 0;
+    return {
+      verifierId: verifier.verifierId,
+      kind: verifier.kind,
+      passed,
+      score: passed ? 1 : 0,
+      reason: passed
+        ? "trace JSON shape present"
+        : "trace JSON shape incomplete",
+      evidence: [candidateTrace.id],
+    };
+  }
+  return {
+    verifierId: verifier.verifierId,
+    kind: verifier.kind,
+    passed: false,
+    score: 0,
+    reason:
+      "llm_judge verifier requires external scorer output and is not auto-passing",
+    evidence: [verifier.rubric ?? verifier.summary],
+  };
+}
+
+function datasetItem(
+  trace: PipelineTrace,
+  split: "held-in" | "held-out",
+  signatures: HarnessFailureSignature[],
+): HarnessDatasetItem {
+  const matching = signatures.filter((signature) =>
+    signature.evidenceTraceIds.includes(trace.id),
+  );
   return {
     itemId: `${split}-${trace.id}`,
     split,
@@ -1045,20 +1767,30 @@ export function createHarnessDataset(input: {
     const signature = loadHarnessFailureSignature(id);
     return signature ? [signature] : [];
   });
-  const signatureTraceIds = signatures.flatMap((signature) => signature.evidenceTraceIds);
-  const allTraceIds = [...new Set([...(input.traceIds ?? []), ...signatureTraceIds])];
+  const signatureTraceIds = signatures.flatMap(
+    (signature) => signature.evidenceTraceIds,
+  );
+  const allTraceIds = [
+    ...new Set([...(input.traceIds ?? []), ...signatureTraceIds]),
+  ];
   const selected = allTraceIds.length
     ? allTraceIds.flatMap((id) => {
         const trace = loadTraceById(id);
         return trace ? [trace] : [];
       })
     : traces;
-  const sorted = selected.sort((a, b) => a.timestamp.localeCompare(b.timestamp));
+  const sorted = selected.sort((a, b) =>
+    a.timestamp.localeCompare(b.timestamp),
+  );
   const heldInRatio = Math.min(0.8, Math.max(0.2, input.heldInRatio ?? 0.6));
-  const heldInCount = Math.max(1, Math.min(sorted.length - 1, Math.ceil(sorted.length * heldInRatio)));
+  const heldInCount = Math.max(
+    1,
+    Math.min(sorted.length - 1, Math.ceil(sorted.length * heldInRatio)),
+  );
   const heldInTraces = sorted.slice(0, heldInCount);
   const heldOutTraces = sorted.slice(heldInCount);
-  const datasetId = input.datasetId?.trim() || `dataset-${randomUUID().slice(0, 8)}`;
+  const datasetId =
+    input.datasetId?.trim() || `dataset-${randomUUID().slice(0, 8)}`;
   const dataset: HarnessDataset = {
     schema: HARNESS_EVOLUTION_SCHEMA,
     datasetId,
@@ -1066,20 +1798,30 @@ export function createHarnessDataset(input: {
     name: input.name,
     description: input.description,
     sourceTraceIds: sorted.map((trace) => trace.id),
-    sourceFailureSignatureIds: signatures.map((signature) => signature.signatureId),
-    heldIn: heldInTraces.map((trace) => datasetItem(trace, "held-in", signatures)),
-    heldOut: heldOutTraces.map((trace) => datasetItem(trace, "held-out", signatures)),
+    sourceFailureSignatureIds: signatures.map(
+      (signature) => signature.signatureId,
+    ),
+    heldIn: heldInTraces.map((trace) =>
+      datasetItem(trace, "held-in", signatures),
+    ),
+    heldOut: heldOutTraces.map((trace) =>
+      datasetItem(trace, "held-out", signatures),
+    ),
     leakageTerms: input.leakageTerms ?? [],
   };
   if (dataset.heldIn.length === 0 || dataset.heldOut.length === 0) {
-    throw new Error("Harness dataset requires at least one held-in and one held-out trace");
+    throw new Error(
+      "Harness dataset requires at least one held-in and one held-out trace",
+    );
   }
   mkdirSync(datasetsDir(), { recursive: true });
   atomicWriteJson(datasetPath(datasetId), dataset);
   return dataset;
 }
 
-export function loadHarnessDataset(datasetId: string): HarnessDataset | undefined {
+export function loadHarnessDataset(
+  datasetId: string,
+): HarnessDataset | undefined {
   return readJsonFile<HarnessDataset>(datasetPath(datasetId));
 }
 
@@ -1090,20 +1832,27 @@ export function evaluateHarnessDataset(input: {
   tolerance?: RegressionTolerance;
 }): HarnessDatasetEvaluation {
   const dataset = loadHarnessDataset(input.datasetId);
-  if (!dataset) throw new Error(`Harness dataset not found: ${input.datasetId}`);
+  if (!dataset)
+    throw new Error(`Harness dataset not found: ${input.datasetId}`);
   const items = [...dataset.heldIn, ...dataset.heldOut];
   const missingBaselineTraceIds = items
     .filter((item) => !input.candidateTraceIdsByBaseline[item.baselineTraceId])
     .map((item) => item.baselineTraceId);
   if (missingBaselineTraceIds.length) {
-    throw new Error(`Missing candidate traces for dataset baselines: ${missingBaselineTraceIds.join(", ")}`);
+    throw new Error(
+      `Missing candidate traces for dataset baselines: ${missingBaselineTraceIds.join(", ")}`,
+    );
   }
   const pairs: HarnessEvalPair[] = items.map((item) => ({
     baselineTraceId: item.baselineTraceId,
     candidateTraceId: input.candidateTraceIdsByBaseline[item.baselineTraceId]!,
     split: item.split,
   }));
-  const gate = evaluateHarnessCandidate({ candidateId: input.candidateId, pairs, tolerance: input.tolerance });
+  const gate = evaluateHarnessCandidate({
+    candidateId: input.candidateId,
+    pairs,
+    tolerance: input.tolerance,
+  });
   const result: HarnessDatasetEvaluation = {
     schema: HARNESS_EVOLUTION_SCHEMA,
     datasetId: input.datasetId,
@@ -1113,23 +1862,328 @@ export function evaluateHarnessDataset(input: {
     missingBaselineTraceIds,
     gate,
   };
-  atomicWriteJson(datasetEvaluationPath(input.datasetId, input.candidateId), result);
+  atomicWriteJson(
+    datasetEvaluationPath(input.datasetId, input.candidateId),
+    result,
+  );
   const record = loadHarnessCandidate(input.candidateId);
   if (record) {
-    const lineage = record.lineage ?? buildCandidateLineage(record, [], [input.datasetId]);
+    const lineage =
+      record.lineage ?? buildCandidateLineage(record, [], [input.datasetId]);
     atomicWriteJson(candidatePath(input.candidateId), {
       ...record,
-      lineage: { ...lineage, datasetIds: [...new Set([...lineage.datasetIds, input.datasetId])] },
+      lineage: {
+        ...lineage,
+        datasetIds: [...new Set([...lineage.datasetIds, input.datasetId])],
+      },
     } satisfies HarnessCandidateRecord);
   }
   return result;
 }
 
-export function selectHarnessCoreset(input: {
-  limit?: number;
-  since?: string;
-  traceIds?: string[];
-} = {}): HarnessCoresetItem[] {
+function traceScore(trace: PipelineTrace | null): number {
+  if (!trace) return 0;
+  const evaluated = evaluatePipelineTrace(trace);
+  if (evaluated.success) return 1;
+  if (trace.finalStatus === "max_rounds") return 0.35;
+  if (trace.finalStatus === "aborted") return 0.2;
+  return 0;
+}
+
+function artifactHash(
+  path: string,
+): { path: string; sha256: string; size: number } | undefined {
+  if (!existsSync(path)) return undefined;
+  const stat = statSync(path);
+  if (!stat.isFile()) return undefined;
+  const content = readFileSync(path);
+  return {
+    path,
+    sha256: createHash("sha256").update(content).digest("hex"),
+    size: stat.size,
+  };
+}
+
+function toolStatsForStep(
+  step: PipelineTrace["steps"][number],
+): Record<string, number> {
+  const stats: Record<string, number> = {};
+  if (step.mode) stats[step.mode] = (stats[step.mode] ?? 0) + 1;
+  if (step.isAgent) stats.agent = (stats.agent ?? 0) + 1;
+  if (step.raceParticipants?.length) stats.race = step.raceParticipants.length;
+  return stats;
+}
+
+export function createHarnessTrajectory(input: {
+  traceId: string;
+  taskId?: string;
+  runId?: string;
+  candidateId?: string;
+  model?: string;
+  skillVersion?: string;
+  toolsets?: string[];
+}): HarnessTrajectory {
+  const trace = loadTraceById(input.traceId);
+  if (!trace) throw new Error(`Trace not found: ${input.traceId}`);
+  const trajectoryId = `traj-${safePathSegment(input.traceId)}-${randomUUID().slice(0, 8)}`;
+  const tracePath = locateTraceFile(input.traceId);
+  const steps: HarnessTrajectoryStep[] = trace.steps.map((step, index) => ({
+    index,
+    name: step.name,
+    provider: step.provider,
+    round: step.round,
+    durationMs: step.durationMs,
+    verdict: step.verdict,
+    filesModified: step.filesModified ?? [],
+    error: step.error,
+    observationSummary: step.observation?.summary,
+    artifactRefs:
+      step.observation?.artifactRefs?.map(
+        (ref) =>
+          ref.ref ||
+          ref.artifactId ||
+          `${ref.stepName}:${ref.kind}:${ref.artifactIndex}`,
+      ) ?? [],
+    toolStats: toolStatsForStep(step),
+  }));
+  const hashes = [tracePath].flatMap((path) => {
+    if (!path) return [];
+    const hash = artifactHash(path);
+    return hash ? [hash] : [];
+  });
+  const trajectory: HarnessTrajectory = {
+    schema: HARNESS_EVOLUTION_SCHEMA,
+    trajectoryId,
+    createdAt: new Date().toISOString(),
+    traceId: input.traceId,
+    taskId: input.taskId,
+    runId: input.runId,
+    candidateId: input.candidateId,
+    model: input.model,
+    skillVersion: input.skillVersion,
+    toolsets:
+      input.toolsets ??
+      [
+        ...new Set(
+          trace.steps.map(
+            (step) => step.mode ?? (step.isAgent ? "agent" : "text"),
+          ),
+        ),
+      ].sort(),
+    completed: trace.finalStatus === "approved",
+    score: traceScore(trace),
+    tracePath,
+    trajectoryPath: trajectoryPath(trajectoryId),
+    artifactHashes: hashes,
+    steps,
+  };
+  mkdirSync(trajectoriesDir(), { recursive: true });
+  atomicWriteJson(trajectory.trajectoryPath, trajectory);
+  return trajectory;
+}
+
+export function loadHarnessTrajectory(
+  trajectoryId: string,
+): HarnessTrajectory | undefined {
+  return readJsonFile<HarnessTrajectory>(trajectoryPath(trajectoryId));
+}
+
+export function createHarnessReplayManifest(input: {
+  replayId?: string;
+  runId?: string;
+  taskSetId?: string;
+  candidateId?: string;
+  trajectoryIds: string[];
+}): HarnessReplayManifest {
+  const replayId =
+    input.replayId?.trim() || `replay-${randomUUID().slice(0, 8)}`;
+  const trajectories = input.trajectoryIds.flatMap((id) => {
+    const trajectory = loadHarnessTrajectory(id);
+    return trajectory ? [trajectory] : [];
+  });
+  const commands = trajectories.map(
+    (trajectory) =>
+      `npm run runoff:traces -- show ${trajectory.traceId} --json`,
+  );
+  const artifactRefs = trajectories.flatMap((trajectory) => [
+    trajectory.trajectoryPath,
+    ...trajectory.artifactHashes.map((hash) => hash.path),
+  ]);
+  const replay: HarnessReplayManifest = {
+    schema: HARNESS_EVOLUTION_SCHEMA,
+    replayId,
+    createdAt: new Date().toISOString(),
+    runId: input.runId,
+    taskSetId: input.taskSetId,
+    candidateId: input.candidateId,
+    trajectoryIds: input.trajectoryIds,
+    commands,
+    artifactRefs,
+  };
+  mkdirSync(replayDir(), { recursive: true });
+  atomicWriteJson(replayManifestPath(replayId), replay);
+  return replay;
+}
+
+export function evaluateHarnessTaskSet(input: {
+  candidateId: string;
+  taskSetId: string;
+  candidateTraceIdsByTask: Record<string, string>;
+  baselineTraceIdsByTask?: Record<string, string>;
+  runId?: string;
+  skillVersion?: string;
+}): HarnessTaskSetEvaluation {
+  const taskSet = loadHarnessTaskSet(input.taskSetId);
+  if (!taskSet)
+    throw new Error(`Harness task set not found: ${input.taskSetId}`);
+  const results: HarnessTaskRunResult[] = [];
+  for (const task of taskSet.tasks) {
+    const verifier =
+      loadHarnessVerifier(task.verifierId) ??
+      defaultVerifier(task.verifierId as HarnessVerifierKind);
+    const candidateTraceId = input.candidateTraceIdsByTask[task.taskId];
+    const baselineTraceId =
+      input.baselineTraceIdsByTask?.[task.taskId] ?? task.sourceTraceId;
+    const candidateTrace = candidateTraceId
+      ? loadTraceById(candidateTraceId)
+      : null;
+    const verifierResult = runHarnessVerifier(verifier, task, candidateTrace);
+    const trajectory = candidateTraceId
+      ? createHarnessTrajectory({
+          traceId: candidateTraceId,
+          taskId: task.taskId,
+          runId: input.runId,
+          candidateId: input.candidateId,
+          skillVersion: input.skillVersion,
+          toolsets: task.toolsets,
+        })
+      : undefined;
+    const baseline = baselineTraceId ? loadTraceById(baselineTraceId) : null;
+    const candidateScore = verifierResult.passed
+      ? Math.max(verifierResult.score, traceScore(candidateTrace))
+      : verifierResult.score;
+    results.push({
+      taskId: task.taskId,
+      baselineTraceId,
+      candidateTraceId,
+      completed: candidateTrace?.finalStatus === "approved",
+      score: candidateScore,
+      verifier: verifierResult,
+      trajectoryId: trajectory?.trajectoryId,
+    });
+    if (
+      baseline &&
+      candidateTrace &&
+      task.criticality === "critical-regression"
+    ) {
+      const regression = compareRegression(
+        evaluatePipelineTrace(candidateTrace),
+        evaluatePipelineTrace(baseline),
+      );
+      if (!regression.pass) {
+        results.at(-1)!.verifier = {
+          ...results.at(-1)!.verifier,
+          passed: false,
+          score: 0,
+          reason: regression.message ?? "critical regression",
+          evidence: [
+            ...results.at(-1)!.verifier.evidence,
+            baseline.id,
+            candidateTrace.id,
+          ],
+        };
+        results.at(-1)!.score = 0;
+      }
+    }
+  }
+  const selection = results.filter((result) =>
+    taskSet.selectionTaskIds.includes(result.taskId),
+  );
+  const regression = results.filter((result) =>
+    taskSet.regressionTaskIds.includes(result.taskId),
+  );
+  const selectionAverage = selection.length
+    ? selection.reduce((sum, result) => sum + result.score, 0) /
+      selection.length
+    : 0;
+  const baselineAverage = selection.length
+    ? selection.reduce(
+        (sum, result) =>
+          sum +
+          traceScore(
+            result.baselineTraceId
+              ? loadTraceById(result.baselineTraceId)
+              : null,
+          ),
+        0,
+      ) / selection.length
+    : 0;
+  const selectionDelta = Number(
+    (selectionAverage - baselineAverage).toFixed(4),
+  );
+  const regressionPassed = regression.every((result) => result.verifier.passed);
+  const policyPassed = results
+    .filter((result) => {
+      const task = taskSet.tasks.find((t) => t.taskId === result.taskId);
+      const verifier = task
+        ? (loadHarnessVerifier(task.verifierId) ??
+          defaultVerifier(task.verifierId as HarnessVerifierKind))
+        : undefined;
+      return verifier?.kind === "policy";
+    })
+    .every((result) => result.verifier.passed);
+  const accepted =
+    selectionDelta > 0 &&
+    regressionPassed &&
+    policyPassed &&
+    results.every((result) => result.verifier.passed);
+  mkdirSync(
+    join(taskSetsDir(), safePathSegment(input.taskSetId), "evaluations"),
+    { recursive: true },
+  );
+  const replay = createHarnessReplayManifest({
+    runId: input.runId,
+    taskSetId: input.taskSetId,
+    candidateId: input.candidateId,
+    trajectoryIds: results.flatMap((result) =>
+      result.trajectoryId ? [result.trajectoryId] : [],
+    ),
+  });
+  for (const result of results) result.replayId = replay.replayId;
+  const evaluation: HarnessTaskSetEvaluation = {
+    schema: HARNESS_EVOLUTION_SCHEMA,
+    taskSetId: input.taskSetId,
+    candidateId: input.candidateId,
+    evaluatedAt: new Date().toISOString(),
+    results,
+    selectionDelta,
+    regressionPassed,
+    policyPassed,
+    accepted,
+    reason: accepted
+      ? "taskset selection improved and regression/policy tasks passed"
+      : selectionDelta <= 0
+        ? "taskset selection did not improve"
+        : !regressionPassed
+          ? "critical regression task failed"
+          : !policyPassed
+            ? "policy task failed"
+            : "one or more task verifiers failed",
+  };
+  atomicWriteJson(
+    taskSetEvaluationPath(input.taskSetId, input.candidateId),
+    evaluation,
+  );
+  return evaluation;
+}
+
+export function selectHarnessCoreset(
+  input: {
+    limit?: number;
+    since?: string;
+    traceIds?: string[];
+  } = {},
+): HarnessCoresetItem[] {
   const limit = Math.max(1, input.limit ?? 10);
   const traces = input.traceIds?.length
     ? input.traceIds.flatMap((id) => {
@@ -1149,29 +2203,44 @@ export function selectHarnessCoreset(input: {
         promptPreview: trace.prompt.slice(0, 160),
       } satisfies HarnessCoresetItem,
     }))
-    .sort((a, b) => b.item.difficulty - a.item.difficulty || b.trace.timestamp.localeCompare(a.trace.timestamp));
+    .sort(
+      (a, b) =>
+        b.item.difficulty - a.item.difficulty ||
+        b.trace.timestamp.localeCompare(a.trace.timestamp),
+    );
 
   const selected: HarnessCoresetItem[] = [];
   const seenKeys = new Set<string>();
   for (const entry of ranked) {
     if (selected.length >= limit) break;
-    if (seenKeys.has(entry.item.diversityKey) && selected.length < Math.ceil(limit / 2)) continue;
+    if (
+      seenKeys.has(entry.item.diversityKey) &&
+      selected.length < Math.ceil(limit / 2)
+    )
+      continue;
     selected.push(entry.item);
     seenKeys.add(entry.item.diversityKey);
   }
   for (const entry of ranked) {
     if (selected.length >= limit) break;
-    if (!selected.some((item) => item.traceId === entry.item.traceId)) selected.push(entry.item);
+    if (!selected.some((item) => item.traceId === entry.item.traceId))
+      selected.push(entry.item);
   }
   return selected;
 }
 
-function improvementReason(candidate: PipelineTrace, baseline: PipelineTrace): string | undefined {
+function improvementReason(
+  candidate: PipelineTrace,
+  baseline: PipelineTrace,
+): string | undefined {
   const c = evaluatePipelineTrace(candidate);
   const b = evaluatePipelineTrace(baseline);
-  if (c.success && !b.success) return "candidate succeeded where baseline failed";
-  if (c.success === b.success && c.durationMs < b.durationMs) return "candidate reduced duration";
-  if (c.success === b.success && c.roundCount < b.roundCount) return "candidate reduced rounds";
+  if (c.success && !b.success)
+    return "candidate succeeded where baseline failed";
+  if (c.success === b.success && c.durationMs < b.durationMs)
+    return "candidate reduced duration";
+  if (c.success === b.success && c.roundCount < b.roundCount)
+    return "candidate reduced rounds";
   return undefined;
 }
 
@@ -1179,9 +2248,12 @@ function emptySplit(split: "held-in" | "held-out"): HarnessSplitGate {
   return { split, total: 0, passed: 0, regressions: [], improvements: [] };
 }
 
-export function evaluateHarnessCandidate(input: HarnessEvalInput): HarnessGateResult {
+export function evaluateHarnessCandidate(
+  input: HarnessEvalInput,
+): HarnessGateResult {
   const candidate = loadHarnessCandidate(input.candidateId);
-  if (!candidate) throw new Error(`Harness candidate not found: ${input.candidateId}`);
+  if (!candidate)
+    throw new Error(`Harness candidate not found: ${input.candidateId}`);
 
   const bySplit: Record<"held-in" | "held-out", HarnessSplitGate> = {
     "held-in": emptySplit("held-in"),
@@ -1198,7 +2270,9 @@ export function evaluateHarnessCandidate(input: HarnessEvalInput): HarnessGateRe
       bySplit[pair.split].regressions.push({
         baselineTraceId: pair.baselineTraceId,
         candidateTraceId: pair.candidateTraceId,
-        message: !baseline ? "baseline trace missing" : "candidate trace missing",
+        message: !baseline
+          ? "baseline trace missing"
+          : "candidate trace missing",
       });
       bySplit[pair.split].total += 1;
       continue;
@@ -1209,7 +2283,11 @@ export function evaluateHarnessCandidate(input: HarnessEvalInput): HarnessGateRe
     const reason = improvementReason(actual, baseline);
     if (reason) {
       split.passed += 1;
-      split.improvements.push({ baselineTraceId: baseline.id, candidateTraceId: actual.id, reason });
+      split.improvements.push({
+        baselineTraceId: baseline.id,
+        candidateTraceId: actual.id,
+        reason,
+      });
       continue;
     }
     const regression = compareRegression(
@@ -1230,10 +2308,13 @@ export function evaluateHarnessCandidate(input: HarnessEvalInput): HarnessGateRe
 
   const heldIn = bySplit["held-in"];
   const heldOut = bySplit["held-out"];
-  const regressionCount = heldIn.regressions.length + heldOut.regressions.length;
-  const improvementCount = heldIn.improvements.length + heldOut.improvements.length;
+  const regressionCount =
+    heldIn.regressions.length + heldOut.regressions.length;
+  const improvementCount =
+    heldIn.improvements.length + heldOut.improvements.length;
   const hasBothSplits = heldIn.total > 0 && heldOut.total > 0;
-  const accepted = hasBothSplits && regressionCount === 0 && improvementCount > 0;
+  const accepted =
+    hasBothSplits && regressionCount === 0 && improvementCount > 0;
   const reason = !hasBothSplits
     ? "held-in and held-out evidence are both required"
     : regressionCount > 0
@@ -1258,7 +2339,10 @@ export function evaluateHarnessCandidate(input: HarnessEvalInput): HarnessGateRe
   return result;
 }
 
-function rankScore(record: HarnessCandidateRecord): { score: number; reasons: string[] } {
+function rankScore(record: HarnessCandidateRecord): {
+  score: number;
+  reasons: string[];
+} {
   const reasons: string[] = [];
   let score = 0;
   const gate = record.gate;
@@ -1272,17 +2356,25 @@ function rankScore(record: HarnessCandidateRecord): { score: number; reasons: st
   } else {
     reasons.push(`gate rejected: ${gate.reason}`);
   }
-  const improvementCount = gate.heldIn.improvements.length + gate.heldOut.improvements.length;
-  const regressionCount = gate.heldIn.regressions.length + gate.heldOut.regressions.length;
+  const improvementCount =
+    gate.heldIn.improvements.length + gate.heldOut.improvements.length;
+  const regressionCount =
+    gate.heldIn.regressions.length + gate.heldOut.regressions.length;
   score += improvementCount * 10;
   score -= regressionCount * 25;
   score += gate.heldOut.passed * 3 + gate.heldIn.passed;
-  if (record.manifest.expectedFixes.length) score += Math.min(5, record.manifest.expectedFixes.length);
-  reasons.push(`${improvementCount} improvement(s), ${regressionCount} regression(s)`);
+  if (record.manifest.expectedFixes.length)
+    score += Math.min(5, record.manifest.expectedFixes.length);
+  reasons.push(
+    `${improvementCount} improvement(s), ${regressionCount} regression(s)`,
+  );
   return { score, reasons };
 }
 
-function readVariantTextFiles(record: HarnessCandidateRecord, files: string[]): Array<{ path: string; text: string }> {
+function readVariantTextFiles(
+  record: HarnessCandidateRecord,
+  files: string[],
+): Array<{ path: string; text: string }> {
   const out: Array<{ path: string; text: string }> = [];
   for (const file of files) {
     const normalized = normalizeSurfacePath(file);
@@ -1298,7 +2390,13 @@ function readVariantTextFiles(record: HarnessCandidateRecord, files: string[]): 
   return out;
 }
 
-function addFinding(findings: HarnessAuditFinding[], severity: HarnessAuditSeverity, rule: string, message: string, evidence: string[]): void {
+function addFinding(
+  findings: HarnessAuditFinding[],
+  severity: HarnessAuditSeverity,
+  rule: string,
+  message: string,
+  evidence: string[],
+): void {
   findings.push({ severity, rule, message, evidence });
 }
 
@@ -1308,36 +2406,99 @@ export function auditHarnessCandidate(input: {
   leakageTerms?: string[];
 }): HarnessAuditReport {
   const record = loadHarnessCandidate(input.candidateId);
-  if (!record) throw new Error(`Harness candidate not found: ${input.candidateId}`);
-  const dataset = input.datasetId ? loadHarnessDataset(input.datasetId) : undefined;
-  if (input.datasetId && !dataset) throw new Error(`Harness dataset not found: ${input.datasetId}`);
+  if (!record)
+    throw new Error(`Harness candidate not found: ${input.candidateId}`);
+  const dataset = input.datasetId
+    ? loadHarnessDataset(input.datasetId)
+    : undefined;
+  if (input.datasetId && !dataset)
+    throw new Error(`Harness dataset not found: ${input.datasetId}`);
   const findings: HarnessAuditFinding[] = [];
   const proposal = record.proposal;
-  if (!proposal) addFinding(findings, "blocker", "proposal-required", "candidate has no proposal", [record.candidateId]);
-  if (proposal?.failed) addFinding(findings, "blocker", "proposal-failed", "proposal is marked failed", [proposal.error ?? "failed"]);
-  if (proposal?.surfaceViolations.length) addFinding(findings, "blocker", "surface-violation", "proposal modified files outside editable surface", proposal.surfaceViolations);
-  if (proposal?.unreportedFilesModified.length) addFinding(findings, "blocker", "unreported-files", "observed variant files were not reported by provider", proposal.unreportedFilesModified);
-  if (proposal?.reportedButUnchangedFiles.length) addFinding(findings, "warning", "reported-unchanged-files", "provider reported files that did not change", proposal.reportedButUnchangedFiles);
+  if (!proposal)
+    addFinding(
+      findings,
+      "blocker",
+      "proposal-required",
+      "candidate has no proposal",
+      [record.candidateId],
+    );
+  if (proposal?.failed)
+    addFinding(
+      findings,
+      "blocker",
+      "proposal-failed",
+      "proposal is marked failed",
+      [proposal.error ?? "failed"],
+    );
+  if (proposal?.surfaceViolations.length)
+    addFinding(
+      findings,
+      "blocker",
+      "surface-violation",
+      "proposal modified files outside editable surface",
+      proposal.surfaceViolations,
+    );
+  if (proposal?.unreportedFilesModified.length)
+    addFinding(
+      findings,
+      "blocker",
+      "unreported-files",
+      "observed variant files were not reported by provider",
+      proposal.unreportedFilesModified,
+    );
+  if (proposal?.reportedButUnchangedFiles.length)
+    addFinding(
+      findings,
+      "warning",
+      "reported-unchanged-files",
+      "provider reported files that did not change",
+      proposal.reportedButUnchangedFiles,
+    );
 
   const changedFiles = proposal?.observedFilesModified ?? [];
   const texts = readVariantTextFiles(record, changedFiles);
   const terms = [
     ...(input.leakageTerms ?? []),
     ...(dataset?.leakageTerms ?? []),
-    ...(dataset?.heldOut.flatMap((item) => [item.baselineTraceId, ...item.failureSignatureIds]) ?? []),
+    ...(dataset?.heldOut.flatMap((item) => [
+      item.baselineTraceId,
+      ...item.failureSignatureIds,
+    ]) ?? []),
   ].filter((term) => term.length >= 4);
   for (const term of [...new Set(terms)]) {
-    const matches = texts.filter((file) => file.text.includes(term)).map((file) => file.path);
+    const matches = texts
+      .filter((file) => file.text.includes(term))
+      .map((file) => file.path);
     if (matches.length) {
-      addFinding(findings, "blocker", "leakage-term", `candidate variant contains leakage term: ${term}`, matches);
+      addFinding(
+        findings,
+        "blocker",
+        "leakage-term",
+        `candidate variant contains leakage term: ${term}`,
+        matches,
+      );
     }
   }
   for (const file of changedFiles) {
     if (!isAllowedByEditableSurface(file, record.manifest.editableSurface)) {
-      addFinding(findings, "blocker", "editable-surface", `changed file is outside editable surface: ${file}`, [file]);
+      addFinding(
+        findings,
+        "blocker",
+        "editable-surface",
+        `changed file is outside editable surface: ${file}`,
+        [file],
+      );
     }
   }
-  if (!changedFiles.length) addFinding(findings, "blocker", "empty-diff", "candidate has no observed variant diff", [record.candidateId]);
+  if (!changedFiles.length)
+    addFinding(
+      findings,
+      "blocker",
+      "empty-diff",
+      "candidate has no observed variant diff",
+      [record.candidateId],
+    );
 
   const report: HarnessAuditReport = {
     schema: HARNESS_EVOLUTION_SCHEMA,
@@ -1350,17 +2511,29 @@ export function auditHarnessCandidate(input: {
     checkedFiles: changedFiles,
   };
   atomicWriteJson(auditPath(record.candidateId), report);
-  atomicWriteJson(candidatePath(record.candidateId), { ...record, audit: report } satisfies HarnessCandidateRecord);
+  atomicWriteJson(candidatePath(record.candidateId), {
+    ...record,
+    audit: report,
+  } satisfies HarnessCandidateRecord);
   return report;
 }
 
-export function rankHarnessCandidates(candidateIds?: string[]): HarnessCandidateRank[] {
-  const records = (candidateIds?.length ? candidateIds.flatMap((id) => {
-    const record = loadHarnessCandidate(id);
-    return record ? [record] : [];
-  }) : listHarnessCandidates());
+export function rankHarnessCandidates(
+  candidateIds?: string[],
+): HarnessCandidateRank[] {
+  const records = candidateIds?.length
+    ? candidateIds.flatMap((id) => {
+        const record = loadHarnessCandidate(id);
+        return record ? [record] : [];
+      })
+    : listHarnessCandidates();
 
-  const scored = records.map((record) => ({ record, ...rankScore(record), wins: 0, losses: 0 }));
+  const scored = records.map((record) => ({
+    record,
+    ...rankScore(record),
+    wins: 0,
+    losses: 0,
+  }));
   for (let i = 0; i < scored.length; i++) {
     for (let j = i + 1; j < scored.length; j++) {
       const left = scored[i]!;
@@ -1376,7 +2549,12 @@ export function rankHarnessCandidates(candidateIds?: string[]): HarnessCandidate
     }
   }
   const ranks = scored
-    .sort((a, b) => b.score - a.score || b.wins - a.wins || a.record.createdAt.localeCompare(b.record.createdAt))
+    .sort(
+      (a, b) =>
+        b.score - a.score ||
+        b.wins - a.wins ||
+        a.record.createdAt.localeCompare(b.record.createdAt),
+    )
     .map((item, index) => ({
       candidateId: item.record.candidateId,
       score: item.score,
@@ -1389,7 +2567,10 @@ export function rankHarnessCandidates(candidateIds?: string[]): HarnessCandidate
   for (const rank of ranks) {
     const record = loadHarnessCandidate(rank.candidateId);
     if (!record) continue;
-    atomicWriteJson(candidatePath(rank.candidateId), { ...record, ranking: rank });
+    atomicWriteJson(candidatePath(rank.candidateId), {
+      ...record,
+      ranking: rank,
+    });
     atomicWriteJson(rankingPath(rank.candidateId), rank);
   }
   return ranks;
@@ -1399,8 +2580,12 @@ function frontierEntry(record: HarnessCandidateRecord): HarnessFrontierEntry {
   const gate = record.gate;
   const audit = record.audit;
   const score = rankScore(record);
-  const regressionCount = gate ? gate.heldIn.regressions.length + gate.heldOut.regressions.length : 0;
-  const improvementCount = gate ? gate.heldIn.improvements.length + gate.heldOut.improvements.length : 0;
+  const regressionCount = gate
+    ? gate.heldIn.regressions.length + gate.heldOut.regressions.length
+    : 0;
+  const improvementCount = gate
+    ? gate.heldIn.improvements.length + gate.heldOut.improvements.length
+    : 0;
   return {
     candidateId: record.candidateId,
     status: record.status,
@@ -1415,20 +2600,28 @@ function frontierEntry(record: HarnessCandidateRecord): HarnessFrontierEntry {
     parentCandidateIds: record.lineage?.parentCandidateIds ?? [],
     reasons: [
       ...score.reasons,
-      audit ? (audit.passed ? "audit passed" : `audit blocked: ${audit.findings.filter((f) => f.severity === "blocker").length} blocker(s)`) : "no audit",
+      audit
+        ? audit.passed
+          ? "audit passed"
+          : `audit blocked: ${audit.findings.filter((f) => f.severity === "blocker").length} blocker(s)`
+        : "no audit",
       record.status === "accepted" ? "accepted" : `status=${record.status}`,
     ],
   };
 }
 
-export function updateHarnessFrontier(input: {
-  frontierId?: string;
-  candidateIds?: string[];
-} = {}): HarnessFrontier {
-  const records = (input.candidateIds?.length ? input.candidateIds.flatMap((id) => {
-    const record = loadHarnessCandidate(id);
-    return record ? [record] : [];
-  }) : listHarnessCandidates());
+export function updateHarnessFrontier(
+  input: {
+    frontierId?: string;
+    candidateIds?: string[];
+  } = {},
+): HarnessFrontier {
+  const records = input.candidateIds?.length
+    ? input.candidateIds.flatMap((id) => {
+        const record = loadHarnessCandidate(id);
+        return record ? [record] : [];
+      })
+    : listHarnessCandidates();
   const candidateIds = records.map((record) => record.candidateId);
   if (candidateIds.length) rankHarnessCandidates(candidateIds);
   const refreshed = candidateIds.flatMap((id) => {
@@ -1437,21 +2630,32 @@ export function updateHarnessFrontier(input: {
   });
   const entries = refreshed
     .map(frontierEntry)
-    .sort((a, b) => Number(b.accepted) - Number(a.accepted) || Number(b.auditPassed) - Number(a.auditPassed) || b.score - a.score);
+    .sort(
+      (a, b) =>
+        Number(b.accepted) - Number(a.accepted) ||
+        Number(b.auditPassed) - Number(a.auditPassed) ||
+        b.score - a.score,
+    );
   const frontier: HarnessFrontier = {
     schema: HARNESS_EVOLUTION_SCHEMA,
     frontierId: input.frontierId ?? "default",
     updatedAt: new Date().toISOString(),
     candidateIds,
     entries,
-    rejectedCandidateIds: entries.filter((entry) => !entry.accepted || !entry.auditPassed || !entry.gateAccepted).map((entry) => entry.candidateId),
+    rejectedCandidateIds: entries
+      .filter(
+        (entry) => !entry.accepted || !entry.auditPassed || !entry.gateAccepted,
+      )
+      .map((entry) => entry.candidateId),
   };
   mkdirSync(frontiersDir(), { recursive: true });
   atomicWriteJson(frontierPath(frontier.frontierId), frontier);
   return frontier;
 }
 
-function acceptanceChecks(record: HarnessCandidateRecord): HarnessAcceptanceChecks {
+function acceptanceChecks(
+  record: HarnessCandidateRecord,
+): HarnessAcceptanceChecks {
   const proposal = record.proposal;
   const audit = record.audit;
   const gateAccepted = record.gate?.accepted === true;
@@ -1459,18 +2663,45 @@ function acceptanceChecks(record: HarnessCandidateRecord): HarnessAcceptanceChec
   const proposalClean = proposalPresent && proposal.failed !== true;
   const observedDiffPresent = (proposal?.observedFilesModified.length ?? 0) > 0;
   const noSurfaceViolations = (proposal?.surfaceViolations.length ?? 0) === 0;
-  const noUnreportedFiles = (proposal?.unreportedFilesModified.length ?? 0) === 0;
-  const noReportedButUnchangedFiles = (proposal?.reportedButUnchangedFiles.length ?? 0) === 0;
+  const noUnreportedFiles =
+    (proposal?.unreportedFilesModified.length ?? 0) === 0;
+  const noReportedButUnchangedFiles =
+    (proposal?.reportedButUnchangedFiles.length ?? 0) === 0;
   const auditPassed = audit?.passed === true;
   const reasons: string[] = [];
-  if (!gateAccepted) reasons.push(record.gate ? `gate rejected: ${record.gate.reason}` : "missing held-in/held-out gate");
+  if (!gateAccepted)
+    reasons.push(
+      record.gate
+        ? `gate rejected: ${record.gate.reason}`
+        : "missing held-in/held-out gate",
+    );
   if (!proposalPresent) reasons.push("missing proposal");
-  if (proposalPresent && !proposalClean) reasons.push(proposal?.error ? `proposal failed: ${proposal.error}` : "proposal failed");
-  if (proposalPresent && !observedDiffPresent) reasons.push("proposal has no observed variant diff");
-  if (proposalPresent && !noSurfaceViolations) reasons.push(`surface violations: ${proposal.surfaceViolations.join(", ")}`);
-  if (proposalPresent && !noUnreportedFiles) reasons.push(`unreported files: ${proposal.unreportedFilesModified.join(", ")}`);
-  if (proposalPresent && !noReportedButUnchangedFiles) reasons.push(`reported but unchanged files: ${proposal.reportedButUnchangedFiles.join(", ")}`);
-  if (!auditPassed) reasons.push(audit ? `audit blocked: ${audit.findings.filter((finding) => finding.severity === "blocker").length} blocker(s)` : "missing audit report");
+  if (proposalPresent && !proposalClean)
+    reasons.push(
+      proposal?.error
+        ? `proposal failed: ${proposal.error}`
+        : "proposal failed",
+    );
+  if (proposalPresent && !observedDiffPresent)
+    reasons.push("proposal has no observed variant diff");
+  if (proposalPresent && !noSurfaceViolations)
+    reasons.push(
+      `surface violations: ${proposal.surfaceViolations.join(", ")}`,
+    );
+  if (proposalPresent && !noUnreportedFiles)
+    reasons.push(
+      `unreported files: ${proposal.unreportedFilesModified.join(", ")}`,
+    );
+  if (proposalPresent && !noReportedButUnchangedFiles)
+    reasons.push(
+      `reported but unchanged files: ${proposal.reportedButUnchangedFiles.join(", ")}`,
+    );
+  if (!auditPassed)
+    reasons.push(
+      audit
+        ? `audit blocked: ${audit.findings.filter((finding) => finding.severity === "blocker").length} blocker(s)`
+        : "missing audit report",
+    );
   const accepted =
     gateAccepted &&
     proposalPresent &&
@@ -1480,7 +2711,10 @@ function acceptanceChecks(record: HarnessCandidateRecord): HarnessAcceptanceChec
     noUnreportedFiles &&
     noReportedButUnchangedFiles &&
     auditPassed;
-  if (accepted) reasons.push("proposal, audit, observed diff, and held-in/held-out gate accepted");
+  if (accepted)
+    reasons.push(
+      "proposal, audit, observed diff, and held-in/held-out gate accepted",
+    );
   return {
     gateAccepted,
     proposalPresent,
@@ -1495,17 +2729,208 @@ function acceptanceChecks(record: HarnessCandidateRecord): HarnessAcceptanceChec
   };
 }
 
-function evaluateHarnessRolePolicy(plan: HarnessEvolutionPlan): HarnessRoleEvidence {
+function rejectedSimilarityKeys(
+  record: HarnessCandidateRecord,
+  reason: string,
+): string[] {
+  return [
+    record.manifest.summary.toLowerCase().slice(0, 80),
+    ...record.manifest.failureSignatureIds,
+    ...(record.proposal?.observedFilesModified ?? []),
+    reason.toLowerCase().slice(0, 80),
+  ].filter(Boolean);
+}
+
+export function recordHarnessRejectedBuffer(input: {
+  candidateId: string;
+  patchId?: string;
+  selectionDelta?: number;
+  regressionFailures?: string[];
+  rejectionReason: string;
+  reviewNotes?: string;
+}): HarnessRejectedBufferEntry {
+  const record = loadHarnessCandidate(input.candidateId);
+  if (!record)
+    throw new Error(`Harness candidate not found: ${input.candidateId}`);
+  const rejectedId = `reject-${safePathSegment(input.candidateId)}-${randomUUID().slice(0, 8)}`;
+  const gateRegressionFailures = [
+    ...(record.gate?.heldIn.regressions.map(
+      (regression) => regression.message,
+    ) ?? []),
+    ...(record.gate?.heldOut.regressions.map(
+      (regression) => regression.message,
+    ) ?? []),
+  ];
+  const entry: HarnessRejectedBufferEntry = {
+    schema: HARNESS_EVOLUTION_SCHEMA,
+    rejectedId,
+    createdAt: new Date().toISOString(),
+    candidateId: input.candidateId,
+    patchId: input.patchId,
+    sourceFailureSignatureIds: record.manifest.failureSignatureIds,
+    sourceTraceIds: record.manifest.evidenceTraceIds,
+    selectionDelta: input.selectionDelta,
+    regressionFailures: input.regressionFailures ?? gateRegressionFailures,
+    rejectionReason: input.rejectionReason,
+    reviewNotes: input.reviewNotes,
+    similarityKeys: rejectedSimilarityKeys(record, input.rejectionReason),
+    optimizerOnly: true,
+  };
+  mkdirSync(rejectedBufferDir(), { recursive: true });
+  atomicWriteJson(rejectedEntryPath(rejectedId), entry);
+  return entry;
+}
+
+export function listHarnessRejectedBuffer(
+  limit = 20,
+): HarnessRejectedBufferEntry[] {
+  if (!existsSync(rejectedBufferDir())) return [];
+  return readdirSync(rejectedBufferDir())
+    .flatMap((name) => {
+      const entry = readJsonFile<HarnessRejectedBufferEntry>(
+        join(rejectedBufferDir(), name),
+      );
+      return entry ? [entry] : [];
+    })
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+    .slice(0, Math.max(1, limit));
+}
+
+export function decideHarnessSkillPatch(input: {
+  candidateId: string;
+  baseSkill: string;
+  candidateSkill?: string;
+  patchId?: string;
+  patchBudget?: { maxFiles?: number; maxBytes?: number };
+  selectionDelta?: number;
+  regressionPassed?: boolean;
+  policyPassed?: boolean;
+  auditPassed?: boolean;
+  accepted?: boolean;
+  reason?: string;
+}): HarnessSkillPatchDecision {
+  const record = loadHarnessCandidate(input.candidateId);
+  if (!record)
+    throw new Error(`Harness candidate not found: ${input.candidateId}`);
+  const maxFiles = Math.max(
+    1,
+    input.patchBudget?.maxFiles ??
+      Math.max(1, record.proposal?.observedFilesModified.length ?? 1),
+  );
+  const touchedSurfaces =
+    record.proposal?.observedFilesModified ?? record.manifest.editableSurface;
+  const patchWithinBudget = touchedSurfaces.length <= maxFiles;
+  const selectionDelta =
+    input.selectionDelta ??
+    (record.gate
+      ? Number(
+          (
+            (record.gate.heldIn.improvements.length +
+              record.gate.heldOut.improvements.length -
+              (record.gate.heldIn.regressions.length +
+                record.gate.heldOut.regressions.length)) /
+            Math.max(1, record.gate.heldIn.total + record.gate.heldOut.total)
+          ).toFixed(4),
+        )
+      : 0);
+  const regressionPassed =
+    input.regressionPassed ??
+    (record.gate?.heldOut.regressions.length === 0 &&
+      record.gate?.heldIn.regressions.length === 0);
+  const policyPassed =
+    input.policyPassed ??
+    (record.proposal?.surfaceViolations.length ?? 0) === 0;
+  const auditPassed = input.auditPassed ?? record.audit?.passed === true;
+  const accepted =
+    input.accepted ??
+    (selectionDelta > 0 &&
+      regressionPassed &&
+      policyPassed &&
+      auditPassed &&
+      patchWithinBudget);
+  const decision = accepted
+    ? "accept"
+    : record.status === "rolled_back"
+      ? "rollback"
+      : "reject";
+  const reason =
+    input.reason ??
+    (accepted
+      ? "skill patch accepted by selection, regression, policy, audit, and budget gates"
+      : !patchWithinBudget
+        ? "skill patch exceeds patch budget"
+        : selectionDelta <= 0
+          ? "selection delta is not positive"
+          : !regressionPassed
+            ? "regression gate failed"
+            : !policyPassed
+              ? "policy gate failed"
+              : !auditPassed
+                ? "audit gate failed"
+                : "skill patch rejected");
+  const patch: HarnessSkillPatchDecision = {
+    schema: HARNESS_EVOLUTION_SCHEMA,
+    patchId:
+      input.patchId?.trim() ||
+      `skillpatch-${safePathSegment(input.candidateId)}-${randomUUID().slice(0, 8)}`,
+    createdAt: new Date().toISOString(),
+    candidateId: input.candidateId,
+    baseSkill: input.baseSkill,
+    candidateSkill:
+      input.candidateSkill ??
+      `${input.baseSkill}-candidate-${input.candidateId}`,
+    touchedSurfaces,
+    patchBudget: { maxFiles, maxBytes: input.patchBudget?.maxBytes },
+    selectionDelta,
+    regressionPassed,
+    policyPassed,
+    auditPassed,
+    accepted,
+    decision,
+    reason,
+    rollbackRef: accepted ? undefined : decisionPath(input.candidateId),
+  };
+  atomicWriteJson(skillPatchPath(input.candidateId), patch);
+  if (!accepted) {
+    recordHarnessRejectedBuffer({
+      candidateId: input.candidateId,
+      patchId: patch.patchId,
+      selectionDelta,
+      rejectionReason: reason,
+    });
+  }
+  return patch;
+}
+
+function evaluateHarnessRolePolicy(
+  plan: HarnessEvolutionPlan,
+): HarnessRoleEvidence {
   const builderProvider = plan.rolePolicy?.builderProvider ?? plan.provider;
   const reviewerProvider = plan.rolePolicy?.reviewerProvider;
   const verifierProvider = plan.rolePolicy?.verifierProvider;
-  const requireIndependentReviewer = plan.rolePolicy?.requireIndependentReviewer ?? false;
-  const requireIndependentVerifier = plan.rolePolicy?.requireIndependentVerifier ?? false;
-  const independentReviewer = !requireIndependentReviewer || Boolean(reviewerProvider && reviewerProvider !== builderProvider);
-  const independentVerifier = !requireIndependentVerifier || Boolean(verifierProvider && verifierProvider !== builderProvider && verifierProvider !== reviewerProvider);
+  const requireIndependentReviewer =
+    plan.rolePolicy?.requireIndependentReviewer ?? false;
+  const requireIndependentVerifier =
+    plan.rolePolicy?.requireIndependentVerifier ?? false;
+  const independentReviewer =
+    !requireIndependentReviewer ||
+    Boolean(reviewerProvider && reviewerProvider !== builderProvider);
+  const independentVerifier =
+    !requireIndependentVerifier ||
+    Boolean(
+      verifierProvider &&
+      verifierProvider !== builderProvider &&
+      verifierProvider !== reviewerProvider,
+    );
   const reasons: string[] = [];
-  if (!independentReviewer) reasons.push("reviewerProvider must be present and different from builderProvider");
-  if (!independentVerifier) reasons.push("verifierProvider must be present and different from builderProvider/reviewerProvider");
+  if (!independentReviewer)
+    reasons.push(
+      "reviewerProvider must be present and different from builderProvider",
+    );
+  if (!independentVerifier)
+    reasons.push(
+      "verifierProvider must be present and different from builderProvider/reviewerProvider",
+    );
   if (!reasons.length) reasons.push("role policy passed");
   return {
     builderProvider,
@@ -1524,19 +2949,26 @@ export function decideHarnessCandidate(input: {
   reason?: string;
 }): HarnessDecisionRecord {
   const record = loadHarnessCandidate(input.candidateId);
-  if (!record) throw new Error(`Harness candidate not found: ${input.candidateId}`);
+  if (!record)
+    throw new Error(`Harness candidate not found: ${input.candidateId}`);
   const checks = acceptanceChecks(record);
   const autoDecision = checks.accepted ? "accept" : "rollback";
   const decision = input.decision ?? autoDecision;
   if (decision === "accept" && !checks.accepted) {
-    throw new Error(`Harness candidate cannot be accepted: ${checks.reasons.join("; ")}`);
+    throw new Error(
+      `Harness candidate cannot be accepted: ${checks.reasons.join("; ")}`,
+    );
   }
   const nextStatus = decision === "accept" ? "accepted" : "rolled_back";
   const decisionRecord: HarnessDecisionRecord = {
     candidateId: input.candidateId,
     decision,
     decidedAt: new Date().toISOString(),
-    reason: input.reason ?? (decision === "accept" ? "accepted by proposal, audit, observed diff, and regression gate" : checks.reasons.join("; ") || "rolled back without passing gate"),
+    reason:
+      input.reason ??
+      (decision === "accept"
+        ? "accepted by proposal, audit, observed diff, and regression gate"
+        : checks.reasons.join("; ") || "rolled back without passing gate"),
     previousStatus: record.status,
     acceptanceChecks: checks,
   };
@@ -1553,19 +2985,32 @@ export function exportHarnessPromotionBundle(input: {
   candidateId: string;
 }): HarnessPromotionBundle {
   const record = loadHarnessCandidate(input.candidateId);
-  if (!record) throw new Error(`Harness candidate not found: ${input.candidateId}`);
-  if (record.status !== "accepted") throw new Error(`Harness candidate is not accepted: ${input.candidateId}`);
-  if (!record.proposal) throw new Error(`Harness candidate has no proposal: ${input.candidateId}`);
-  if (!record.gate) throw new Error(`Harness candidate has no gate result: ${input.candidateId}`);
-  if (!record.decision) throw new Error(`Harness candidate has no decision record: ${input.candidateId}`);
+  if (!record)
+    throw new Error(`Harness candidate not found: ${input.candidateId}`);
+  if (record.status !== "accepted")
+    throw new Error(`Harness candidate is not accepted: ${input.candidateId}`);
+  if (!record.proposal)
+    throw new Error(`Harness candidate has no proposal: ${input.candidateId}`);
+  if (!record.gate)
+    throw new Error(
+      `Harness candidate has no gate result: ${input.candidateId}`,
+    );
+  if (!record.decision)
+    throw new Error(
+      `Harness candidate has no decision record: ${input.candidateId}`,
+    );
   if (!record.decision.acceptanceChecks.accepted) {
-    throw new Error(`Harness candidate acceptance checks are not passing: ${input.candidateId}`);
+    throw new Error(
+      `Harness candidate acceptance checks are not passing: ${input.candidateId}`,
+    );
   }
 
   const dir = promotionDir(input.candidateId);
   const filesDir = join(dir, "files");
   mkdirSync(filesDir, { recursive: true });
-  const files = record.proposal.observedFilesModified.map((file) => copyPromotionFile(record.variant.variantDir, filesDir, file));
+  const files = record.proposal.observedFilesModified.map((file) =>
+    copyPromotionFile(record.variant.variantDir, filesDir, file),
+  );
   const bundle: HarnessPromotionBundle = {
     schema: HARNESS_EVOLUTION_SCHEMA,
     candidateId: input.candidateId,
@@ -1577,6 +3022,9 @@ export function exportHarnessPromotionBundle(input: {
     proposal: record.proposal,
     gate: record.gate,
     decision: record.decision,
+    skillPatch: readJsonFile<HarnessSkillPatchDecision>(
+      skillPatchPath(input.candidateId),
+    ),
     instructions: [
       "Review this promotion bundle before applying anything to a user repository.",
       "Files under files/ are copied from the accepted candidate variant directory.",
@@ -1587,7 +3035,9 @@ export function exportHarnessPromotionBundle(input: {
   return bundle;
 }
 
-export function loadHarnessEvolutionRun(runId: string): HarnessEvolutionRun | undefined {
+export function loadHarnessEvolutionRun(
+  runId: string,
+): HarnessEvolutionRun | undefined {
   return readJsonFile<HarnessEvolutionRun>(runPath(runId));
 }
 
@@ -1595,18 +3045,30 @@ export function listHarnessEvolutionRuns(): HarnessEvolutionRun[] {
   if (!existsSync(runsDir())) return [];
   return readdirSync(runsDir())
     .flatMap((name) => {
-      const run = readJsonFile<HarnessEvolutionRun>(join(runsDir(), name, "run.json"));
+      const run = readJsonFile<HarnessEvolutionRun>(
+        join(runsDir(), name, "run.json"),
+      );
       return run ? [run] : [];
     })
     .sort((a, b) => b.startedAt.localeCompare(a.startedAt));
 }
 
-function artifactRefsForRun(runId: string, plan: HarnessEvolutionPlan, includePromotion: boolean): string[] {
+function artifactRefsForRun(
+  runId: string,
+  plan: HarnessEvolutionPlan,
+  includePromotion: boolean,
+): string[] {
   const refs = [
     runPlanPath(runId),
     runPath(runId),
     runReportPath(runId),
     datasetPath(plan.datasetId),
+    ...(plan.taskSetId
+      ? [
+          taskSetPath(plan.taskSetId),
+          taskSetEvaluationPath(plan.taskSetId, plan.candidateId),
+        ]
+      : []),
     candidatePath(plan.candidateId),
     proposalPath(plan.candidateId),
     auditPath(plan.candidateId),
@@ -1614,12 +3076,16 @@ function artifactRefsForRun(runId: string, plan: HarnessEvolutionPlan, includePr
     rankingPath(plan.candidateId),
     frontierPath(plan.frontierId),
     decisionPath(plan.candidateId),
+    skillPatchPath(plan.candidateId),
   ];
-  if (includePromotion) refs.push(join(promotionDir(plan.candidateId), "bundle.json"));
+  if (includePromotion)
+    refs.push(join(promotionDir(plan.candidateId), "bundle.json"));
   return refs;
 }
 
-function buildHarnessEvolutionReport(run: HarnessEvolutionRun): HarnessEvolutionReport {
+function buildHarnessEvolutionReport(
+  run: HarnessEvolutionRun,
+): HarnessEvolutionReport {
   return {
     schema: HARNESS_EVOLUTION_SCHEMA,
     runId: run.runId,
@@ -1630,20 +3096,25 @@ function buildHarnessEvolutionReport(run: HarnessEvolutionRun): HarnessEvolution
     planId: run.plan.planId,
     candidateId: run.plan.candidateId,
     datasetId: run.plan.datasetId,
+    taskSetId: run.plan.taskSetId,
     frontierId: run.plan.frontierId,
     triggerEventId: run.plan.triggerEventId,
     gateAccepted: run.evaluation?.gate.accepted,
     auditPassed: run.audit?.passed,
     rolePolicyPassed: run.roleEvidence?.passed,
+    taskSetAccepted: run.taskSetEvaluation?.accepted,
     connectorWritebacks: run.connectorWritebacks ?? [],
     decision: run.decision?.decision,
+    skillPatchId: run.skillPatch?.patchId,
     exportedBundleDir: run.bundle?.bundleDir,
     missingCandidateTraceIds: run.missingCandidateTraceIds,
     artifactRefs: run.artifactRefs,
   };
 }
 
-function persistHarnessEvolutionRun(run: HarnessEvolutionRun): HarnessEvolutionRun {
+function persistHarnessEvolutionRun(
+  run: HarnessEvolutionRun,
+): HarnessEvolutionRun {
   mkdirSync(runDir(run.runId), { recursive: true });
   atomicWriteJson(runPlanPath(run.runId), run.plan);
   atomicWriteJson(runPath(run.runId), run);
@@ -1667,7 +3138,9 @@ function renderHarnessReportMarkdown(report: HarnessEvolutionReport): string {
     `- Decision: ${report.decision ?? "none"}`,
     "",
     "## Missing Candidate Trace Mappings",
-    report.missingCandidateTraceIds.length ? report.missingCandidateTraceIds.map((id) => `- ${id}`).join("\n") : "- none",
+    report.missingCandidateTraceIds.length
+      ? report.missingCandidateTraceIds.map((id) => `- ${id}`).join("\n")
+      : "- none",
     "",
     "## Artifacts",
     report.artifactRefs.map((ref) => `- ${ref}`).join("\n"),
@@ -1685,17 +3158,26 @@ export function writeHarnessConnectorReport(input: {
   const targets = input.targets?.length ? input.targets : run.plan.connectors;
   const writebacks: HarnessConnectorWriteback[] = [];
   for (const target of targets) {
-    const path = resolve(target.path ?? connectorDefaultPath(input.runId, target.kind));
+    const path = resolve(
+      target.path ?? connectorDefaultPath(input.runId, target.kind),
+    );
     mkdirSync(dirname(path), { recursive: true });
     if (target.kind === "markdown") {
-      atomicWriteJson(`${path}.meta.json`, { schema: HARNESS_EVOLUTION_SCHEMA, runId: input.runId, path });
+      atomicWriteJson(`${path}.meta.json`, {
+        schema: HARNESS_EVOLUTION_SCHEMA,
+        runId: input.runId,
+        path,
+      });
       // Keep the human-facing file plain Markdown while preserving atomic metadata separately.
       const content = renderHarnessReportMarkdown(report);
       const tmpPath = `${path}.${randomUUID().slice(0, 8)}.tmp`;
       writeFileSync(tmpPath, content, "utf-8");
       renameSync(tmpPath, path);
     } else {
-      const row = JSON.stringify({ ...report, writtenAt: new Date().toISOString() });
+      const row = JSON.stringify({
+        ...report,
+        writtenAt: new Date().toISOString(),
+      });
       const existing = existsSync(path) ? readFileSync(path, "utf-8") : "";
       const tmpPath = `${path}.${randomUUID().slice(0, 8)}.tmp`;
       writeFileSync(tmpPath, `${existing}${row}\n`, "utf-8");
@@ -1711,25 +3193,33 @@ export function writeHarnessConnectorReport(input: {
       status: "written",
     });
   }
-  const nextRun = { ...run, connectorWritebacks: writebacks } satisfies HarnessEvolutionRun;
+  const nextRun = {
+    ...run,
+    connectorWritebacks: writebacks,
+  } satisfies HarnessEvolutionRun;
   persistHarnessEvolutionRun(nextRun);
   return writebacks;
 }
 
-function triggerEventFromRule(rule: HarnessTriggerRule, traceIds: string[], candidateIds: string[]): HarnessTriggerEvent {
+function triggerEventFromRule(
+  rule: HarnessTriggerRule,
+  traceIds: string[],
+  candidateIds: string[],
+): HarnessTriggerEvent {
   const eventId = `trigger-${rule.ruleId}-${randomUUID().slice(0, 8)}`;
-  const plan = rule.allowedAction === "report"
-    ? undefined
-    : createHarnessEvolutionPlan({
-        runId: `run-${eventId}`,
-        summary: rule.summary,
-        traceIds,
-        candidateId: candidateIds[0],
-        frontierId: rule.frontierId,
-        triggerEventId: eventId,
-        autoDecide: false,
-        exportOnAccept: rule.allowedAction === "export",
-      });
+  const plan =
+    rule.allowedAction === "report"
+      ? undefined
+      : createHarnessEvolutionPlan({
+          runId: `run-${eventId}`,
+          summary: rule.summary,
+          traceIds,
+          candidateId: candidateIds[0],
+          frontierId: rule.frontierId,
+          triggerEventId: eventId,
+          autoDecide: false,
+          exportOnAccept: rule.allowedAction === "export",
+        });
   return {
     schema: HARNESS_EVOLUTION_SCHEMA,
     eventId,
@@ -1742,7 +3232,9 @@ function triggerEventFromRule(rule: HarnessTriggerRule, traceIds: string[], cand
     candidateIds,
     frontierId: rule.frontierId,
     plan,
-    nextAction: plan ? "review pending harness evolution plan before running" : "inspect trigger report and decide whether to create a harness evolution run",
+    nextAction: plan
+      ? "review pending harness evolution plan before running"
+      : "inspect trigger report and decide whether to create a harness evolution run",
   };
 }
 
@@ -1753,25 +3245,47 @@ export function scanHarnessTriggers(input: {
   const events: HarnessTriggerEvent[] = [];
   for (const rule of input.rules.filter((item) => item.enabled)) {
     if (rule.kind === "trace_failure") {
-      const traces = (rule.traceIds?.length ? rule.traceIds.flatMap((id) => {
-        const trace = loadTraceById(id);
-        return trace ? [trace] : [];
-      }) : queryTraces({})).filter((trace) => trace.finalStatus === "failed" || trace.finalStatus === "max_rounds" || trace.finalStatus === "aborted");
+      const traces = (
+        rule.traceIds?.length
+          ? rule.traceIds.flatMap((id) => {
+              const trace = loadTraceById(id);
+              return trace ? [trace] : [];
+            })
+          : queryTraces({})
+      ).filter(
+        (trace) =>
+          trace.finalStatus === "failed" ||
+          trace.finalStatus === "max_rounds" ||
+          trace.finalStatus === "aborted",
+      );
       const traceIds = traces.map((trace) => trace.id);
-      if (traceIds.length >= (rule.minFailureCount ?? 1)) events.push(triggerEventFromRule(rule, traceIds, []));
+      if (traceIds.length >= (rule.minFailureCount ?? 1))
+        events.push(triggerEventFromRule(rule, traceIds, []));
     }
     if (rule.kind === "audit_blocker") {
-      const blocked = listHarnessCandidates().filter((candidate) => candidate.audit?.passed === false);
+      const blocked = listHarnessCandidates().filter(
+        (candidate) => candidate.audit?.passed === false,
+      );
       const candidateIds = blocked.map((candidate) => candidate.candidateId);
       if (candidateIds.length >= (rule.minBlockedAudits ?? 1)) {
-        const traceIds = [...new Set(blocked.flatMap((candidate) => candidate.manifest.evidenceTraceIds))];
+        const traceIds = [
+          ...new Set(
+            blocked.flatMap((candidate) => candidate.manifest.evidenceTraceIds),
+          ),
+        ];
         events.push(triggerEventFromRule(rule, traceIds, candidateIds));
       }
     }
     if (rule.kind === "frontier_stagnation") {
-      const frontier = readJsonFile<HarnessFrontier>(frontierPath(rule.frontierId ?? "default"));
+      const frontier = readJsonFile<HarnessFrontier>(
+        frontierPath(rule.frontierId ?? "default"),
+      );
       const rejectedCandidateIds = frontier?.rejectedCandidateIds ?? [];
-      if (frontier && rejectedCandidateIds.length > 0 && !frontier.entries.some((entry) => entry.accepted)) {
+      if (
+        frontier &&
+        rejectedCandidateIds.length > 0 &&
+        !frontier.entries.some((entry) => entry.accepted)
+      ) {
         events.push(triggerEventFromRule(rule, [], rejectedCandidateIds));
       }
     }
@@ -1786,8 +3300,12 @@ export function scanHarnessTriggers(input: {
   };
   mkdirSync(join(triggersDir(), "events"), { recursive: true });
   mkdirSync(join(triggersDir(), "scans"), { recursive: true });
-  for (const event of events) atomicWriteJson(triggerEventPath(event.eventId), event);
-  const refs = [triggerScanPath(scan.scanId), ...events.map((event) => triggerEventPath(event.eventId))];
+  for (const event of events)
+    atomicWriteJson(triggerEventPath(event.eventId), event);
+  const refs = [
+    triggerScanPath(scan.scanId),
+    ...events.map((event) => triggerEventPath(event.eventId)),
+  ];
   const persisted = { ...scan, artifactRefs: refs };
   atomicWriteJson(triggerScanPath(scan.scanId), persisted);
   return persisted;
@@ -1799,6 +3317,7 @@ function createHarnessEvolutionPlan(input: {
   traceIds?: string[];
   failureSignatureIds?: string[];
   datasetId?: string;
+  taskSetId?: string;
   candidateId?: string;
   frontierId?: string;
   sourceDir?: string;
@@ -1822,6 +3341,7 @@ function createHarnessEvolutionPlan(input: {
     traceIds: input.traceIds ?? [],
     failureSignatureIds: input.failureSignatureIds ?? [],
     datasetId: input.datasetId?.trim() || `dataset-${input.runId}`,
+    taskSetId: input.taskSetId?.trim(),
     candidateId: input.candidateId?.trim() || `candidate-${input.runId}`,
     frontierId: input.frontierId?.trim() || "default",
     sourceDir: input.sourceDir,
@@ -1846,6 +3366,7 @@ export async function runHarnessEvolution(input: {
   traceIds?: string[];
   failureSignatureIds?: string[];
   datasetId?: string;
+  taskSetId?: string;
   candidateId?: string;
   frontierId?: string;
   sourceDir?: string;
@@ -1858,18 +3379,35 @@ export async function runHarnessEvolution(input: {
   rolePolicy?: HarnessRolePolicy;
   connectors?: HarnessConnectorTarget[];
   candidateTraceIdsByBaseline?: Record<string, string>;
+  candidateTraceIdsByTask?: Record<string, string>;
+  baseSkill?: string;
+  candidateSkill?: string;
   autoDecide?: boolean;
   exportOnAccept?: boolean;
 }): Promise<HarnessEvolutionRun> {
   const runId = input.runId?.trim() || `run-${randomUUID().slice(0, 8)}`;
-  const plan = createHarnessEvolutionPlan({ ...input, runId, provider: input.provider.name });
-  const coreset = selectHarnessCoreset({ traceIds: plan.traceIds, limit: Math.max(2, plan.traceIds.length || 10) });
+  const plan = createHarnessEvolutionPlan({
+    ...input,
+    runId,
+    provider: input.provider.name,
+  });
+  const coreset = selectHarnessCoreset({
+    traceIds: plan.traceIds,
+    limit: Math.max(2, plan.traceIds.length || 10),
+  });
   const coresetTraceIds = coreset.map((item) => item.traceId);
   const mined = mineHarnessFailureSignatures({
     traceIds: plan.traceIds.length ? plan.traceIds : coresetTraceIds,
   });
-  const failureSignatureIds = [...new Set([...plan.failureSignatureIds, ...mined.map((signature) => signature.signatureId)])];
-  const datasetTraceIds = plan.traceIds.length ? plan.traceIds : coresetTraceIds;
+  const failureSignatureIds = [
+    ...new Set([
+      ...plan.failureSignatureIds,
+      ...mined.map((signature) => signature.signatureId),
+    ]),
+  ];
+  const datasetTraceIds = plan.traceIds.length
+    ? plan.traceIds
+    : coresetTraceIds;
   const dataset = createHarnessDataset({
     datasetId: plan.datasetId,
     name: plan.summary,
@@ -1877,6 +3415,21 @@ export async function runHarnessEvolution(input: {
     failureSignatureIds,
     leakageTerms: plan.leakageTerms,
   });
+  const taskSet = plan.taskSetId
+    ? (loadHarnessTaskSet(plan.taskSetId) ??
+      createHarnessTaskSet({
+        taskSetId: plan.taskSetId,
+        name: plan.summary,
+        traceIds: datasetTraceIds,
+        leakageTerms: plan.leakageTerms,
+      }))
+    : createHarnessTaskSet({
+        taskSetId: `taskset-${runId}`,
+        name: plan.summary,
+        traceIds: datasetTraceIds,
+        leakageTerms: plan.leakageTerms,
+      });
+  plan.taskSetId = taskSet.taskSetId;
   const proposal = await proposeHarnessCandidate({
     candidateId: plan.candidateId,
     provider: input.provider,
@@ -1892,14 +3445,21 @@ export async function runHarnessEvolution(input: {
   });
   const missingCandidateTraceIds = [...dataset.heldIn, ...dataset.heldOut]
     .map((item) => item.baselineTraceId)
-    .filter((baselineTraceId) => !input.candidateTraceIdsByBaseline?.[baselineTraceId]);
+    .filter(
+      (baselineTraceId) =>
+        !input.candidateTraceIdsByBaseline?.[baselineTraceId],
+    );
 
   let evaluation: HarnessDatasetEvaluation | undefined;
   let audit: HarnessAuditReport | undefined;
   let ranks: HarnessCandidateRank[] | undefined;
   let frontier: HarnessFrontier | undefined;
   let decision: HarnessDecisionRecord | undefined;
+  let skillPatch: HarnessSkillPatchDecision | undefined;
   let bundle: HarnessPromotionBundle | undefined;
+  let taskSetEvaluation: HarnessTaskSetEvaluation | undefined;
+  let trajectories: HarnessTrajectory[] = [];
+  let replay: HarnessReplayManifest | undefined;
   const roleEvidence = evaluateHarnessRolePolicy(plan);
   let connectorWritebacks: HarnessConnectorWriteback[] = [];
   let status: HarnessEvolutionRunStatus = "awaiting_candidate_traces";
@@ -1911,20 +3471,77 @@ export async function runHarnessEvolution(input: {
       datasetId: plan.datasetId,
       candidateTraceIdsByBaseline: input.candidateTraceIdsByBaseline ?? {},
     });
-    audit = auditHarnessCandidate({ candidateId: plan.candidateId, datasetId: plan.datasetId, leakageTerms: plan.leakageTerms });
+    const candidateTraceIdsByTask =
+      input.candidateTraceIdsByTask ??
+      Object.fromEntries(
+        taskSet.tasks.flatMap((task) => {
+          const baselineTraceId = task.sourceTraceId;
+          const candidateTraceId = baselineTraceId
+            ? input.candidateTraceIdsByBaseline?.[baselineTraceId]
+            : undefined;
+          return candidateTraceId ? [[task.taskId, candidateTraceId]] : [];
+        }),
+      );
+    taskSetEvaluation = evaluateHarnessTaskSet({
+      candidateId: plan.candidateId,
+      taskSetId: taskSet.taskSetId,
+      candidateTraceIdsByTask,
+      runId,
+      skillVersion: input.baseSkill,
+    });
+    trajectories = taskSetEvaluation.results.flatMap((result) => {
+      if (!result.trajectoryId) return [];
+      const trajectory = loadHarnessTrajectory(result.trajectoryId);
+      return trajectory ? [trajectory] : [];
+    });
+    const replayId = taskSetEvaluation.results.find(
+      (result) => result.replayId,
+    )?.replayId;
+    replay = replayId
+      ? readJsonFile<HarnessReplayManifest>(replayManifestPath(replayId))
+      : undefined;
+    audit = auditHarnessCandidate({
+      candidateId: plan.candidateId,
+      datasetId: plan.datasetId,
+      leakageTerms: plan.leakageTerms,
+    });
     ranks = rankHarnessCandidates([plan.candidateId]);
-    frontier = updateHarnessFrontier({ frontierId: plan.frontierId, candidateIds: [plan.candidateId] });
+    frontier = updateHarnessFrontier({
+      frontierId: plan.frontierId,
+      candidateIds: [plan.candidateId],
+    });
+    skillPatch = decideHarnessSkillPatch({
+      candidateId: plan.candidateId,
+      baseSkill: input.baseSkill ?? "harness@current",
+      candidateSkill: input.candidateSkill,
+      selectionDelta: taskSetEvaluation.selectionDelta,
+      regressionPassed:
+        taskSetEvaluation.regressionPassed &&
+        evaluation.gate.heldOut.regressions.length === 0 &&
+        evaluation.gate.heldIn.regressions.length === 0,
+      policyPassed: taskSetEvaluation.policyPassed && roleEvidence.passed,
+      auditPassed: audit.passed,
+    });
     if (!roleEvidence.passed) {
       status = "blocked";
       nextAction = `fix role policy before deciding: ${roleEvidence.reasons.join("; ")}`;
+    } else if (!taskSetEvaluation.accepted) {
+      status = "blocked";
+      nextAction = `fix taskset gate before deciding: ${taskSetEvaluation.reason}`;
     } else if (plan.autoDecide) {
       decision = decideHarnessCandidate({ candidateId: plan.candidateId });
       status = decision.decision === "accept" ? "accepted" : "rolled_back";
-      nextAction = decision.decision === "accept" ? "review promotion bundle or export accepted candidate" : "inspect audit/gate findings and create a derived candidate";
+      nextAction =
+        decision.decision === "accept"
+          ? "review promotion bundle or export accepted candidate"
+          : "inspect audit/gate findings and create a derived candidate";
       if (decision.decision === "accept" && plan.exportOnAccept) {
-        bundle = exportHarnessPromotionBundle({ candidateId: plan.candidateId });
+        bundle = exportHarnessPromotionBundle({
+          candidateId: plan.candidateId,
+        });
         status = "exported";
-        nextAction = "review exported promotion bundle before applying outside runoff";
+        nextAction =
+          "review exported promotion bundle before applying outside runoff";
       }
     } else {
       status = audit.passed && evaluation.gate.accepted ? "planned" : "blocked";
@@ -1943,6 +3560,8 @@ export async function runHarnessEvolution(input: {
     coresetTraceIds,
     failureSignatureIds,
     dataset,
+    taskSet,
+    taskSetEvaluation,
     candidate: loadHarnessCandidate(plan.candidateId) ?? proposal.candidate,
     evaluation,
     audit,
@@ -1952,20 +3571,30 @@ export async function runHarnessEvolution(input: {
     roleEvidence,
     connectorWritebacks,
     decision,
+    skillPatch,
     bundle,
+    trajectories,
+    replay,
     missingCandidateTraceIds,
     artifactRefs: artifactRefsForRun(runId, plan, Boolean(bundle)),
     nextAction,
   };
   const persisted = persistHarnessEvolutionRun(run);
   if (plan.connectors.length) {
-    connectorWritebacks = writeHarnessConnectorReport({ runId, targets: plan.connectors });
-    return loadHarnessEvolutionRun(runId) ?? { ...persisted, connectorWritebacks };
+    connectorWritebacks = writeHarnessConnectorReport({
+      runId,
+      targets: plan.connectors,
+    });
+    return (
+      loadHarnessEvolutionRun(runId) ?? { ...persisted, connectorWritebacks }
+    );
   }
   return persisted;
 }
 
-export function queryHarnessEvolutionReport(runId: string): HarnessEvolutionReport {
+export function queryHarnessEvolutionReport(
+  runId: string,
+): HarnessEvolutionReport {
   const run = loadHarnessEvolutionRun(runId);
   if (!run) throw new Error(`Harness evolution run not found: ${runId}`);
   const report = buildHarnessEvolutionReport(run);
