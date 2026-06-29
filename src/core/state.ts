@@ -18,6 +18,7 @@ export type StepStatus = "queued" | "running" | "success" | "failed" | "skipped"
 export type PipelineStatus =
   | "queued"
   | "running"
+  | "needs_clarification"
   | "approved"
   | "failed"
   | "aborted"
@@ -33,6 +34,7 @@ export const PIPELINE_STATUS_FILTERS = [
   "max_rounds",
   "running",
   "queued",
+  "needs_clarification",
   "aborted",
   "awaiting_judge",
   "awaiting_approval",
@@ -56,8 +58,9 @@ const STEP_TRANSITIONS: Record<StepStatus, StepStatus[]> = {
 };
 
 const PIPELINE_TRANSITIONS: Record<PipelineStatus, PipelineStatus[]> = {
-  queued: ["running"],
+  queued: ["running", "needs_clarification"],
   running: ["approved", "failed", "aborted", "max_rounds", "awaiting_judge", "awaiting_approval", "awaiting_plan_approval"],
+  needs_clarification: ["running", "failed", "aborted"],
   approved: [],
   failed: ["running"],
   aborted: [],
@@ -90,6 +93,8 @@ export interface StepResult {
   round?: number;
   kind?: "text" | "agent";
   model?: string;
+  /** Contract describing the context that should have been supplied to this step. */
+  contextContract?: StepContextContract;
   code?: string;
   explanation?: string;
   summary?: string;
@@ -103,6 +108,8 @@ export interface StepResult {
   durationMs?: number;
   /** Runtime-shaped work memory for the next host/model turn. */
   observation?: StepObservation;
+  /** Step-level resume contract: input hash, artifact completeness, workspace attachment, skip/rerun hints. */
+  resumeMetadata?: StepResumeMetadata;
   /** Typed artifacts for this step (Wave 7.5 / Gate 2.7). */
   artifacts?: import("../orchestration/artifacts.js").Artifact[];
 }
@@ -117,6 +124,99 @@ export interface StepObservationArtifactRef {
   producedBy?: string;
 }
 
+export type StepContextKind = "generate" | "review" | "pipeline";
+export type ObservationReflectionKind = "process" | "evidence" | "draft";
+
+export interface ObservationClaim {
+  claim: string;
+  evidenceRefs: string[];
+}
+
+export interface ObservationCoverageGap {
+  kind: ObservationReflectionKind;
+  detail: string;
+  evidenceRefs?: string[];
+}
+
+export type ScopePreflightDecision = "proceed" | "needs_clarification";
+export type ScopePreflightRisk = "low" | "medium" | "high";
+export type ScopePreflightCheckStatus = "pass" | "warn" | "block";
+
+export interface ScopePreflightCheck {
+  name: string;
+  status: ScopePreflightCheckStatus;
+  detail: string;
+  evidenceRefs?: string[];
+  assumption?: string;
+  clarificationQuestion?: string;
+}
+
+export interface ScopePreflightReport {
+  schemaVersion: 1;
+  decision: ScopePreflightDecision;
+  risk: ScopePreflightRisk;
+  checks: ScopePreflightCheck[];
+  assumptions: string[];
+  warnings: string[];
+  blockers: string[];
+  clarificationQuestions: string[];
+  evidenceRefs: string[];
+  safeDefaults: string[];
+}
+
+export type StepArtifactCompleteness = "complete" | "partial" | "missing";
+export type StepWorkspaceAttachment =
+  | "none"
+  | "source_workdir"
+  | "session_workspace"
+  | "race_candidate_workspace";
+
+export interface StepResumeMetadata {
+  schemaVersion: 1;
+  stepName: string;
+  round: number;
+  inputHash: string;
+  artifactCompleteness: StepArtifactCompleteness;
+  providerResultPresent: boolean;
+  workspaceAttachment: StepWorkspaceAttachment;
+  canSkipOnResume: boolean;
+  evidenceRefs: string[];
+  promptVersionId?: string;
+  skipReason?: string;
+  rerunReason?: string;
+  mustRerunReason?: string;
+}
+
+export type ResumeReuseDecision = "skipped" | "rerun";
+
+export interface ResumeReusePlanEntry {
+  stepName: string;
+  decision: ResumeReuseDecision;
+  reason: string;
+  round: number;
+  downstreamOf?: string;
+  evidenceRefs: string[];
+}
+
+export interface ResumeReusePlanReport {
+  schemaVersion: 1;
+  round: number;
+  entries: ResumeReusePlanEntry[];
+  summary: {
+    skipped: number;
+    rerun: number;
+  };
+  evidenceRefs: string[];
+}
+
+export interface StepContextContract {
+  kind: StepContextKind;
+  inputs: string[];
+  forbidden: string[];
+  requiredEvidence: string[];
+  scopeNotes?: string[];
+}
+
 export interface StepObservation {
   schemaVersion: 1;
   action: string;
@@ -125,7 +225,11 @@ export interface StepObservation {
   summary: string;
   evidence: string[];
   coverageGaps: string[];
+  typedCoverageGaps?: ObservationCoverageGap[];
   artifactRefs: StepObservationArtifactRef[];
+  claims?: ObservationClaim[];
+  contextContract?: StepContextContract;
+  resumeMetadata?: StepResumeMetadata;
   nextHint?: string;
 }
 
@@ -173,6 +277,10 @@ export interface PipelineState {
   workspaceBaseRef?: string;
   pendingRaceTraceId?: string;
   raceCandidates?: RaceCandidateSnapshot[];
+  /** Last scope preflight report for this pipeline session. */
+  scopePreflight?: ScopePreflightReport;
+  /** Resume planner decisions applied before the current run continued. */
+  resumeReusePlan?: ResumeReusePlanReport;
   /** Experiment metadata carried through checkpoint/resume. */
   experimentId?: string;
   experimentVariant?: string;

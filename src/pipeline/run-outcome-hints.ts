@@ -4,6 +4,7 @@
 
 import type { PipelineResult } from "../core/pipeline-run-types.js";
 import type { StepResult } from "../core/state.js";
+import { formatResumePlannerOutcomeHints } from "./resume-planner-format.js";
 
 function findLastFailedStep(stepResults: Record<string, StepResult>): {
   name: string;
@@ -20,6 +21,19 @@ function findLastFailedStep(stepResults: Record<string, StepResult>): {
   return best ? { name: best.name, step: best.step } : null;
 }
 
+function collectClaimEvidenceRefs(result: PipelineResult, limit = 8): { refs: string[]; omitted: number } {
+  const seen = new Set<string>();
+  const refs: string[] = [];
+  for (const claim of result.observation?.claims ?? []) {
+    for (const ref of claim.evidenceRefs) {
+      if (seen.has(ref)) continue;
+      seen.add(ref);
+      if (refs.length < limit) refs.push(ref);
+    }
+  }
+  return { refs, omitted: Math.max(0, seen.size - refs.length) };
+}
+
 /** Multi-line operator hints (stdout). */
 export function formatPipelineRunOutcomeHints(
   result: PipelineResult,
@@ -32,7 +46,7 @@ export function formatPipelineRunOutcomeHints(
     `status:      ${result.status}`,
     `traceId:     ${result.traceId}`,
     `session:     ${session}`,
-    `checkpoint:  ~/.runoff/sessions/${session}.json`,
+    `checkpoint:  ~/.runoff/sessions/${session}.checkpoint.json`,
   ];
 
   if (result.error) {
@@ -46,12 +60,36 @@ export function formatPipelineRunOutcomeHints(
     if (failed.step.reason) lines.push(`reason:      ${failed.step.reason}`);
   }
 
+  const claimEvidence = collectClaimEvidenceRefs(result);
+  if (claimEvidence.refs.length) {
+    lines.push("");
+    lines.push("claim evidence refs (for final summaries / PR comments):");
+    for (const ref of claimEvidence.refs) {
+      lines.push(`  • ${ref}`);
+    }
+    if (claimEvidence.omitted > 0) {
+      lines.push(`  • ... ${claimEvidence.omitted} more`);
+    }
+  }
+
+  lines.push(
+    ...formatResumePlannerOutcomeHints(result.resumeReusePlan ?? result.observation?.resumeReusePlan),
+  );
+
   lines.push("");
   lines.push("inspect:");
   lines.push(`  ls ~/.runoff/traces/${result.traceId}.json`);
   lines.push("  npm run pipeline:doctor");
 
   switch (result.status) {
+    case "needs_clarification":
+      lines.push("");
+      lines.push("scope clarification:");
+      for (const question of result.scopePreflight?.clarificationQuestions ?? []) {
+        lines.push(`  • ${question}`);
+      }
+      lines.push(`  rerun runoff_run_pipeline with sessionId: ${session}`);
+      break;
     case "awaiting_judge":
       lines.push("");
       lines.push("race finalize:");

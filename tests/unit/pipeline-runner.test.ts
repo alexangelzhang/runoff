@@ -8,6 +8,7 @@ import type { StepResult } from "../../src/core/state.ts";
 import type { SchedulerContext, StepOutcome } from "../../src/orchestration/step-execution.ts";
 import { artifactsFromStepResponse } from "../../src/orchestration/artifact-bridge.ts";
 import { isCodeArtifact } from "../../src/orchestration/artifacts.ts";
+import { applyResumeStepReusePlan } from "../../src/orchestration/pipeline-runner-helpers.ts";
 
 function makeConfig(): PipelineConfig {
   return {
@@ -182,4 +183,208 @@ test("runPipelineDAGLoop resume reruns failed step without rerunning successful 
   assert.deepEqual(calls, ["review@1"]);
   assert.equal(state.stepResults.generate.round, 1);
   assert.equal(state.stepResults.review.status, "success");
+});
+
+test("runPipelineDAGLoop resume reruns incomplete success and downstream completed steps", async () => {
+  const calls: string[] = [];
+  const stepRunner = {
+    async executeStep(stepName: string, ctx: SchedulerContext): Promise<StepOutcome> {
+      calls.push(`${stepName}@${ctx.round}`);
+      const response = {
+        kind: "text" as const,
+        content: stepName === "review" ? "VERDICT: APPROVED" : `${stepName}-${ctx.round}`,
+        code: `${stepName}-${ctx.round}`,
+        explanation: "",
+        model: "mock",
+      };
+      return {
+        stepName,
+        usedProvider: "mock",
+        upgraded: false,
+        routedFrom: undefined,
+        durationMs: 1,
+        trace: makeTrace(stepName, ctx.round),
+        response,
+        candidateSnapshot: stepName === "review" ? undefined : { code: `${stepName}-${ctx.round}`, isAgent: false },
+        verdict: stepName === "review" ? { approved: true, feedback: "" } : undefined,
+        artifacts: artifactsFromStepResponse(response, { stepName }),
+      };
+    },
+  } as const;
+
+  const state = {
+    stepResults: {
+      generate: {
+        round: 1,
+        status: "success",
+        provider: "mock",
+        kind: "text",
+        code: "stale",
+        candidateSnapshot: { code: "stale", isAgent: false },
+        resumeMetadata: {
+          schemaVersion: 1,
+          stepName: "generate",
+          round: 1,
+          inputHash: "hash-generate",
+          artifactCompleteness: "partial",
+          providerResultPresent: true,
+          workspaceAttachment: "none",
+          canSkipOnResume: false,
+          evidenceRefs: ["stepResults.generate.status"],
+          mustRerunReason: "artifact completeness is partial",
+        },
+      },
+      review: {
+        round: 1,
+        status: "success",
+        provider: "mock",
+        kind: "text",
+        code: "VERDICT: APPROVED",
+        resumeMetadata: {
+          schemaVersion: 1,
+          stepName: "review",
+          round: 1,
+          inputHash: "hash-review",
+          artifactCompleteness: "complete",
+          providerResultPresent: true,
+          workspaceAttachment: "none",
+          canSkipOnResume: true,
+          evidenceRefs: ["stepResults.review.status"],
+        },
+      },
+    } as Record<string, StepResult>,
+    stepTraces: [],
+    globalKnowledge: {},
+    candidate: { code: "stale", isAgent: false },
+    approved: false,
+    lastReviewFeedback: "",
+  };
+
+  const result = await runPipelineDAGLoop({
+    runtimeConfig: makeConfig(),
+    stepRunner: stepRunner as never,
+    costTracker: new CostTracker(),
+    state,
+    pipelineSessionId: "session-3",
+    startRound: 1,
+    maxRounds: 1,
+    reviewStepName: "review",
+    traceId: "trace-3",
+    prompt: "resume incomplete generate",
+    onRoundComplete: async () => {},
+  });
+
+  assert.equal(result.finalStatus, "approved");
+  assert.deepEqual(calls, ["generate@1", "review@1"]);
+  assert.equal(state.stepResults.generate.status, "success");
+  assert.equal(state.stepResults.review.status, "success");
+  assert.equal(state.stepResults.generate.resumeMetadata?.canSkipOnResume, true);
+  assert.equal(state.stepResults.review.resumeMetadata?.canSkipOnResume, true);
+  assert.match(state.stepResults.generate.resumeMetadata?.rerunReason ?? "", /artifact completeness is partial/);
+  assert.match(state.stepResults.review.resumeMetadata?.rerunReason ?? "", /downstream dependency generate/);
+  assert.equal(result.resumeReusePlan?.summary.rerun, 2);
+  assert.equal(state.resumeReusePlan?.summary.skipped, 0);
+  assert.deepEqual(
+    result.resumeReusePlan?.entries.map((entry) => [entry.stepName, entry.decision]),
+    [
+      ["generate", "rerun"],
+      ["review", "rerun"],
+    ],
+  );
+  assert.equal(
+    result.resumeReusePlan?.entries.find((entry) => entry.stepName === "review")?.downstreamOf,
+    "generate",
+  );
+});
+
+test("applyResumeStepReusePlan keeps legacy completed results skippable", () => {
+  const stepResults = {
+    generate: {
+      round: 1,
+      status: "success",
+      provider: "mock",
+    },
+    review: {
+      round: 1,
+      status: "success",
+      provider: "mock",
+      resumeMetadata: {
+        schemaVersion: 1,
+        stepName: "review",
+        round: 1,
+        inputHash: "hash-review",
+        artifactCompleteness: "complete",
+        providerResultPresent: true,
+        workspaceAttachment: "none",
+        canSkipOnResume: true,
+        evidenceRefs: ["stepResults.review.status"],
+      },
+    },
+  } as Record<string, StepResult>;
+
+  const plan = applyResumeStepReusePlan({
+    stepResults,
+    pipeline: makeConfig().pipeline,
+    round: 1,
+  });
+
+  assert.deepEqual(plan.rerunSteps, []);
+  assert.equal(stepResults.generate.status, "success");
+  assert.equal(stepResults.review.status, "success");
+  assert.ok(plan.skippedSteps.some((step) => step.stepName === "generate"));
+  assert.ok(plan.skippedSteps.some((step) => step.stepName === "review"));
+  assert.deepEqual(plan.report.summary, { skipped: 2, rerun: 0 });
+  assert.ok(plan.report.entries.every((entry) => entry.decision === "skipped"));
+});
+
+test("applyResumeStepReusePlan does not report invalidated downstream as skipped", () => {
+  const stepResults = {
+    generate: {
+      round: 1,
+      status: "success",
+      provider: "mock",
+      resumeMetadata: {
+        schemaVersion: 1,
+        stepName: "generate",
+        round: 1,
+        inputHash: "hash-generate",
+        artifactCompleteness: "partial",
+        providerResultPresent: true,
+        workspaceAttachment: "none",
+        canSkipOnResume: false,
+        evidenceRefs: ["stepResults.generate.status"],
+        mustRerunReason: "artifact completeness is partial",
+      },
+    },
+    review: {
+      round: 1,
+      status: "success",
+      provider: "mock",
+      resumeMetadata: {
+        schemaVersion: 1,
+        stepName: "review",
+        round: 1,
+        inputHash: "hash-review",
+        artifactCompleteness: "complete",
+        providerResultPresent: true,
+        workspaceAttachment: "none",
+        canSkipOnResume: true,
+        evidenceRefs: ["stepResults.review.status"],
+      },
+    },
+  } as Record<string, StepResult>;
+
+  const plan = applyResumeStepReusePlan({
+    stepResults,
+    pipeline: makeConfig().pipeline,
+    round: 1,
+  });
+
+  assert.deepEqual(
+    plan.rerunSteps.map((step) => step.stepName),
+    ["generate", "review"],
+  );
+  assert.deepEqual(plan.skippedSteps, []);
+  assert.deepEqual(plan.report.summary, { skipped: 0, rerun: 2 });
+  assert.equal(plan.report.entries.find((entry) => entry.stepName === "review")?.downstreamOf, "generate");
 });

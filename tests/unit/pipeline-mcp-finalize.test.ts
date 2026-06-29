@@ -37,6 +37,21 @@ test("finalizePipelineRunResult returns pipeline-level observation", async () =>
         },
       },
       globalKnowledge: {},
+      resumeReusePlan: {
+        schemaVersion: 1,
+        round: 1,
+        entries: [
+          {
+            stepName: "implement",
+            decision: "rerun",
+            reason: "artifact completeness is partial",
+            round: 1,
+            evidenceRefs: ["stepResults.implement.resumeMetadata"],
+          },
+        ],
+        summary: { skipped: 0, rerun: 1 },
+        evidenceRefs: ["stepResults.implement.resumeMetadata"],
+      },
       runtimeConfig: config,
       controlPlaneMode: "memory",
       hooks: new PipelineHooks(config, "trace-finalize", "session-finalize"),
@@ -48,6 +63,9 @@ test("finalizePipelineRunResult returns pipeline-level observation", async () =>
     assert.deepEqual(result.observation?.checkpointRef, { sessionId: "session-finalize", status: "approved" });
     assert.equal(result.observation?.stepRefs[0]?.stepName, "implement");
     assert.equal(result.observation?.stepRefs[0]?.summary, "implemented feature");
+    assert.equal(result.resumeReusePlan?.summary.rerun, 1);
+    assert.equal(result.observation?.resumeReusePlan?.entries[0]?.stepName, "implement");
+    assert.ok(result.observation?.evidence.includes("resumeReusePlan=rerun:1,skipped:0"));
   } finally {
     if (previousHome === undefined) delete process.env.RUNOFF_HOME;
     else process.env.RUNOFF_HOME = previousHome;

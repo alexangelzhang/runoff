@@ -11,10 +11,15 @@ import { createPipelineCostTracker, runPipelineExecution } from "./pipeline-exec
 import { createExecutionGovernance } from "./execution-governance.js";
 import { syncRunStoreFromPipeline } from "./run-control.js";
 import type { MutablePipelineRunState } from "./pipeline-runner.js";
-import { saveCheckpoint, buildResumeMetadata, type PipelineStatus } from "../core/state.js";
+import {
+  saveCheckpoint,
+  buildResumeMetadata,
+  type PipelineStatus,
+  type ScopePreflightReport,
+} from "../core/state.js";
 import type { PipelineResult, PipelineParams } from "../core/pipeline-run-types.js";
 import { pipelineUsesGlobalSessionWorkspace } from "../runtime/pipeline-workdir.js";
-import { persistRunningPipelineTrace } from "../observability/trace.js";
+import { persistRunningPipelineTrace, recordTrace } from "../observability/trace.js";
 import { PipelineHooks } from "../pipeline/pipeline-hooks.js";
 import { composeEffectivePipelineContext } from "../pipeline/pipeline-context.js";
 import { buildPipelineCheckpointState } from "./pipeline-mcp-checkpoint.js";
@@ -32,6 +37,7 @@ import { PatternCache } from "./pattern-cache.js";
 import { getPipelineMemory } from "../memory/pipeline-memory.js";
 import type { HistoricalPattern } from "../core/pipeline-run-types.js";
 import { buildPipelineObservation } from "./observation.js";
+import { runScopePreflight } from "./scope-preflight.js";
 
 export type PipelineRunParams = PipelineParams & { signal?: AbortSignal };
 
@@ -47,6 +53,7 @@ export async function executePipelineRun(args: PipelineRunParams): Promise<Pipel
     workDir,
     acceptanceCriteria,
     verifyResults,
+    scopePreflight: scopePreflightOverrides,
     sessionId: originalSessionId,
     maxRounds: requestedMaxRounds,
     setPipelineTraceId,
@@ -103,8 +110,89 @@ export async function executePipelineRun(args: PipelineRunParams): Promise<Pipel
   let raceCandidates = resumeState.raceCandidates;
   const skipPlanApproval = resumeState.skipPlanApproval;
   const resumedState = resumeState.resumedState;
+  let scopePreflight: ScopePreflightReport | undefined = resumedState?.scopePreflight;
 
   if (setPipelineTraceId) setPipelineTraceId(traceId);
+
+  scopePreflight = runScopePreflight({
+    config: runtimeConfig,
+    prompt,
+    context,
+    workDir,
+    acceptanceCriteria,
+    verifyResults,
+    configHash: currentConfigHash,
+    overrides: scopePreflightOverrides,
+  });
+
+  if (scopePreflight.decision === "needs_clarification") {
+    const clarificationResult: PipelineResult = {
+      status: "needs_clarification",
+      rounds: 0,
+      totalDurationMs: Date.now() - startTime,
+      totalCostUSD: 0,
+      checkpointFile: sessionId,
+      traceId,
+      stepResults,
+      usage: { promptTokens: 0, completionTokens: 0 },
+      costBreakdown: {},
+      scopePreflight,
+      warnings: scopePreflight.warnings,
+    };
+    clarificationResult.observation = buildPipelineObservation({
+      status: clarificationResult.status,
+      traceId: clarificationResult.traceId,
+      checkpointFile: clarificationResult.checkpointFile,
+      stepResults: clarificationResult.stepResults,
+      rounds: clarificationResult.rounds,
+      totalDurationMs: clarificationResult.totalDurationMs,
+      scopePreflight,
+    });
+    const clarificationState = buildPipelineCheckpointState({
+      sessionId,
+      prompt,
+      currentRound: startRound,
+      maxRounds,
+      status: "needs_clarification",
+      resumeMetadata,
+      traceId,
+      candidate,
+      lastReviewFeedback,
+      approved,
+      stepResults,
+      stepTraces,
+      globalKnowledge,
+      runtimePipeline: runtimeConfig.pipeline,
+      pendingRaceTraceId,
+      raceCandidates,
+      scopePreflight,
+    });
+    await saveCheckpoint(sessionId, clarificationState);
+    syncRunStoreFromPipeline(controlPlane.runStore, {
+      runId: traceId,
+      sessionId,
+      round: startRound,
+      pipelineStatus: "needs_clarification",
+      resumeToken: sessionId,
+    });
+    recordTrace({
+      id: traceId,
+      sessionId,
+      prompt,
+      promptLength: prompt.length,
+      mode: "pipeline",
+      steps: stepTraces,
+      totalRounds: 0,
+      finalStatus: "needs_clarification",
+      totalDurationMs: clarificationResult.totalDurationMs,
+      timestamp: new Date().toISOString(),
+      hasVerifyResults: !!verifyResults,
+      lifecycle: "final",
+      observation: clarificationResult.observation,
+      scopePreflight,
+    });
+    return clarificationResult;
+  }
 
   const governance = createExecutionGovernance(runtimeConfig, {
     runStore: controlPlane.runStore,
@@ -142,6 +230,7 @@ export async function executePipelineRun(args: PipelineRunParams): Promise<Pipel
     lastReviewFeedback,
     pendingRaceTraceId,
     raceCandidates,
+    resumeReusePlan: resumedState?.resumeReusePlan,
   };
 
   const checkpointSnapshot = (currentRound: number, status: PipelineStatus = "running") =>
@@ -163,6 +252,8 @@ export async function executePipelineRun(args: PipelineRunParams): Promise<Pipel
       pendingRaceTraceId: runState.pendingRaceTraceId,
       raceCandidates: runState.raceCandidates,
       workspace,
+      scopePreflight,
+      resumeReusePlan: runState.resumeReusePlan,
     });
 
   try {
@@ -204,6 +295,7 @@ export async function executePipelineRun(args: PipelineRunParams): Promise<Pipel
           round: currentRound,
           pipelineStatus: "running",
           resumeToken: sessionId,
+          resumeReusePlan: runState.resumeReusePlan,
         });
         await saveCheckpoint(sessionId, checkpointSnapshot(currentRound));
         const snap = costTracker.getSummary();
@@ -220,6 +312,7 @@ export async function executePipelineRun(args: PipelineRunParams): Promise<Pipel
           timestamp: new Date().toISOString(),
           hasVerifyResults: !!verifyResults,
           totalUsage: { promptTokens: snap.totalTokens, completionTokens: 0 },
+          resumeReusePlan: runState.resumeReusePlan,
         });
       },
     });
@@ -240,6 +333,7 @@ export async function executePipelineRun(args: PipelineRunParams): Promise<Pipel
         round: startRound,
         pipelineStatus: "awaiting_plan_approval",
         resumeToken: sessionId,
+        resumeReusePlan: runState.resumeReusePlan,
       });
       const pausedResult: PipelineResult = {
         status: "awaiting_plan_approval",
@@ -251,15 +345,18 @@ export async function executePipelineRun(args: PipelineRunParams): Promise<Pipel
         stepResults: runState.stepResults,
         usage: { promptTokens: 0, completionTokens: 0 },
         costBreakdown: {},
+        resumeReusePlan: runState.resumeReusePlan,
       };
       pausedResult.observation = buildPipelineObservation({
         status: pausedResult.status,
         traceId: pausedResult.traceId,
         checkpointFile: pausedResult.checkpointFile,
-        stepResults: pausedResult.stepResults,
-        rounds: pausedResult.rounds,
-        totalDurationMs: pausedResult.totalDurationMs,
-      });
+          stepResults: pausedResult.stepResults,
+          rounds: pausedResult.rounds,
+          totalDurationMs: pausedResult.totalDurationMs,
+          scopePreflight,
+          resumeReusePlan: runState.resumeReusePlan,
+        });
       return pausedResult;
     }
 
@@ -269,6 +366,7 @@ export async function executePipelineRun(args: PipelineRunParams): Promise<Pipel
       round: Math.min(loopResult.endRound, maxRounds),
       pipelineStatus: finalStatus,
       resumeToken: sessionId,
+      resumeReusePlan: runState.resumeReusePlan,
     });
 
     stepResults = runState.stepResults;
@@ -327,6 +425,8 @@ export async function executePipelineRun(args: PipelineRunParams): Promise<Pipel
       costTracker,
       stepResults,
       globalKnowledge,
+      scopePreflight,
+      resumeReusePlan: runState.resumeReusePlan,
       runtimeConfig,
       controlPlaneMode: controlPlane.mode,
       eventLog: controlPlane.eventLog,
@@ -366,6 +466,8 @@ export async function executePipelineRun(args: PipelineRunParams): Promise<Pipel
               rounds: finalResult.rounds,
               totalDurationMs: finalResult.totalDurationMs,
               error: finalResult.error,
+              scopePreflight,
+              resumeReusePlan: finalResult.resumeReusePlan,
             });
           }
         }

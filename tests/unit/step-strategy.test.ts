@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { emptyCandidate } from "../../src/core/candidate.js";
 import {
+  buildStepContextContract,
   buildStructuredPromptForStep,
   isReviewStep,
   resolveStepKind,
@@ -41,4 +42,28 @@ test("buildStructuredPromptForStep uses generate template for non-review step", 
   });
   assert.match(p.system, /software engineer/i);
   assert.doesNotMatch(p.staticContext, /VERDICT:/);
+});
+
+test("buildStepContextContract tailors generate evidence to output kind", () => {
+  const base = {
+    stepName: "generate",
+    reviewStepName: "review",
+    spec: "do X",
+    round: 1,
+    globalKnowledge: {},
+    candidate: emptyCandidate(),
+  };
+
+  assert.deepEqual(
+    buildStepContextContract({ ...base, outputKind: "text" }).requiredEvidence,
+    ["code", "artifacts"],
+  );
+  assert.deepEqual(
+    buildStepContextContract({ ...base, outputKind: "agent" }).requiredEvidence,
+    ["filesModified", "diffStat", "artifacts"],
+  );
+  assert.deepEqual(
+    buildStepContextContract({ ...base, outputKind: "mixed" }).requiredEvidence,
+    ["artifacts"],
+  );
 });

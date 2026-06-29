@@ -51,21 +51,21 @@ Host MCP client
 
 ## MCP tools (do not rename without migration plan)
 
-| Tool | Module |
-|------|--------|
-| `runoff_run_pipeline` | `src/tools/run-pipeline.ts` |
-| `runoff_run_step` | `src/tools/run-step.ts` |
-| `runoff_show_config` | `src/tools/show-config.ts` |
-| `runoff_show_agent_graph` | `src/tools/show-agent-graph.ts` |
-| `runoff_query_traces` | `src/tools/query-traces.ts` |
-| `runoff_score_trace` | `src/tools/score-trace.ts` |
-| `runoff_query_experiments` | `src/tools/query-experiments.ts` |
-| `runoff_memory_status` | `src/tools/memory-status.ts` |
-| `runoff_query_memory` | `src/tools/query-memory.ts` |
-| `runoff_dream_run` | `src/tools/dream-run.ts` |
-| `runoff_dreamify_tune` | `src/tools/dreamify-tune.ts` |
-| `runoff_dream_export` | `src/tools/dream-export.ts` |
-| `runoff_race_apply` / `runoff_race_abort` | `src/tools/race.ts` |
+| Tool                                      | Module                           |
+| ----------------------------------------- | -------------------------------- |
+| `runoff_run_pipeline`                     | `src/tools/run-pipeline.ts`      |
+| `runoff_run_step`                         | `src/tools/run-step.ts`          |
+| `runoff_show_config`                      | `src/tools/show-config.ts`       |
+| `runoff_show_agent_graph`                 | `src/tools/show-agent-graph.ts`  |
+| `runoff_query_traces`                     | `src/tools/query-traces.ts`      |
+| `runoff_score_trace`                      | `src/tools/score-trace.ts`       |
+| `runoff_query_experiments`                | `src/tools/query-experiments.ts` |
+| `runoff_memory_status`                    | `src/tools/memory-status.ts`     |
+| `runoff_query_memory`                     | `src/tools/query-memory.ts`      |
+| `runoff_dream_run`                        | `src/tools/dream-run.ts`         |
+| `runoff_dreamify_tune`                    | `src/tools/dreamify-tune.ts`     |
+| `runoff_dream_export`                     | `src/tools/dream-export.ts`      |
+| `runoff_race_apply` / `runoff_race_abort` | `src/tools/race.ts`              |
 
 **MCP response contract:** success and error bodies are JSON in `content[0].text`. Errors use `{ "error", "prefix" }` with `isError: true`. Pipeline/race/step semantics live in JSON fields (`status`, `reason`, `cleanupErrors`) — do not rely on `isError` alone. See `skill/SKILL.md` §MCP response contract.
 
@@ -73,29 +73,29 @@ New tools: add `src/tools/<name>.ts` and register in `src/index.ts`.
 
 ## Common tasks → files
 
-| Goal | Files |
-|------|--------|
-| New MCP tool | `src/tools/*.ts`, `src/index.ts` |
-| Pipeline orchestration | `src/orchestration/pipeline-execution.ts`, `pipeline-runner.ts`, `orchestrator.ts` |
-| AgentGraph (B7) | `src/orchestration/agent-graph.ts` |
-| Step execution (B8) | `src/orchestration/step-execution.ts`, `pipeline-step-agent.ts`, `step-runner.ts` |
-| A2A federation sync (B5) | `src/experimental/a2a/federation-sync.ts` |
-| Orchestrator plan waves | `src/orchestration/plan-scheduler.ts` |
-| Single-step / race execution | `src/orchestration/step-execution.ts`, `src/runtime/race-execution.ts` |
-| Provider routing / retry pick | `src/routing/router.ts`, `src/routing/retry-strategy.ts` |
-| IPC schema | `src/core/ipc.ts` + `scripts/python/task_runner.py` → `npm run check-ipc-sync` |
-| Workspace / worktree | `src/runtime/workspace.ts`, `scripts/python/workspace_manager.py` |
-| Checkpoints / status machine | `src/core/state.ts` |
-| Traces / query | `src/observability/trace.ts`, `src/tools/query-traces.ts` |
-| Observation summaries | `src/orchestration/observation.ts`, `src/core/state.ts`, `src/core/pipeline-run-types.ts` |
-| Harness evolution | `src/orchestration/harness-evolution.ts`, `src/tools/harness-evolve.ts`, `src/pipeline/harness-evolve-cli.ts` |
-| Policy / approval / guardrails | `src/orchestration/policy.ts`, `approval.ts`, `execution-governance.ts`, `guardrails.ts`, `guardrail-scan.ts` |
-| Agent registry | `src/orchestration/agent.ts`, `registry.ts`, `agent-state.ts` |
-| A2A HTTP / federation | `src/experimental/a2a/*` (shims under `experimental/a2a/`) |
-| OTel export | `src/observability/trace-exporter.ts`, `src/pipeline/pipeline-hooks.ts` |
-| Config validation | `src/core/config.ts` |
-| Pipeline run types | `src/core/pipeline-run-types.ts` |
-| Python executor | `scripts/python/task_runner.py` |
+| Goal                           | Files                                                                                                                                                         |
+| ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| New MCP tool                   | `src/tools/*.ts`, `src/index.ts`                                                                                                                              |
+| Pipeline orchestration         | `src/orchestration/pipeline-execution.ts`, `pipeline-runner.ts`, `orchestrator.ts`                                                                            |
+| AgentGraph (B7)                | `src/orchestration/agent-graph.ts`                                                                                                                            |
+| Step execution (B8)            | `src/orchestration/step-execution.ts`, `pipeline-step-agent.ts`, `step-runner.ts`                                                                             |
+| A2A federation sync (B5)       | `src/experimental/a2a/federation-sync.ts`                                                                                                                     |
+| Orchestrator plan waves        | `src/orchestration/plan-scheduler.ts`                                                                                                                         |
+| Single-step / race execution   | `src/orchestration/step-execution.ts`, `src/runtime/race-execution.ts`                                                                                        |
+| Provider routing / retry pick  | `src/routing/router.ts`, `src/routing/retry-strategy.ts`                                                                                                      |
+| IPC schema                     | `src/core/ipc.ts` + `scripts/python/task_runner.py` → `npm run check-ipc-sync`                                                                                |
+| Workspace / worktree           | `src/runtime/workspace.ts`, `scripts/python/workspace_manager.py`                                                                                             |
+| Checkpoints / status machine   | `src/core/state.ts`                                                                                                                                           |
+| Traces / query                 | `src/observability/trace.ts`, `src/tools/query-traces.ts`                                                                                                     |
+| Observation summaries          | `src/orchestration/observation.ts`, `src/core/state.ts`, `src/core/pipeline-run-types.ts`                                                                     |
+| Harness evolution              | `src/orchestration/harness-evolution.ts`, `src/orchestration/harness-operating-layer.ts`, `src/orchestration/harness-artifact-store.ts`, `src/tools/harness-evolve.ts`, `src/pipeline/harness-evolve-cli.ts` |
+| Policy / approval / guardrails | `src/orchestration/policy.ts`, `approval.ts`, `execution-governance.ts`, `guardrails.ts`, `guardrail-scan.ts`                                                 |
+| Agent registry                 | `src/orchestration/agent.ts`, `registry.ts`, `agent-state.ts`                                                                                                 |
+| A2A HTTP / federation          | `src/experimental/a2a/*` (shims under `experimental/a2a/`)                                                                                                    |
+| OTel export                    | `src/observability/trace-exporter.ts`, `src/pipeline/pipeline-hooks.ts`                                                                                       |
+| Config validation              | `src/core/config.ts`                                                                                                                                          |
+| Pipeline run types             | `src/core/pipeline-run-types.ts`                                                                                                                              |
+| Python executor                | `scripts/python/task_runner.py`                                                                                                                               |
 
 ## Hard constraints (breaking these fails CI or production)
 
@@ -107,7 +107,7 @@ New tools: add `src/tools/<name>.ts` and register in `src/index.ts`.
 6. **Governance order:** Policy → Guardrails → Approval in `ExecutionGovernance.beforeStep` / `afterStep`. Race `awaiting_judge` must be handled **before** `orchestrator.onStepComplete` in `pipeline-runner.ts` (see smoke tests).
 7. **Guardrails:** When `runtime.governance.enabled`, extended guardrails default on (secrets, PII, injection, paths). Document new toggles in `docs/architecture/governance-config.md`.
 8. **Observation layer:** `StepResult.observation` and `PipelineResult.observation` are deterministic, schema-versioned work memory for the next host/model turn. Keep full audit material in `artifacts` / `traces`; do not replace them with summaries.
-9. **Harness evolution:** trigger scans, failure signatures, tasksets, verifier registry records, trajectory/replay manifests, dataset/split objects, dataset/taskset evaluations, plan/run/report objects, role policy evidence, connector writebacks, candidate manifests, candidate lineage, proposer outputs, history contexts, rejected-buffer entries, observed variant diffs, leakage/overfit audits, held-in/held-out gates, skill patch decisions, frontier snapshots, rank decisions, acceptance checks, promotion bundles, and rollback records are audit artifacts under `~/.runoff/harness-evolution/`. Prefer orchestrated `run` + `report` when the host needs the full loop; reports must expose `nextAction` and missing candidate trace mappings instead of forcing log scraping. Trigger scans must default to report/pending-plan behavior, not unattended source edits. Automatic proposers must run with `workDir` set to the candidate `variant/` directory and should consume mined failure signatures/history context plus optimizer-only rejected-buffer entries before editing; proposal audit must compare provider-reported files with observed variant changes and scan dataset leakage terms / held-out IDs before acceptance. Accept decisions must require a clean proposal, observed diff, passing audit, passing role policy when configured, passing held-in/held-out gate, and passing taskset/skill-patch gate when configured. Connector writeback is limited to local JSONL/Markdown artifacts unless an explicit adapter is added later. Promotion export copies accepted variant files into an audit bundle only; it must not apply edits to user repos from TypeScript. Keep repo mutation in the existing workspace/runtime paths.
+9. **Harness evolution:** trigger scans, failure signatures, tasksets, verifier registry records, trajectory/replay manifests, training exports, paddock adapter records, sandbox leases, rollout batches, reward functions/reports, rule/skill registry records, compiled feedback records, GC reports, autonomy policies/decisions, context topologies/routes, dataset/split objects, dataset/taskset evaluations, plan/run/report objects, role policy evidence, connector writebacks, candidate manifests, candidate lineage, proposer outputs, history contexts, rejected-buffer entries, observed variant diffs, leakage/overfit audits, held-in/held-out gates, skill patch decisions, frontier snapshots, rank decisions, acceptance checks, promotion bundles, and rollback records are audit artifacts under `~/.runoff/harness-evolution/`. Prefer orchestrated `run` + `report` when the host needs the full loop; reports must expose `nextAction` and missing candidate trace mappings instead of forcing log scraping. Trigger scans must default to report/pending-plan behavior, not unattended source edits. Automatic proposers must run with `workDir` set to the candidate `variant/` directory and should consume mined failure signatures/history context plus optimizer-only rejected-buffer entries before editing; proposal audit must compare provider-reported files with observed variant changes and scan dataset leakage terms / held-out IDs before acceptance. Training exports must preserve available trace/usage/observation evidence and must not fabricate token-level logprobs, loss masks, or trainer-only telemetry. Paddock, sandbox, rollout, reward, rule, feedback, GC, autonomy, and context topology objects are control-plane contracts; arbitrary blackbox execution, remote sandbox lifecycle, automatic source edits, and repo mutation must stay behind explicit adapters / existing workspace runtime paths. Accept decisions must require a clean proposal, observed diff, passing audit, passing role policy when configured, passing held-in/held-out gate, and passing taskset/skill-patch gate when configured. Connector writeback is limited to local JSONL/Markdown artifacts unless an explicit adapter is added later. Promotion export copies accepted variant files into an audit bundle only; it must not apply edits to user repos from TypeScript. Keep `harness-evolution.ts` as the compatibility facade for broad candidate/dataset/run contracts; put rule registry, prompted feedback, GC, autonomy policy, and context topology/router changes in `harness-operating-layer.ts` so the operating layer remains a deep module instead of growing the facade. Put durable path contracts, artifact indexing, and artifact-store doctor checks in `harness-artifact-store.ts`; callers should not re-create `~/.runoff/harness-evolution/` path logic.
 
 ## Provider integration
 
@@ -122,11 +122,11 @@ Reference subagent spec: [.claude/agents/provider-integrator.md](.claude/agents/
 
 ## Orchestration modes (`orchestration.mode`)
 
-| Mode | Class | Notes |
-|------|--------|------|
-| `dag` (default) | `DAGOrchestrator` | Deterministic waves from pipeline DAG |
-| `workflow` | `WorkflowOrchestrator` | Parallel stages via workflow agents |
-| `llm-driven` | `LLMOrchestrator` | `plannerProvider` + `applyExecutionPlanToAgentGraph` |
+| Mode            | Class                  | Notes                                                |
+| --------------- | ---------------------- | ---------------------------------------------------- |
+| `dag` (default) | `DAGOrchestrator`      | Deterministic waves from pipeline DAG                |
+| `workflow`      | `WorkflowOrchestrator` | Parallel stages via workflow agents                  |
+| `llm-driven`    | `LLMOrchestrator`      | `plannerProvider` + `applyExecutionPlanToAgentGraph` |
 
 ## Testing conventions
 

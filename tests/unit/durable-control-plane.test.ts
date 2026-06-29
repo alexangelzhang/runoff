@@ -155,3 +155,61 @@ test("syncRunStoreFromPipeline preserves exact pipeline status in metadata", () 
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("syncRunStoreFromPipeline stores resume planner summary in metadata", () => {
+  const dir = mkdtempSync(join(tmpdir(), "llm-sync-resume-planner-"));
+  try {
+    const store = new FileRunStore(join(dir, "runs"));
+    syncRunStoreFromPipeline(store, {
+      runId: "trace-resume-planner",
+      sessionId: "session-resume-planner",
+      round: 1,
+      pipelineStatus: "approved",
+      resumeToken: "session-resume-planner",
+      resumeReusePlan: {
+        schemaVersion: 1,
+        round: 1,
+        entries: [
+          {
+            stepName: "generate",
+            decision: "rerun",
+            reason: "artifact completeness is partial",
+            round: 1,
+            evidenceRefs: ["stepResults.generate.resumeMetadata"],
+          },
+          {
+            stepName: "review",
+            decision: "rerun",
+            reason: "downstream dependency generate must rerun on resume",
+            round: 1,
+            downstreamOf: "generate",
+            evidenceRefs: ["stepResults.review.resumeMetadata"],
+          },
+        ],
+        summary: { skipped: 0, rerun: 2 },
+        evidenceRefs: ["stepResults.generate.resumeMetadata", "stepResults.review.resumeMetadata"],
+      },
+    });
+
+    const stored = store.load("trace-resume-planner");
+    assert.deepEqual(stored?.metadata?.resumePlanner, {
+      round: 1,
+      rerun: 2,
+      skipped: 0,
+      rerunSteps: [
+        {
+          stepName: "generate",
+          reason: "artifact completeness is partial",
+        },
+        {
+          stepName: "review",
+          reason: "downstream dependency generate must rerun on resume",
+          downstreamOf: "generate",
+        },
+      ],
+      skippedHidden: 0,
+    });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

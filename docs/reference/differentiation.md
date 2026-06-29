@@ -197,5 +197,6 @@ Verified 2026-06 via AnySearch + page extract.
 
 - [`coding-agent-backends.md`](guides/coding-agent-backends.md) — Codex, Gemini, Claude Code, OpenCode
 - [`industry-benchmark.md`](reference/industry-benchmark.md) — pinned SHA tactical refs
+- [`hermes-ase-comparison.md`](reference/hermes-ase-comparison.md) — vs Hermes Agent Self-Evolution (DSPy + GEPA); borrowed iterative proposer, dual-layer fitness, graded gates
 - [`OPEN_SOURCE.md`](reference/OPEN_SOURCE.md) — release checklist
 - [`observability.md`](features/observability.md) — trace + experiment

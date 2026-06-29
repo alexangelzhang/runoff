@@ -1,5 +1,6 @@
 import type { EventLog } from "./event-log.js";
 import type { RunState, RunStatus, RunStore } from "./run-store.js";
+import type { RunResumePlannerSummary } from "./run-control.js";
 
 export type RunNextAction =
   | "wait"
@@ -21,12 +22,19 @@ export interface RunSummary {
   eventCursor?: number;
   nextAction: RunNextAction;
   nextHint: string;
+  /** Compact resume planner counts for summary/list views. */
+  resumePlanner?: Pick<RunResumePlannerSummary, "rerun" | "skipped">;
+}
+
+export interface FullRunQueryRun extends RunState {
+  /** Full-format host/UI summary of resume reuse decisions, if a resumed run produced one. */
+  resumePlanner?: RunResumePlannerSummary;
 }
 
 export interface RunQueryResult {
   format: "summary" | "full";
   controlPlaneMode: "memory" | "file";
-  runs: Array<RunSummary | RunState>;
+  runs: Array<RunSummary | FullRunQueryRun>;
   count: number;
   eventCount?: number;
 }
@@ -41,6 +49,12 @@ export function runNextAction(run: RunState): { action: RunNextAction; hint: str
   }
   if (pipelineStatus === "max_rounds") {
     return { action: "inspect_trace", hint: "Inspect the trace/postmortem; max rounds were reached before approval." };
+  }
+  if (pipelineStatus === "needs_clarification") {
+    return {
+      action: "resume_from_checkpoint",
+      hint: "Answer scopePreflight.clarificationQuestions, then resume with the same sessionId and explicit scopePreflight overrides.",
+    };
   }
 
   switch (run.status) {
@@ -62,6 +76,7 @@ export function summarizeRun(run: RunState, eventLog?: EventLog): RunSummary {
   const next = runNextAction(run);
   const events = eventLog?.replay(run.runId);
   const pipelineStatus = typeof run.metadata?.pipelineStatus === "string" ? run.metadata.pipelineStatus : undefined;
+  const storedPlanner = run.metadata?.resumePlanner as RunResumePlannerSummary | undefined;
   return {
     runId: run.runId,
     sessionId: run.sessionId,
@@ -75,7 +90,16 @@ export function summarizeRun(run: RunState, eventLog?: EventLog): RunSummary {
     eventCursor: events?.at(-1)?.seq,
     nextAction: next.action,
     nextHint: next.hint,
+    ...(storedPlanner
+      ? { resumePlanner: { rerun: storedPlanner.rerun, skipped: storedPlanner.skipped } }
+      : {}),
   };
+}
+
+function fullRunForQuery(run: RunState): FullRunQueryRun {
+  const metadata = run.metadata ?? {};
+  const resumePlanner = metadata.resumePlanner as RunResumePlannerSummary | undefined;
+  return resumePlanner ? { ...run, resumePlanner } : { ...run };
 }
 
 export function queryRuns(args: {
@@ -95,7 +119,7 @@ export function queryRuns(args: {
   });
   const sorted = loaded.sort((a, b) => b.updatedAt - a.updatedAt);
   const limited = args.limit ? sorted.slice(0, args.limit) : sorted;
-  const runs = format === "full" ? limited : limited.map((run) => summarizeRun(run, args.eventLog));
+  const runs = format === "full" ? limited.map(fullRunForQuery) : limited.map((run) => summarizeRun(run, args.eventLog));
 
   return {
     format,

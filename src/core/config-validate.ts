@@ -213,6 +213,30 @@ function validateRuntime(runtime: Record<string, unknown>): void {
   ) {
     throw new Error('runtime.raceFinalize must be "defer" or "auto-pick"');
   }
+  if (runtime.scopePreflight !== undefined) {
+    const sp = runtime.scopePreflight as Record<string, unknown>;
+    if (typeof sp !== "object" || sp === null || Array.isArray(sp)) {
+      throw new Error("runtime.scopePreflight must be an object");
+    }
+    if (sp.enabled !== undefined && typeof sp.enabled !== "boolean") {
+      throw new Error("runtime.scopePreflight.enabled must be a boolean");
+    }
+    for (const flag of ["requireVerificationCommand", "requireCleanWorktree"] as const) {
+      if (sp[flag] !== undefined && typeof sp[flag] !== "boolean") {
+        throw new Error(`runtime.scopePreflight.${flag} must be a boolean`);
+      }
+    }
+    for (const policy of ["dirtyWorktree", "docUpdates", "race"] as const) {
+      if (
+        sp[policy] !== undefined &&
+        sp[policy] !== "allow" &&
+        sp[policy] !== "warn" &&
+        sp[policy] !== "clarify"
+      ) {
+        throw new Error(`runtime.scopePreflight.${policy} must be "allow", "warn", or "clarify"`);
+      }
+    }
+  }
   if (runtime.governance !== undefined) {
     const g = runtime.governance as Record<string, unknown>;
     if (typeof g !== "object" || g === null || Array.isArray(g)) throw new Error("runtime.governance must be an object");
@@ -267,4 +291,3 @@ export function validateConfig(config: unknown): config is PipelineConfig {
   }
   return true;
 }
-

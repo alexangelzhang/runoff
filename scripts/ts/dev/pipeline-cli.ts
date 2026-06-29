@@ -4,7 +4,7 @@
  *
  *   pipeline run | init | doctor | config edit | config validate | mcp
  *   pipeline runs list|show
- *   pipeline harness coreset|mine|dataset|create|propose|run|report|runs|trigger-scan|writeback|evaluate|evaluate-dataset|audit|rank|frontier|decide|export|list
+ *   pipeline harness coreset|mine|dataset|create|propose|run|training-export|paddock|sandbox|rollout-batch|reward|rule|feedback|gc|autonomy|context|index|doctor|report|runs|trigger-scan|writeback|evaluate|evaluate-dataset|audit|rank|frontier|decide|export|list
  *   pipeline traces list|show|tail | observability ui
  */
 
@@ -44,23 +44,36 @@ import {
   harnessEvolveCreate,
   harnessEvolveDataset,
   harnessEvolveDecide,
+  harnessEvolveDoctor,
   harnessEvolveEvaluate,
   harnessEvolveEvaluateDataset,
   harnessEvolveEvaluateTaskSet,
   harnessEvolveExport,
   harnessEvolveFrontier,
+  harnessEvolveAutonomy,
+  harnessEvolveContext,
+  harnessEvolveFeedback,
+  harnessEvolveGc,
+  harnessEvolveIndex,
   harnessEvolveList,
   harnessEvolveMine,
+  harnessEvolvePaddock,
   harnessEvolvePropose,
+  harnessEvolveEvolve,
   harnessEvolveRank,
   harnessEvolveRejected,
   harnessEvolveReplay,
   harnessEvolveReport,
+  harnessEvolveReward,
+  harnessEvolveRule,
   harnessEvolveRun,
   harnessEvolveRuns,
+  harnessEvolveRolloutBatch,
+  harnessEvolveSandbox,
   harnessEvolveSkillPatch,
   harnessEvolveTaskSet,
   harnessEvolveTaskSets,
+  harnessEvolveTrainingExport,
   harnessEvolveTriggerScan,
   harnessEvolveTrajectory,
   harnessEvolveVerifier,
@@ -109,6 +122,18 @@ Usage:
 	  pipeline harness tasksets [--limit <n>] [--json]
 	  pipeline harness trajectory --trace-id <id> [--candidate-id <id>] [--run-id <id>] [--json]
 	  pipeline harness replay --trajectory-ids-json <json> [--replay-id <id>] [--json]
+	  pipeline harness training-export --trajectory-ids-json <json> [--export-id <id>] [--taskset-id <id>] [--candidate-id <id>] [--format runoff_training_jsonl|dressage_compatible_jsonl] [--json]
+	  pipeline harness paddock [--paddock-id <id>] [--kind local_cli|mcp_host|http_blackbox] [--protocol runoff_provider|openai_compatible|blackbox_http] [--summary <text>] [--command-json <json>] [--endpoint <url>] [--json]
+	  pipeline harness sandbox [--lease-id <id>] [--candidate-id <id>] [--taskset-id <id>] [--spec-json <json>] [--release] [--json]
+	  pipeline harness rollout-batch [--batch-id <id>] [--taskset-id <id>] [--candidate-id <id>] [--paddock-id <id>] [--sandbox-lease-ids-json <json>] [--candidate-trace-map-by-task-json <json>] [--reward-report-id <id>] [--complete] [--json]
+	  pipeline harness reward [--reward-id <id>] [--kind verifier_score|binary_success|regression_delta|policy_safe|custom] [--summary <text>] [--taskset-id <id>] [--candidate-id <id>] [--reports] [--json]
+	  pipeline harness rule [--rule-id <id>] [--kind coding_standard|qa_plan|review_rubric|lint_guidance|architecture_boundary|workflow] [--summary <text>] [--guidance <text>] [--applies-to-json <json>] [--triggers-json <json>] [--json]
+	  pipeline harness feedback [--feedback-id <id>] [--trace-id <id>] [--candidate-id <id>] [--taskset-id <id>] [--manual-text <text>] [--rule-ids-json <json>] [--json]
+	  pipeline harness gc [--report-id <id>] [--since <iso>] [--limit <n>] [--json]
+	  pipeline harness autonomy [--policy-id <id>] [--summary <text>] [--action <name>] [--risk <n>] [--confidence <n>] [--decisions] [--json]
+	  pipeline harness context [--topology-id <id>] [--summary <text>] [--context-nodes-json <json>] [--include-rules] [--changed-files-json <json>] [--routes] [--json]
+	  pipeline harness index [--limit <n>] [--json]
+	  pipeline harness doctor [--limit <n>] [--json]
 	  pipeline harness skill-patch <candidateId> --base-skill <version> [--candidate-skill <version>] [--json]
 	  pipeline harness rejected [<candidateId>] [--reason <text>] [--limit <n>] [--json]
 	  pipeline harness create --summary <text> [--candidate-id <id>] [--source-dir <dir>] [--parent-candidate-ids-json <json>] [--dataset-ids-json <json>] [--json]
@@ -154,6 +179,7 @@ type CliArgs = {
   port?: number;
   noOpen?: boolean;
   traceId?: string;
+  candidateId?: string;
   runId?: string;
   scanId?: string;
   sessionId?: string;
@@ -163,11 +189,27 @@ type CliArgs = {
   datasetId?: string;
   taskSetId?: string;
   verifierId?: string;
+  exportId?: string;
+  paddockId?: string;
+  leaseId?: string;
+  batchId?: string;
+  rewardId?: string;
+  rewardReportId?: string;
+  ruleId?: string;
+  feedbackId?: string;
+  reportId?: string;
+  policyId?: string;
+  decisionId?: string;
+  topologyId?: string;
+  routeId?: string;
   replayId?: string;
   frontierId?: string;
   sourceDir?: string;
   provider?: string;
   instructions?: string;
+  iterations?: number;
+  earlyStopThreshold?: number;
+  reflectOnTrajectory?: boolean;
   editableSurfaceJson?: string;
   expectedFixesJson?: string;
   possibleRegressionsJson?: string;
@@ -188,7 +230,51 @@ type CliArgs = {
     | "trace_process"
     | "policy"
     | "llm_judge";
+  paddockKind?: "local_cli" | "mcp_host" | "http_blackbox";
+  paddockProtocol?: "runoff_provider" | "openai_compatible" | "blackbox_http";
+  trainingFormat?: "runoff_training_jsonl" | "dressage_compatible_jsonl";
+  rolloutMode?: "sync" | "async" | "partial";
+  rewardKind?:
+    | "verifier_score"
+    | "binary_success"
+    | "regression_delta"
+    | "policy_safe"
+    | "custom";
+  ruleKind?:
+    | "coding_standard"
+    | "qa_plan"
+    | "review_rubric"
+    | "lint_guidance"
+    | "architecture_boundary"
+    | "workflow";
+  defaultDecision?: "auto_continue" | "ask_approval" | "report_only";
   verifierCommandJson?: string;
+  verifierIdsJson?: string;
+  commandJson?: string;
+  endpoint?: string;
+  toolsetsJson?: string;
+  capabilitiesJson?: string;
+  headerNamesJson?: string;
+  sandboxSpecJson?: string;
+  sandboxLeaseIdsJson?: string;
+  rewardRefsJson?: string;
+  appliesToJson?: string;
+  triggersJson?: string;
+  ruleIdsJson?: string;
+  autonomyRulesJson?: string;
+  evidenceRefsJson?: string;
+  contextNodesJson?: string;
+  contextEdgesJson?: string;
+  changedFilesJson?: string;
+  guidance?: string;
+  manualText?: string;
+  autonomyAction?: string;
+  risk?: number;
+  confidence?: number;
+  includeRules?: boolean;
+  includeTaskSets?: boolean;
+  decisions?: boolean;
+  routes?: boolean;
   expectedFilesJson?: string;
   requiredTraceStatusesJson?: string;
   requiredStepNamesJson?: string;
@@ -216,6 +302,9 @@ type CliArgs = {
   since?: string;
   cleanupOrphans?: boolean;
   exportOnAccept?: boolean;
+  release?: boolean;
+  complete?: boolean;
+  reports?: boolean;
   json?: boolean;
   postmortem?: boolean;
   once?: boolean;
@@ -315,16 +404,35 @@ function parseArgs(argv: string[]): CliArgs {
     else if (a === "--trace-id") out.traceId = next();
     else if (a === "--run-id") out.runId = next();
     else if (a === "--scan-id") out.scanId = next();
-    else if (a === "--candidate-id") out.traceId = next();
-    else if (a === "--dataset-id") out.datasetId = next();
+    else if (a === "--candidate-id") {
+      out.candidateId = next();
+      out.traceId = out.traceId ?? out.candidateId;
+    } else if (a === "--dataset-id") out.datasetId = next();
     else if (a === "--taskset-id" || a === "--task-set-id")
       out.taskSetId = next();
     else if (a === "--verifier-id") out.verifierId = next();
+    else if (a === "--export-id") out.exportId = next();
+    else if (a === "--paddock-id") out.paddockId = next();
+    else if (a === "--lease-id") out.leaseId = next();
+    else if (a === "--batch-id") out.batchId = next();
+    else if (a === "--reward-id") out.rewardId = next();
+    else if (a === "--reward-report-id") out.rewardReportId = next();
+    else if (a === "--rule-id") out.ruleId = next();
+    else if (a === "--feedback-id") out.feedbackId = next();
+    else if (a === "--report-id") out.reportId = next();
+    else if (a === "--policy-id") out.policyId = next();
+    else if (a === "--decision-id") out.decisionId = next();
+    else if (a === "--topology-id") out.topologyId = next();
+    else if (a === "--route-id") out.routeId = next();
     else if (a === "--replay-id") out.replayId = next();
     else if (a === "--frontier-id") out.frontierId = next();
     else if (a === "--source-dir") out.sourceDir = next();
     else if (a === "--provider") out.provider = next();
     else if (a === "--instructions") out.instructions = next();
+    else if (a === "--iterations") out.iterations = Number(next());
+    else if (a === "--early-stop") out.earlyStopThreshold = Number(next());
+    else if (a === "--reflect") out.reflectOnTrajectory = true;
+    else if (a === "--no-reflect") out.reflectOnTrajectory = false;
     else if (a === "--editable-surface-json") out.editableSurfaceJson = next();
     else if (a === "--expected-fixes-json") out.expectedFixesJson = next();
     else if (a === "--possible-regressions-json")
@@ -357,8 +465,89 @@ function parseArgs(argv: string[]): CliArgs {
       )
         throw new Error("--verifier-kind is invalid");
       out.verifierKind = kind as CliArgs["verifierKind"];
+    } else if (a === "--kind") {
+      const kind = next();
+      if (["local_cli", "mcp_host", "http_blackbox"].includes(kind)) {
+        out.paddockKind = kind as CliArgs["paddockKind"];
+      } else if (
+        [
+          "verifier_score",
+          "binary_success",
+          "regression_delta",
+          "policy_safe",
+          "custom",
+        ].includes(kind)
+      ) {
+        out.rewardKind = kind as CliArgs["rewardKind"];
+      } else if (
+        [
+          "coding_standard",
+          "qa_plan",
+          "review_rubric",
+          "lint_guidance",
+          "architecture_boundary",
+          "workflow",
+        ].includes(kind)
+      ) {
+        out.ruleKind = kind as CliArgs["ruleKind"];
+      } else {
+        throw new Error("--kind is invalid");
+      }
+    } else if (a === "--protocol") {
+      const protocol = next();
+      if (
+        !["runoff_provider", "openai_compatible", "blackbox_http"].includes(
+          protocol,
+        )
+      )
+        throw new Error("--protocol is invalid");
+      out.paddockProtocol = protocol as CliArgs["paddockProtocol"];
+    } else if (a === "--format") {
+      const format = next();
+      if (
+        format !== "runoff_training_jsonl" &&
+        format !== "dressage_compatible_jsonl"
+      )
+        throw new Error("--format is invalid");
+      out.trainingFormat = format;
+    } else if (a === "--mode") {
+      const mode = next();
+      if (mode !== "sync" && mode !== "async" && mode !== "partial")
+        throw new Error("--mode is invalid");
+      out.rolloutMode = mode;
+    } else if (a === "--default-decision") {
+      const decision = next();
+      if (
+        decision !== "auto_continue" &&
+        decision !== "ask_approval" &&
+        decision !== "report_only"
+      )
+        throw new Error("--default-decision is invalid");
+      out.defaultDecision = decision;
     } else if (a === "--verifier-command-json")
       out.verifierCommandJson = next();
+    else if (a === "--verifier-ids-json") out.verifierIdsJson = next();
+    else if (a === "--command-json") out.commandJson = next();
+    else if (a === "--endpoint") out.endpoint = next();
+    else if (a === "--toolsets-json") out.toolsetsJson = next();
+    else if (a === "--capabilities-json") out.capabilitiesJson = next();
+    else if (a === "--header-names-json") out.headerNamesJson = next();
+    else if (a === "--spec-json") out.sandboxSpecJson = next();
+    else if (a === "--sandbox-lease-ids-json") out.sandboxLeaseIdsJson = next();
+    else if (a === "--reward-refs-json") out.rewardRefsJson = next();
+    else if (a === "--applies-to-json") out.appliesToJson = next();
+    else if (a === "--triggers-json") out.triggersJson = next();
+    else if (a === "--rule-ids-json") out.ruleIdsJson = next();
+    else if (a === "--autonomy-rules-json") out.autonomyRulesJson = next();
+    else if (a === "--evidence-refs-json") out.evidenceRefsJson = next();
+    else if (a === "--context-nodes-json") out.contextNodesJson = next();
+    else if (a === "--context-edges-json") out.contextEdgesJson = next();
+    else if (a === "--changed-files-json") out.changedFilesJson = next();
+    else if (a === "--guidance") out.guidance = next();
+    else if (a === "--manual-text") out.manualText = next();
+    else if (a === "--action") out.autonomyAction = next();
+    else if (a === "--risk") out.risk = Number(next());
+    else if (a === "--confidence") out.confidence = Number(next());
     else if (a === "--expected-files-json") out.expectedFilesJson = next();
     else if (a === "--required-trace-statuses-json")
       out.requiredTraceStatusesJson = next();
@@ -400,6 +589,13 @@ function parseArgs(argv: string[]): CliArgs {
     else if (a === "--reason") out.reason = next();
     else if (a === "--cleanup-orphans") out.cleanupOrphans = true;
     else if (a === "--export-on-accept") out.exportOnAccept = true;
+    else if (a === "--release") out.release = true;
+    else if (a === "--complete") out.complete = true;
+    else if (a === "--reports") out.reports = true;
+    else if (a === "--include-rules") out.includeRules = true;
+    else if (a === "--include-tasksets") out.includeTaskSets = true;
+    else if (a === "--decisions") out.decisions = true;
+    else if (a === "--routes") out.routes = true;
     else if (a === "--json") out.json = true;
     else if (a === "--postmortem") out.postmortem = true;
     else if (a === "--once") out.once = true;
@@ -697,13 +893,190 @@ async function cmdHarness(args: CliArgs): Promise<void> {
       replayId: args.replayId,
       runId: args.runId,
       taskSetId: args.taskSetId,
-      candidateId: args.traceId,
+      candidateId: args.candidateId ?? args.traceId,
       trajectoryIds: parseJsonArray(
         args.trajectoryIdsJson,
         "--trajectory-ids-json",
       ),
       json: args.json,
     });
+    return;
+  }
+  if (args.sub === "training-export") {
+    harnessEvolveTrainingExport({
+      exportId: args.exportId,
+      trajectoryIds: parseJsonArray(
+        args.trajectoryIdsJson,
+        "--trajectory-ids-json",
+      ),
+      taskSetId: args.taskSetId,
+      candidateId: args.candidateId ?? args.traceId,
+      format: args.trainingFormat,
+      rewardRefs: parseJsonArray(args.rewardRefsJson, "--reward-refs-json"),
+      limit: args.limit,
+      json: args.json,
+    });
+    return;
+  }
+  if (args.sub === "paddock") {
+    harnessEvolvePaddock({
+      paddockId: args.paddockId,
+      kind: args.paddockKind,
+      protocol: args.paddockProtocol,
+      summary: args.summary,
+      command: parseJsonArray(args.commandJson, "--command-json"),
+      endpoint: args.endpoint,
+      toolsets: parseJsonArray(args.toolsetsJson, "--toolsets-json"),
+      capabilities: parseJsonArray(
+        args.capabilitiesJson,
+        "--capabilities-json",
+      ),
+      headerNames: parseJsonArray(args.headerNamesJson, "--header-names-json"),
+      limit: args.limit,
+      json: args.json,
+    });
+    return;
+  }
+  if (args.sub === "sandbox") {
+    harnessEvolveSandbox({
+      leaseId: args.leaseId ?? args.traceId,
+      candidateId: args.candidateId ?? args.traceId,
+      taskSetId: args.taskSetId,
+      spec: parseJsonObject(args.sandboxSpecJson, "--spec-json"),
+      release: args.release,
+      reason: args.reason,
+      limit: args.limit,
+      json: args.json,
+    });
+    return;
+  }
+  if (args.sub === "rollout-batch") {
+    const candidateTraceMap = args.candidateTraceMapByTaskJson
+      ? (JSON.parse(args.candidateTraceMapByTaskJson) as Record<string, string>)
+      : {};
+    harnessEvolveRolloutBatch({
+      batchId: args.batchId ?? args.traceId,
+      mode: args.rolloutMode,
+      taskSetId: args.taskSetId,
+      candidateId: args.candidateId ?? args.traceId,
+      paddockId: args.paddockId,
+      sandboxLeaseIds: parseJsonArray(
+        args.sandboxLeaseIdsJson,
+        "--sandbox-lease-ids-json",
+      ),
+      candidateTraceMap,
+      trainingExportId: args.exportId,
+      rewardReportId: args.rewardReportId,
+      complete: args.complete,
+      reason: args.reason,
+      limit: args.limit,
+      json: args.json,
+    });
+    return;
+  }
+  if (args.sub === "reward") {
+    harnessEvolveReward({
+      rewardId: args.rewardId,
+      kind: args.rewardKind,
+      summary: args.summary,
+      sourceVerifierId: args.verifierId,
+      rubric: args.rubric,
+      taskSetId: args.taskSetId,
+      candidateId: args.candidateId ?? args.traceId,
+      rolloutBatchId: args.batchId,
+      trainingExportId: args.exportId,
+      reports: args.reports,
+      limit: args.limit,
+      json: args.json,
+    });
+    return;
+  }
+  if (args.sub === "rule") {
+    harnessEvolveRule({
+      ruleId: args.ruleId,
+      kind: args.ruleKind,
+      summary: args.summary,
+      guidance: args.guidance,
+      appliesTo: parseJsonArray(args.appliesToJson, "--applies-to-json"),
+      triggers: parseJsonArray(args.triggersJson, "--triggers-json"),
+      skillRef: args.baseSkill,
+      verifierIds: parseJsonArray(args.verifierIdsJson, "--verifier-ids-json"),
+      limit: args.limit,
+      json: args.json,
+    });
+    return;
+  }
+  if (args.sub === "feedback") {
+    harnessEvolveFeedback({
+      feedbackId: args.feedbackId,
+      traceId: args.traceId,
+      candidateId: args.candidateId,
+      taskSetId: args.taskSetId,
+      manualText: args.manualText,
+      ruleIds: parseJsonArray(args.ruleIdsJson, "--rule-ids-json"),
+      limit: args.limit,
+      json: args.json,
+    });
+    return;
+  }
+  if (args.sub === "gc") {
+    harnessEvolveGc({
+      reportId: args.reportId,
+      since: args.since,
+      limit: args.limit,
+      json: args.json,
+    });
+    return;
+  }
+  if (args.sub === "autonomy") {
+    harnessEvolveAutonomy({
+      policyId: args.policyId,
+      decisionId: args.decisionId,
+      action: args.autonomyAction,
+      summary: args.summary,
+      defaultDecision: args.defaultDecision,
+      rules: parseJsonArray(args.autonomyRulesJson, "--autonomy-rules-json"),
+      risk: args.risk,
+      confidence: args.confidence,
+      candidateId: args.candidateId,
+      runId: args.runId,
+      evidenceRefs: parseJsonArray(
+        args.evidenceRefsJson,
+        "--evidence-refs-json",
+      ),
+      decisions: args.decisions,
+      limit: args.limit,
+      json: args.json,
+    });
+    return;
+  }
+  if (args.sub === "context") {
+    harnessEvolveContext({
+      topologyId: args.topologyId,
+      routeId: args.routeId,
+      summary: args.summary,
+      nodes: parseJsonArray(args.contextNodesJson, "--context-nodes-json"),
+      edges: parseJsonArray(args.contextEdgesJson, "--context-edges-json"),
+      includeRules: args.includeRules,
+      includeTaskSets: args.includeTaskSets,
+      taskId: args.taskSetId,
+      candidateId: args.candidateId,
+      changedFiles: parseJsonArray(
+        args.changedFilesJson,
+        "--changed-files-json",
+      ),
+      routes: args.routes,
+      limit: args.limit,
+      json: args.json,
+    });
+    return;
+  }
+  if (args.sub === "index") {
+    harnessEvolveIndex({ limit: args.limit, json: args.json });
+    return;
+  }
+  if (args.sub === "doctor") {
+    harnessEvolveDoctor({ limit: args.limit, json: args.json });
     return;
   }
   if (args.sub === "skill-patch") {
@@ -797,6 +1170,55 @@ async function cmdHarness(args: CliArgs): Promise<void> {
       sourceDir: args.sourceDir,
       provider: args.provider,
       instructions: args.instructions,
+      editableSurface: parseJsonArray(
+        args.editableSurfaceJson,
+        "--editable-surface-json",
+      ),
+      expectedFixes: parseJsonArray(
+        args.expectedFixesJson,
+        "--expected-fixes-json",
+      ),
+      possibleRegressions: parseJsonArray(
+        args.possibleRegressionsJson,
+        "--possible-regressions-json",
+      ),
+      evidenceTraceIds: parseJsonArray(
+        args.evidenceTraceIdsJson,
+        "--evidence-trace-ids-json",
+      ),
+      failureSignatureIds: parseJsonArray(
+        args.failureSignatureIdsJson,
+        "--failure-signature-ids-json",
+      ),
+      parentCandidateIds: parseJsonArray(
+        args.parentCandidateIdsJson,
+        "--parent-candidate-ids-json",
+      ),
+      datasetIds: parseJsonArray(args.datasetIdsJson, "--dataset-ids-json"),
+      json: args.json,
+    });
+    return;
+  }
+  if (args.sub === "evolve") {
+    if (!args.summary?.trim() && !args.traceId)
+      throw new Error(
+        "--summary is required unless --candidate-id targets an existing candidate",
+      );
+    const configPath = resolve(
+      args.config ?? join(process.cwd(), "pipeline.config.json"),
+    );
+    if (!existsSync(configPath))
+      throw new Error(`Config not found: ${configPath}`);
+    await harnessEvolveEvolve({
+      configPath,
+      candidateId: args.traceId,
+      summary: args.summary ?? "Harness evolution candidate",
+      sourceDir: args.sourceDir,
+      provider: args.provider,
+      instructions: args.instructions,
+      iterations: args.iterations,
+      earlyStopThreshold: args.earlyStopThreshold,
+      reflectOnTrajectory: args.reflectOnTrajectory,
       editableSurface: parseJsonArray(
         args.editableSurfaceJson,
         "--editable-surface-json",
@@ -1028,7 +1450,7 @@ async function cmdHarness(args: CliArgs): Promise<void> {
     return;
   }
   throw new Error(
-    "Usage: pipeline harness coreset|mine|dataset|create|propose|run|report|runs|trigger-scan|writeback|evaluate|evaluate-dataset|audit|rank|frontier|decide|export|list",
+    "Usage: pipeline harness coreset|mine|dataset|create|propose|run|index|doctor|report|runs|trigger-scan|writeback|evaluate|evaluate-dataset|audit|rank|frontier|decide|export|list",
   );
 }
 

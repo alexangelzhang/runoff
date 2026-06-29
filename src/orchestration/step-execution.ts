@@ -14,7 +14,7 @@ import { executeProviderRace, resolveRaceBudgetUSD } from "../runtime/race-execu
 import { pickRetryProvider, type FailureReason } from "../routing/retry-strategy.js";
 import type { PipelineCostAccumulator } from "../routing/pricing.js";
 import { renderPrompt } from "../pipeline/prompt.js";
-import { buildStructuredPromptForStep } from "./step-strategy.js";
+import { buildStepContextContract, buildStructuredPromptForStep } from "./step-strategy.js";
 import {
   type LLMProvider,
   type LLMRequest,
@@ -41,6 +41,7 @@ import {
   isPromptVersionStoreEnabled,
   recordPromptVersion,
 } from "../observability/prompt-version.js";
+import { hashStepInput } from "./step-resume-metadata.js";
 
 export interface SchedulerContext {
   prompt: string;
@@ -72,6 +73,9 @@ export interface StepOutcome {
   upgraded: boolean;
   durationMs: number;
   trace: StepTrace;
+  inputHash?: string;
+  rerunReason?: string;
+  contextContract?: import("../core/state.js").StepContextContract;
   verdict?: { approved: boolean; feedback: string };
   candidateSnapshot?: Candidate;
   artifacts?: Artifact[];
@@ -141,6 +145,11 @@ export async function executePipelineStep(
 
   const conflictResolution = (config.orchestration?.conflictResolution ??
     "pick-winner") as ProviderRaceResolution;
+  const outputKind = providers.every((provider) => isAgentMode(provider.mode))
+    ? "agent"
+    : providers.some((provider) => isAgentMode(provider.mode))
+      ? "mixed"
+      : "text";
 
   const structuredPrompt = buildStructuredPromptForStep({
     stepName,
@@ -154,8 +163,33 @@ export async function executePipelineStep(
     lastReviewFeedback: ctx.lastReviewFeedback,
     context: ctx.context,
   });
+  const contextContract = buildStepContextContract({
+    stepName,
+    reviewStepName,
+    spec: ctx.prompt,
+    round: ctx.round,
+    globalKnowledge: ctx.globalKnowledge,
+    candidate: ctx.candidate,
+    acceptanceCriteria: ctx.acceptanceCriteria,
+    verifyResults: ctx.verifyResults,
+    lastReviewFeedback: ctx.lastReviewFeedback,
+    context: ctx.context,
+    outputKind,
+  });
 
   const renderedPrompt = renderPrompt(structuredPrompt);
+  const inputHash = hashStepInput({
+    stepName,
+    round: ctx.round,
+    providerNames,
+    routedFrom,
+    upgraded,
+    structuredPrompt,
+    renderedPrompt,
+    workDir: ctx.workDir,
+    language: ctx.language,
+    lastRetryFailure: ctx.lastRetryFailure,
+  });
   let promptVersionId: string | undefined;
   if (isPromptVersionStoreEnabled(ctx.promptVersionStore)) {
     try {
@@ -380,6 +414,8 @@ export async function executePipelineStep(
     upgraded,
     durationMs,
     trace,
+    inputHash,
+    contextContract,
     verdict: { approved: verdictParsed.approved, feedback: verdictParsed.feedback },
     candidateSnapshot,
     artifacts: artifacts.length > 0 ? artifacts : undefined,

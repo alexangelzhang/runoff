@@ -16,6 +16,7 @@
 ### Guides
 
 - [getting-started-30min.md](guides/getting-started-30min.md)
+- [host-resume-ux.md](guides/host-resume-ux.md) — MCP hosts explaining checkpoint resume behavior
 - [mcp-host-setup.md](guides/mcp-host-setup.md)
 - [mock-to-real-cli.md](guides/mock-to-real-cli.md)
 - [coding-agent-backends.md](guides/coding-agent-backends.md)
@@ -62,6 +63,7 @@
 ### Design & history
 
 - [design/pipeline-hooks-design.md](design/pipeline-hooks-design.md)
+- [design/prince-context-harness-lessons.md](design/prince-context-harness-lessons.md)
 - [history/roadmap-delivered-phases.md](history/roadmap-delivered-phases.md) — Phase 0–8 detail (archived)
 
 ### Repo root

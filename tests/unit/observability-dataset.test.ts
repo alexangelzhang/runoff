@@ -10,6 +10,7 @@ import {
   exportExperimentDatasetJsonl,
   OBSERVABILITY_DATASET_SCHEMA,
 } from "../../src/observability/observability-dataset.js";
+import { recordTrace, type PipelineTrace } from "../../src/observability/trace.js";
 
 describe("observability dataset + eval report", () => {
   let prevHome: string | undefined;
@@ -62,6 +63,54 @@ describe("observability dataset + eval report", () => {
     });
   }
 
+  function appendRun(experimentId: string, traceId: string, variant = "baseline"): void {
+    appendExperimentEntry({
+      timestamp: "2026-05-28T02:00:00.000Z",
+      traceId,
+      experimentId,
+      variant,
+      tags: [],
+      status: "approved",
+      totalTokens: 100,
+      promptTokens: 60,
+      completionTokens: 40,
+      durationMs: 200,
+      rounds: 1,
+      providers: ["mock"],
+    });
+  }
+
+  function sampleTrace(
+    id: string,
+    stageEvaluations?: NonNullable<PipelineTrace["observation"]>["stageEvaluations"],
+  ): PipelineTrace {
+    return {
+      id,
+      sessionId: `sess-${id}`,
+      prompt: "fix bug",
+      promptLength: 7,
+      mode: "pipeline",
+      steps: [],
+      totalRounds: 1,
+      finalStatus: "approved",
+      totalDurationMs: 200,
+      hasVerifyResults: false,
+      timestamp: "2026-05-28T02:00:00.000Z",
+      observation: {
+        schemaVersion: 1,
+        action: "pipeline_result",
+        purpose: "Report pipeline outcome.",
+        status: "approved",
+        summary: "Pipeline approved.",
+        evidence: ["traceId=" + id],
+        coverageGaps: [],
+        stepRefs: [],
+        traceRef: { traceId: id },
+        ...(stageEvaluations ? { stageEvaluations } : {}),
+      },
+    };
+  }
+
   it("buildExperimentDatasetRows uses runoff-eval-v1 schema", () => {
     seed();
     const rows = buildExperimentDatasetRows("exp-ab");
@@ -86,5 +135,52 @@ describe("observability dataset + eval report", () => {
     assert.equal(report.winnerVariant, "fast-prompt");
     assert.match(report.recommendation, /fast-prompt/);
     assert.equal(report.variants.length, 2);
+  });
+
+  it("buildExperimentEvalReport summarizes stage evaluation hints and gaps", () => {
+    recordTrace(
+      sampleTrace("stage01", [
+        {
+          stepName: "analyze_input",
+          kind: "analyze",
+          metrics: [
+            {
+              name: "context_relevance",
+              description: "Check that the step used task-relevant context.",
+              evidenceRefs: ["observation.contextContract"],
+            },
+          ],
+        },
+        {
+          stepName: "verify_tests",
+          kind: "test",
+          metrics: [
+            {
+              name: "verification_signal",
+              description: "Check test or verification output.",
+              evidenceRefs: ["observation.claims"],
+            },
+          ],
+        },
+      ]),
+    );
+    recordTrace(sampleTrace("nostage01"));
+    appendRun("exp-stage", "stage01", "with-stage");
+    appendRun("exp-stage", "nostage01", "without-stage");
+    appendRun("exp-stage", "missing01", "missing-trace");
+
+    const report = buildExperimentEvalReport("exp-stage");
+
+    assert.equal(report.stageEvaluationSummary.evaluatedTraceCount, 1);
+    assert.equal(report.stageEvaluationSummary.stageEvaluationCount, 2);
+    assert.equal(report.stageEvaluationSummary.missingTraceCount, 1);
+    assert.equal(report.stageEvaluationSummary.missingStageEvaluationCount, 1);
+    assert.deepEqual(
+      report.stageEvaluationSummary.byKind.map((row) => row.kind),
+      ["analyze", "test"],
+    );
+    assert.deepEqual(report.stageEvaluationSummary.byKind[0]!.stepNames, ["analyze_input"]);
+    assert.deepEqual(report.stageEvaluationSummary.byKind[0]!.metricNames, ["context_relevance"]);
+    assert.deepEqual(report.stageEvaluationSummary.byKind[1]!.evidenceRefs, ["observation.claims"]);
   });
 });

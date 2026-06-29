@@ -27,6 +27,16 @@ export function observabilityUiHtml(apiBase: string): string {
     .bad { color: #f07178; }
     .muted { color: #9aa3b5; font-size: 0.8rem; }
     #detail-panel { margin-top: 1rem; }
+    .resume-panel { background: #1a1e28; border: 1px solid #2a2f3a; border-radius: 8px; padding: 0.75rem 1rem; margin: 0.75rem 0; }
+    .resume-panel h3 { margin: 0 0 0.5rem; font-size: 0.95rem; font-weight: 600; }
+    .resume-summary { display: flex; gap: 1rem; flex-wrap: wrap; font-size: 0.85rem; margin-bottom: 0.5rem; }
+    .resume-rerun { color: #f0c674; }
+    .resume-skipped { color: #9aa3b5; }
+    .resume-rerun-list { margin: 0.5rem 0 0; padding-left: 1.25rem; font-size: 0.85rem; }
+    .resume-rerun-list li { margin: 0.25rem 0; }
+    .resume-skipped-drawer { margin-top: 0.5rem; }
+    .resume-skipped-drawer summary { cursor: pointer; color: #9aa3b5; font-size: 0.85rem; }
+    .resume-skipped-list { margin: 0.35rem 0 0; padding-left: 1.25rem; font-size: 0.8rem; color: #9aa3b5; }
   </style>
 </head>
 <body>
@@ -39,6 +49,7 @@ export function observabilityUiHtml(apiBase: string): string {
   <div id="list"></div>
   <div id="detail-panel" hidden>
     <h2 id="detail-title" style="font-size:1rem;margin:0.5rem 0"></h2>
+    <div id="detail-resume"></div>
     <pre id="detail-body"></pre>
   </div>
   <script>
@@ -73,7 +84,67 @@ export function observabilityUiHtml(apiBase: string): string {
     function showDetail(title, obj) {
       document.getElementById("detail-panel").hidden = false;
       document.getElementById("detail-title").textContent = title;
+      renderResumePlannerPanel(document.getElementById("detail-resume"), obj);
       document.getElementById("detail-body").textContent = JSON.stringify(obj, null, 2);
+    }
+
+    function renderResumePlannerPanel(container, payload) {
+      clear(container);
+      const trace = payload.trace || payload;
+      const plan = trace.resumeReusePlan;
+      if (!plan || !plan.entries || !plan.entries.length) return;
+
+      const reruns = plan.entries.filter(e => e.decision === "rerun");
+      const skipped = plan.entries.filter(e => e.decision === "skipped");
+      const panel = document.createElement("section");
+      panel.className = "resume-panel";
+
+      const heading = document.createElement("h3");
+      heading.textContent = "Resume Planner";
+      panel.appendChild(heading);
+
+      const summary = document.createElement("div");
+      summary.className = "resume-summary";
+      [["round", String(plan.round), ""], ["rerun", String(plan.summary?.rerun ?? reruns.length), "resume-rerun"],
+       ["skipped", String(plan.summary?.skipped ?? skipped.length), "resume-skipped"],
+       ["status", trace.finalStatus || "—", "muted"]].forEach(([label, value, cls]) => {
+        const span = document.createElement("span");
+        if (cls) span.className = cls;
+        span.textContent = label + " " + value;
+        summary.appendChild(span);
+      });
+      panel.appendChild(summary);
+
+      if (reruns.length) {
+        const list = document.createElement("ul");
+        list.className = "resume-rerun-list";
+        reruns.forEach(entry => {
+          const li = document.createElement("li");
+          const downstream = entry.downstreamOf ? " (downstreamOf=" + entry.downstreamOf + ")" : "";
+          li.textContent = entry.stepName + ": " + entry.reason + downstream;
+          list.appendChild(li);
+        });
+        panel.appendChild(list);
+      }
+
+      if (skipped.length) {
+        const drawer = document.createElement("details");
+        drawer.className = "resume-skipped-drawer";
+        const summaryEl = document.createElement("summary");
+        summaryEl.textContent = "Skipped audit (" + skipped.length + ") — collapsed by default";
+        drawer.appendChild(summaryEl);
+        const list = document.createElement("ul");
+        list.className = "resume-skipped-list";
+        skipped.forEach(entry => {
+          const li = document.createElement("li");
+          li.textContent = entry.stepName + ": " + entry.reason;
+          list.appendChild(li);
+        });
+        drawer.appendChild(list);
+        panel.appendChild(drawer);
+      }
+
+      container.appendChild(panel);
     }
 
     async function showTraces() {

@@ -43,6 +43,17 @@ export function register(server: McpServer) {
       workDir: z.string().optional().describe("Absolute path to project directory"),
       acceptanceCriteria: z.array(z.string()).optional().describe("List of constraints to verify"),
       verifyResults: z.string().optional().describe("Verification instructions"),
+      scopePreflight: z
+        .object({
+          allowDirtyWorktree: z.boolean().optional().describe("Confirm the pipeline may run on a dirty git worktree"),
+          allowDocUpdates: z.boolean().optional().describe("Confirm documentation updates are in scope"),
+          allowRace: z.boolean().optional().describe("Confirm configured provider race is allowed"),
+          verificationCommand: z.string().optional().describe("Explicit verification command expected after changes"),
+          requireVerificationCommand: z.boolean().optional().describe("Pause unless verificationCommand or verifyResults is supplied"),
+          requireCleanWorktree: z.boolean().optional().describe("Pause unless the target git worktree is clean"),
+        })
+        .optional()
+        .describe("P2 scope preflight overrides and confirmations"),
       sessionId: z.string().optional().describe("Resume from a specific checkpoint"),
       maxRounds: z.number().optional().describe("Override max pipeline rounds"),
       approvalDecision: z

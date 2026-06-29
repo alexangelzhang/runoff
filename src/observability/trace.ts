@@ -7,7 +7,13 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, writeFile
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { getTracesDir } from "../core/paths.js";
-import { PipelineStatus, type StepObservation } from "../core/state.js";
+import {
+  PipelineStatus,
+  type ResumeReusePlanReport,
+  type ScopePreflightReport,
+  type StepObservation,
+  type StepResumeMetadata,
+} from "../core/state.js";
 import type { PipelineObservation } from "../core/pipeline-run-types.js";
 import { logger } from "../core/logger.js";
 
@@ -49,6 +55,8 @@ export interface StepTrace {
   promptVersionId?: string;
   /** Work-memory snapshot returned to the host/model for this step. */
   observation?: StepObservation;
+  /** Step-level resume contract persisted with the trace. */
+  resumeMetadata?: StepResumeMetadata;
 }
 
 /** Create a short unique span id for step traces. */
@@ -121,6 +129,10 @@ export interface PipelineTrace {
   globalKnowledge?: Record<string, string>;
   /** Work-memory snapshot returned to the host/model at run boundary. */
   observation?: PipelineObservation;
+  /** Scope preflight report that allowed or paused this run. */
+  scopePreflight?: ScopePreflightReport;
+  /** Resume planner decisions applied before this run continued. */
+  resumeReusePlan?: ResumeReusePlanReport;
 }
 
 export interface OrchestrationTraceRecord {

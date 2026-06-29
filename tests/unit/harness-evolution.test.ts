@@ -20,29 +20,57 @@ import type {
 } from "../../src/providers/types.ts";
 import {
   auditHarnessCandidate,
+  buildHarnessArtifactIndex,
+  compileHarnessFeedback,
+  completeHarnessRolloutBatch,
+  createHarnessContextTopology,
   createHarnessCandidate,
   createHarnessDataset,
   createHarnessReplayManifest,
+  createHarnessRolloutBatch,
+  createHarnessSandboxLease,
   createHarnessTaskSet,
   createHarnessTrajectory,
   decideHarnessCandidate,
   decideHarnessSkillPatch,
+  decideHarnessAutonomy,
+  doctorHarnessArtifactStore,
   evaluateHarnessCandidate,
   evaluateHarnessDataset,
+  evaluateHarnessReward,
   evaluateHarnessTaskSet,
+  evolveHarnessCandidate,
   exportHarnessPromotionBundle,
+  exportHarnessTrainingTrajectories,
+  heuristicFitness,
   loadHarnessCandidate,
   loadHarnessDataset,
   loadHarnessEvolutionRun,
+  listHarnessAutonomyDecisions,
+  listHarnessContextRoutes,
+  listHarnessFeedback,
+  listHarnessGcReports,
+  listHarnessPaddockAdapters,
   listHarnessCandidates,
   listHarnessRejectedBuffer,
   listHarnessEvolutionRuns,
+  listHarnessRewardFunctions,
+  listHarnessRolloutBatches,
+  listHarnessSandboxLeases,
+  listHarnessRules,
+  listHarnessTrainingExports,
   mineHarnessFailureSignatures,
   proposeHarnessCandidate,
   queryHarnessEvolutionReport,
   rankHarnessCandidates,
   recordHarnessRejectedBuffer,
+  registerHarnessAutonomyPolicy,
+  registerHarnessPaddockAdapter,
+  registerHarnessRewardFunction,
+  registerHarnessRule,
   registerHarnessVerifier,
+  routeHarnessContext,
+  runHarnessGcLoop,
   runHarnessEvolution,
   scanHarnessTriggers,
   selectHarnessCoreset,
@@ -762,6 +790,309 @@ test("harness rejected buffer is optimizer-only and included in proposer history
     };
     assert.equal(history.rejectedBuffer[0]?.rejectedId, entry.rejectedId);
     assert.equal(history.rejectedBuffer[0]?.optimizerOnly, true);
+  } finally {
+    if (oldHome === undefined) delete process.env.RUNOFF_HOME;
+    else process.env.RUNOFF_HOME = oldHome;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("harness training export paddock sandbox rollout and reward artifacts form a closed loop", () => {
+  const dir = mkdtempSync(join(tmpdir(), "runoff-harness-training-loop-"));
+  const oldHome = process.env.RUNOFF_HOME;
+  try {
+    process.env.RUNOFF_HOME = join(dir, "home");
+    recordTrace(
+      trace("train-base-a", {
+        finalStatus: "failed",
+        timestamp: "2026-06-20T00:00:01.000Z",
+      }),
+    );
+    recordTrace(
+      trace("train-cand-a", {
+        finalStatus: "approved",
+        timestamp: "2026-06-20T00:00:02.000Z",
+        totalUsage: { promptTokens: 12, completionTokens: 8 },
+        steps: [
+          {
+            name: "implement",
+            provider: "mock",
+            durationMs: 8,
+            round: 1,
+            filesModified: ["skill/SKILL.md"],
+            usage: { promptTokens: 12, completionTokens: 8 },
+            observation: {
+              schemaVersion: 1,
+              action: "implement",
+              purpose: "training export",
+              status: "success",
+              summary: "fixed train task",
+              evidence: ["ok"],
+              coverageGaps: [],
+              artifactRefs: [
+                {
+                  stepName: "implement",
+                  artifactIndex: 0,
+                  kind: "file",
+                  ref: "skill/SKILL.md",
+                },
+              ],
+            },
+          },
+        ],
+      }),
+    );
+    const verifier = registerHarnessVerifier({
+      verifierId: "train-trace-ok",
+      kind: "trace_process",
+      summary: "requires approved trace",
+      requiredTraceStatuses: ["approved"],
+      requiredStepNames: ["implement"],
+    });
+    createHarnessCandidate({
+      candidateId: "candidate-training",
+      summary: "Training-ready candidate",
+      editableSurface: ["skill/"],
+      evidenceTraceIds: ["train-base-a"],
+    });
+    const taskSet = createHarnessTaskSet({
+      taskSetId: "taskset-training",
+      name: "training taskset",
+      tasks: [
+        {
+          taskId: "task-training",
+          prompt: "fix training task",
+          toolsets: ["files"],
+          verifierId: verifier.verifierId,
+          timeoutSec: 60,
+          forbiddenPaths: [],
+          expectedArtifacts: [],
+          criticality: "selection",
+          sourceTraceId: "train-base-a",
+        },
+      ],
+    });
+    const evaluation = evaluateHarnessTaskSet({
+      candidateId: "candidate-training",
+      taskSetId: taskSet.taskSetId,
+      candidateTraceIdsByTask: { "task-training": "train-cand-a" },
+      runId: "run-training",
+      skillVersion: "skill@train",
+    });
+    const reward = registerHarnessRewardFunction({
+      rewardId: "reward-verifier",
+      kind: "verifier_score",
+      summary: "Verifier score reward",
+    });
+    const rewardReport = evaluateHarnessReward({
+      rewardId: reward.rewardId,
+      taskSetId: taskSet.taskSetId,
+      candidateId: "candidate-training",
+    });
+    const trajectoryId = evaluation.results[0]?.trajectoryId;
+    assert.ok(trajectoryId);
+    const trainingExport = exportHarnessTrainingTrajectories({
+      exportId: "export-training",
+      trajectoryIds: [trajectoryId],
+      taskSetId: taskSet.taskSetId,
+      candidateId: "candidate-training",
+      format: "dressage_compatible_jsonl",
+      rewardRefs: [rewardReport.reportId],
+    });
+    const paddock = registerHarnessPaddockAdapter({
+      paddockId: "paddock-local",
+      kind: "local_cli",
+      protocol: "runoff_provider",
+      summary: "Local CLI paddock",
+      command: ["node", "agent.js"],
+      toolsets: ["files"],
+      capabilities: ["blackbox-rollout"],
+    });
+    const lease = createHarnessSandboxLease({
+      leaseId: "lease-local",
+      candidateId: "candidate-training",
+      taskSetId: taskSet.taskSetId,
+      spec: {
+        provider: "local_directory",
+        workspaceRoot: dir,
+        serviceEndpoints: [],
+        cleanupPolicy: "manual",
+      },
+    });
+    const batch = createHarnessRolloutBatch({
+      batchId: "batch-training",
+      mode: "sync",
+      taskSetId: taskSet.taskSetId,
+      candidateId: "candidate-training",
+      paddockId: paddock.paddockId,
+      sandboxLeaseIds: [lease.leaseId],
+      candidateTraceIdsByTask: { "task-training": "train-cand-a" },
+      trainingExportId: trainingExport.exportId,
+      rewardReportId: rewardReport.reportId,
+    });
+    const completed = completeHarnessRolloutBatch({
+      batchId: batch.batchId,
+      trainingExportId: trainingExport.exportId,
+      rewardReportId: rewardReport.reportId,
+    });
+
+    assert.equal(rewardReport.aggregateReward, 1);
+    assert.equal(trainingExport.sampleCount, 1);
+    assert.equal(trainingExport.tokenTelemetry.status, "not_captured");
+    assert.equal(
+      trainingExport.samples[0]?.rewardRefs[0],
+      rewardReport.reportId,
+    );
+    assert.equal(listHarnessTrainingExports()[0]?.exportId, "export-training");
+    assert.equal(listHarnessPaddockAdapters()[0]?.paddockId, "paddock-local");
+    assert.equal(listHarnessSandboxLeases()[0]?.leaseId, "lease-local");
+    assert.equal(listHarnessRolloutBatches()[0]?.batchId, "batch-training");
+    assert.equal(listHarnessRewardFunctions()[0]?.rewardId, "reward-verifier");
+    assert.equal(completed.status, "completed");
+    assert.equal(
+      existsSync(
+        join(
+          process.env.RUNOFF_HOME,
+          "harness-evolution",
+          "training-exports",
+          "export-training",
+          "samples.jsonl",
+        ),
+      ),
+      true,
+    );
+  } finally {
+    if (oldHome === undefined) delete process.env.RUNOFF_HOME;
+    else process.env.RUNOFF_HOME = oldHome;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("harness operating layer compiles rules feedback gc autonomy and context routes", () => {
+  const dir = mkdtempSync(join(tmpdir(), "runoff-harness-operating-layer-"));
+  const oldHome = process.env.RUNOFF_HOME;
+  try {
+    process.env.RUNOFF_HOME = join(dir, "home");
+    recordTrace(
+      trace("ops-fail-a", {
+        finalStatus: "failed",
+        hasVerifyResults: false,
+        steps: [
+          {
+            name: "implement",
+            provider: "mock",
+            durationMs: 12,
+            round: 1,
+            filesModified: ["src/core/unsafe.ts"],
+            error: "unknown type escaped boundary",
+            observation: {
+              schemaVersion: 1,
+              action: "implement",
+              purpose: "operating layer",
+              status: "error",
+              summary: "unknown type escaped boundary",
+              evidence: ["unknown"],
+              coverageGaps: ["boundary parsing"],
+              artifactRefs: [],
+            },
+          },
+        ],
+      }),
+    );
+    createHarnessCandidate({
+      candidateId: "candidate-operating",
+      summary: "Operating layer candidate",
+      editableSurface: ["src/core/"],
+      evidenceTraceIds: ["ops-fail-a"],
+    });
+    const rule = registerHarnessRule({
+      ruleId: "rule-boundary-parse",
+      kind: "coding_standard",
+      summary: "Parse unknown values at system boundaries",
+      guidance: "Do not pass unknown through core code; parse at the boundary.",
+      appliesTo: ["src/core/"],
+      triggers: ["unknown type"],
+      severity: "blocker",
+      skillRef: "skill/SKILL.md",
+    });
+    const feedback = compileHarnessFeedback({
+      feedbackId: "feedback-boundary",
+      traceId: "ops-fail-a",
+      candidateId: "candidate-operating",
+    });
+    recordHarnessRejectedBuffer({
+      candidateId: "candidate-operating",
+      rejectionReason: "boundary rule was not followed",
+      regressionFailures: ["unknown leaked"],
+    });
+    const gc = runHarnessGcLoop({ reportId: "gc-operating", limit: 10 });
+    const policy = registerHarnessAutonomyPolicy({
+      policyId: "policy-operating",
+      summary: "Operating autonomy",
+      defaultDecision: "ask_approval",
+      rules: [
+        {
+          action: "continue",
+          maxRisk: 1,
+          minConfidence: 0.9,
+          decision: "auto_continue",
+          reason: "trivial continuation",
+        },
+      ],
+    });
+    const decision = decideHarnessAutonomy({
+      decisionId: "decision-operating",
+      policyId: policy.policyId,
+      action: "continue",
+      risk: 4,
+      confidence: 0.7,
+      candidateId: "candidate-operating",
+      evidenceRefs: [feedback.feedbackId],
+    });
+    const topology = createHarnessContextTopology({
+      topologyId: "topology-operating",
+      summary: "Operating topology",
+      includeRules: true,
+      nodes: [
+        {
+          nodeId: "dir:src/core",
+          kind: "directory",
+          ref: "src/core",
+          summary: "Core runtime",
+          tags: ["core"],
+          priority: 80,
+        },
+      ],
+    });
+    const route = routeHarnessContext({
+      routeId: "route-operating",
+      topologyId: topology.topologyId,
+      candidateId: "candidate-operating",
+      changedFiles: ["src/core/unsafe.ts"],
+      limit: 5,
+    });
+
+    assert.equal(rule.enabled, true);
+    assert.equal(feedback.ruleIds[0], "rule-boundary-parse");
+    assert.match(feedback.compiledPrompt, /Parse unknown values/);
+    assert.equal(gc.nextAction, "patch_harness");
+    assert.equal(decision.decision, "ask_approval");
+    assert.equal(
+      route.selectedRefs.some((ref) => ref.ref === "src/core"),
+      true,
+    );
+    assert.equal(
+      route.selectedRefs.some((ref) => ref.ref === "rule-boundary-parse"),
+      true,
+    );
+    assert.equal(listHarnessRules()[0]?.ruleId, "rule-boundary-parse");
+    assert.equal(listHarnessFeedback()[0]?.feedbackId, "feedback-boundary");
+    assert.equal(listHarnessGcReports()[0]?.reportId, "gc-operating");
+    assert.equal(
+      listHarnessAutonomyDecisions()[0]?.decisionId,
+      "decision-operating",
+    );
+    assert.equal(listHarnessContextRoutes()[0]?.routeId, "route-operating");
   } finally {
     if (oldHome === undefined) delete process.env.RUNOFF_HOME;
     else process.env.RUNOFF_HOME = oldHome;
@@ -1598,6 +1929,283 @@ test("harness connector writeback emits markdown and jsonl reports", async () =>
       loadHarnessEvolutionRun("run-writeback")?.connectorWritebacks?.length,
       2,
     );
+  } finally {
+    if (oldHome === undefined) delete process.env.RUNOFF_HOME;
+    else process.env.RUNOFF_HOME = oldHome;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("harness artifact store indexes artifacts and reports invalid JSON", () => {
+  const dir = mkdtempSync(join(tmpdir(), "runoff-harness-artifact-store-"));
+  const oldHome = process.env.RUNOFF_HOME;
+  try {
+    process.env.RUNOFF_HOME = join(dir, "home");
+    createHarnessCandidate({
+      candidateId: "store-candidate",
+      summary: "Store candidate",
+      editableSurface: ["src/"],
+      evidenceTraceIds: [],
+    });
+    registerHarnessRule({
+      ruleId: "store-rule",
+      kind: "architecture_boundary",
+      summary: "Keep store boundary",
+      guidance: "Use the harness artifact store for durable paths.",
+      appliesTo: ["src/orchestration/"],
+      triggers: ["harness store"],
+    });
+    const corruptDir = join(
+      process.env.RUNOFF_HOME,
+      "harness-evolution",
+      "verifiers",
+    );
+    mkdirSync(corruptDir, { recursive: true });
+    writeFileSync(join(corruptDir, "bad.json"), "{bad", "utf-8");
+
+    const index = buildHarnessArtifactIndex({ limit: 50 });
+    assert.equal(index.countsByKind.candidate, 1);
+    assert.equal(index.countsByKind.rule, 1);
+    assert.equal(index.invalidCount, 1);
+    assert.equal(
+      index.entries.some(
+        (entry) =>
+          entry.kind === "verifier" &&
+          entry.relativePath === "verifiers/bad.json" &&
+          entry.jsonStatus === "invalid",
+      ),
+      true,
+    );
+
+    const doctor = doctorHarnessArtifactStore({ limit: 50 });
+    assert.equal(doctor.status, "needs_attention");
+    assert.equal(doctor.nextAction, "inspect_invalid_artifacts");
+    assert.equal(
+      doctor.warnings.some((warning) =>
+        warning.includes("invalid json: verifiers/bad.json"),
+      ),
+      true,
+    );
+  } finally {
+    if (oldHome === undefined) delete process.env.RUNOFF_HOME;
+    else process.env.RUNOFF_HOME = oldHome;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// ── Hermes-ASE borrowed mechanics: iterative proposer + dual-layer fitness ──
+
+/**
+ * Mock provider that returns a different summary per call so iterative
+ * evolution can be scored differently across rounds. The summary text drives
+ * `heuristicFitness` keyword overlap against expectedFixes.
+ */
+class IterativeProvider implements LLMProvider {
+  mode: ProviderMode = "agent-write";
+  calls = 0;
+
+  constructor(
+    public name: string,
+    private summaries: string[],
+  ) {}
+
+  async execute(req: LLMRequest): Promise<LLMResponse> {
+    const summary =
+      this.summaries[Math.min(this.calls, this.summaries.length - 1)]!;
+    this.calls += 1;
+    mkdirSync(join(req.workDir!, "skill"), { recursive: true });
+    writeFileSync(
+      join(req.workDir!, "skill", "SKILL.md"),
+      `updated round ${this.calls}`,
+      "utf-8",
+    );
+    return {
+      kind: "agent",
+      model: "iter-model",
+      summary,
+      changes: "diff --git a/skill/SKILL.md b/skill/SKILL.md\n",
+      filesModified: ["skill/SKILL.md"],
+      diffStat: "1 file changed",
+    };
+  }
+}
+
+test("heuristicFitness scores keyword overlap and length penalty", () => {
+  const strong = heuristicFitness({
+    expectedFixes: ["handle null input", "guard empty array"],
+    observedDiff: "now we handle null input and guard empty array safely",
+    constraintsPassed: true,
+    baselineSize: 1000,
+    evolvedSize: 1000,
+  });
+  assert.ok(strong.score >= 0.9, `expected >=0.9, got ${strong.score}`);
+
+  const weak = heuristicFitness({
+    expectedFixes: ["handle null input", "guard empty array"],
+    observedDiff: "unrelated refactor of formatting",
+    constraintsPassed: true,
+    baselineSize: 1000,
+    evolvedSize: 1000,
+  });
+  assert.ok(weak.score < strong.score);
+
+  const empty = heuristicFitness({
+    expectedFixes: ["x"],
+    observedDiff: "   ",
+    constraintsPassed: true,
+    baselineSize: 1000,
+    evolvedSize: 1000,
+  });
+  assert.equal(empty.score, 0);
+
+  const bloated = heuristicFitness({
+    expectedFixes: ["handle null input", "guard empty array"],
+    observedDiff: "now we handle null input and guard empty array safely",
+    constraintsPassed: true,
+    baselineSize: 1000,
+    evolvedSize: 2200,
+  });
+  assert.ok(bloated.score < strong.score);
+});
+
+test("evolveHarnessCandidate runs N iterations and picks the best", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "runoff-harness-evolve-best-"));
+  const oldHome = process.env.RUNOFF_HOME;
+  try {
+    process.env.RUNOFF_HOME = join(dir, "home");
+    const provider = new IterativeProvider("agent-evolver", [
+      "minor unrelated tweak",
+      "now we handle null input",
+      "now we handle null input and guard empty array",
+    ]);
+
+    const result = await evolveHarnessCandidate({
+      candidateId: "evolve-best",
+      provider,
+      summary: "tighten input handling",
+      expectedFixes: ["handle null input", "guard empty array"],
+      editableSurface: ["skill/"],
+      iterations: 3,
+      earlyStopThreshold: 1.1,
+    });
+
+    assert.equal(result.totalIterations, 3);
+    assert.equal(result.bestIteration, 2);
+    assert.equal(result.earlyStopped, false);
+    assert.equal(result.finalCandidate.candidateId, "evolve-best-iter-2");
+    assert.ok(result.history[2]!.score >= result.history[0]!.score);
+    assert.equal(provider.calls, 3);
+  } finally {
+    if (oldHome === undefined) delete process.env.RUNOFF_HOME;
+    else process.env.RUNOFF_HOME = oldHome;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("evolveHarnessCandidate stops early once threshold is met", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "runoff-harness-evolve-early-"));
+  const oldHome = process.env.RUNOFF_HOME;
+  try {
+    process.env.RUNOFF_HOME = join(dir, "home");
+    const provider = new IterativeProvider("agent-evolver", [
+      "now we handle null input and guard empty array",
+    ]);
+
+    const result = await evolveHarnessCandidate({
+      candidateId: "evolve-early",
+      provider,
+      summary: "tighten input handling",
+      expectedFixes: ["handle null input", "guard empty array"],
+      editableSurface: ["skill/"],
+      iterations: 5,
+      earlyStopThreshold: 0.9,
+    });
+
+    assert.equal(result.totalIterations, 1);
+    assert.equal(result.earlyStopped, true);
+    assert.equal(result.bestIteration, 0);
+    assert.equal(provider.calls, 1);
+  } finally {
+    if (oldHome === undefined) delete process.env.RUNOFF_HOME;
+    else process.env.RUNOFF_HOME = oldHome;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("runHarnessEvolution records graded gate stages", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "runoff-harness-gates-"));
+  const oldHome = process.env.RUNOFF_HOME;
+  try {
+    process.env.RUNOFF_HOME = join(dir, "home");
+    recordTrace(
+      trace("gate-base-in", {
+        finalStatus: "failed",
+        timestamp: "2026-06-20T00:00:01.000Z",
+      }),
+    );
+    recordTrace(
+      trace("gate-base-out", {
+        totalDurationMs: 2000,
+        timestamp: "2026-06-20T00:00:02.000Z",
+      }),
+    );
+    recordTrace(
+      trace("gate-cand-in", {
+        finalStatus: "approved",
+        timestamp: "2026-06-20T00:00:03.000Z",
+      }),
+    );
+    recordTrace(
+      trace("gate-cand-out", {
+        totalDurationMs: 1000,
+        timestamp: "2026-06-20T00:00:04.000Z",
+      }),
+    );
+    const provider = new ProposalProvider(
+      "agent-proposer",
+      {
+        summary: "Complete gate candidate",
+        changes: "diff --git a/skill/SKILL.md b/skill/SKILL.md\n",
+        filesModified: ["skill/SKILL.md"],
+        diffStat: "1 file changed",
+      },
+      (req) => {
+        mkdirSync(join(req.workDir!, "skill"), { recursive: true });
+        writeFileSync(
+          join(req.workDir!, "skill", "SKILL.md"),
+          "updated",
+          "utf-8",
+        );
+      },
+    );
+
+    const run = await runHarnessEvolution({
+      runId: "run-gates",
+      provider,
+      summary: "Graded gate run",
+      candidateId: "candidate-run-gates",
+      datasetId: "dataset-run-gates",
+      frontierId: "frontier-run-gates",
+      traceIds: ["gate-base-in", "gate-base-out"],
+      editableSurface: ["skill/"],
+      candidateTraceIdsByBaseline: {
+        "gate-base-in": "gate-cand-in",
+        "gate-base-out": "gate-cand-out",
+      },
+    });
+
+    assert.ok(run.gateResults && run.gateResults.length === 4);
+    const kinds = run.gateResults!.map((g) => g.stage.kind);
+    assert.deepEqual(kinds, [
+      "constraint",
+      "quick_fitness",
+      "fitness",
+      "coherence",
+    ]);
+    assert.equal(run.gateResults![0]!.passed, true);
+    assert.equal(run.gateResults![2]!.passed, run.evaluation?.gate.accepted);
+    const reloaded = loadHarnessEvolutionRun("run-gates");
+    assert.equal(reloaded?.gateResults?.length, 4);
   } finally {
     if (oldHome === undefined) delete process.env.RUNOFF_HOME;
     else process.env.RUNOFF_HOME = oldHome;

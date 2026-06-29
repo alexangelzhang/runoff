@@ -182,6 +182,11 @@ test("assertPipelineTransition allows failed to running", () => {
   assert.doesNotThrow(() => assertPipelineTransition("failed", "running"));
 });
 
+test("assertPipelineTransition allows queued to needs_clarification and clarification to running", () => {
+  assert.doesNotThrow(() => assertPipelineTransition("queued", "needs_clarification"));
+  assert.doesNotThrow(() => assertPipelineTransition("needs_clarification", "running"));
+});
+
 test("assertPipelineTransition allows awaiting_judge to aborted", () => {
   assert.doesNotThrow(() => assertPipelineTransition("awaiting_judge", "aborted"));
 });
@@ -216,6 +221,7 @@ test("PIPELINE_STATUS_FILTERS matches queryable pipeline statuses", () => {
     "max_rounds",
     "running",
     "queued",
+    "needs_clarification",
     "aborted",
     "awaiting_judge",
     "awaiting_approval",

@@ -35,26 +35,33 @@ What does the user want?
 │   ├─ Score a trace (human eval)                → runoff_score_trace
 │   └─ A/B experiments / eval report             → runoff_query_experiments
 │
-├─ Evolve the harness
+├─ Evolve the harness (local control-plane artifacts)
 │   ├─ Scan trigger rules                       → runoff_harness_evolve(action="trigger_scan")
-	│   ├─ Select hard/diverse traces                → runoff_harness_evolve(action="coreset")
-	│   ├─ Mine failure signatures                   → runoff_harness_evolve(action="mine")
-	│   ├─ Create held-in / held-out dataset split   → runoff_harness_evolve(action="dataset")
-	│   ├─ Register task verifiers                   → runoff_harness_evolve(action="verifier"|"verifiers")
-	│   ├─ Create tasksets / regression suites       → runoff_harness_evolve(action="taskset"|"tasksets")
-	│   ├─ Persist trajectory + replay manifests     → runoff_harness_evolve(action="trajectory"|"replay")
-	│   ├─ Create change manifest + variant          → runoff_harness_evolve(action="create")
-	│   ├─ Propose isolated candidate edits          → runoff_harness_evolve(action="propose")
-	│   ├─ Run full harness evolution loop           → runoff_harness_evolve(action="run")
-	│   ├─ Inspect harness evolution run report      → runoff_harness_evolve(action="report"|"runs")
-	│   ├─ Write report to local connectors          → runoff_harness_evolve(action="writeback")
-	│   ├─ Run held-in / held-out gate               → runoff_harness_evolve(action="evaluate")
-	│   ├─ Evaluate candidate against dataset        → runoff_harness_evolve(action="evaluate_dataset")
-	│   ├─ Evaluate candidate against taskset        → runoff_harness_evolve(action="evaluate_taskset")
-	│   ├─ Audit leakage / overfit / surface safety  → runoff_harness_evolve(action="audit")
-	│   ├─ Gate skill patch decisions                → runoff_harness_evolve(action="skill_patch")
-	│   ├─ Record optimizer-only rejected buffer     → runoff_harness_evolve(action="rejected")
-	│   ├─ Rank / update frontier                    → runoff_harness_evolve(action="rank"|"frontier")
+│   ├─ Select hard/diverse traces                → runoff_harness_evolve(action="coreset")
+│   ├─ Mine failure signatures                   → runoff_harness_evolve(action="mine")
+│   ├─ Create held-in / held-out dataset split   → runoff_harness_evolve(action="dataset")
+│   ├─ Register task verifiers                   → runoff_harness_evolve(action="verifier"|"verifiers")
+│   ├─ Create tasksets / regression suites       → runoff_harness_evolve(action="taskset"|"tasksets")
+│   ├─ Persist trajectory + replay manifests     → runoff_harness_evolve(action="trajectory"|"replay")
+│   ├─ Export training-ready trajectories        → runoff_harness_evolve(action="training_export")
+│   ├─ Register paddock / sandbox / rollout      → runoff_harness_evolve(action="paddock"|"sandbox"|"rollout_batch")
+│   ├─ Register rewards / evaluate rewards       → runoff_harness_evolve(action="reward"|"rewards"|"reward_reports")
+│   ├─ Register rules / compile feedback         → runoff_harness_evolve(action="rule"|"feedback")
+│   ├─ Run harness GC loop                       → runoff_harness_evolve(action="gc"|"gc_reports")
+│   ├─ Decide autonomy policy                    → runoff_harness_evolve(action="autonomy_policy"|"autonomy_decide")
+│   ├─ Route context topology                    → runoff_harness_evolve(action="context_topology"|"context_route")
+│   ├─ Create change manifest + variant          → runoff_harness_evolve(action="create")
+│   ├─ Propose isolated candidate edits          → runoff_harness_evolve(action="propose")
+│   ├─ Run full harness evolution loop           → runoff_harness_evolve(action="run")
+│   ├─ Inspect harness evolution run report      → runoff_harness_evolve(action="report"|"runs")
+│   ├─ Write report to local connectors          → runoff_harness_evolve(action="writeback")
+│   ├─ Run held-in / held-out gate               → runoff_harness_evolve(action="evaluate")
+│   ├─ Evaluate candidate against dataset        → runoff_harness_evolve(action="evaluate_dataset")
+│   ├─ Evaluate candidate against taskset        → runoff_harness_evolve(action="evaluate_taskset")
+│   ├─ Audit leakage / overfit / surface safety  → runoff_harness_evolve(action="audit")
+│   ├─ Gate skill patch decisions                → runoff_harness_evolve(action="skill_patch")
+│   ├─ Record optimizer-only rejected buffer     → runoff_harness_evolve(action="rejected")
+│   ├─ Rank / update frontier                    → runoff_harness_evolve(action="rank"|"frontier")
 │   ├─ Accept / rollback                         → runoff_harness_evolve(action="decide")
 │   └─ Export accepted promotion bundle          → runoff_harness_evolve(action="export")
 │
@@ -82,18 +89,18 @@ Example configs: [examples/configs/](../examples/configs/) · scaffold: `npm run
 
 ## Tier 2 — Operator (debug & observability)
 
-| Tool | When to use |
-|------|-------------|
-| `runoff_query_runs` | Check active/paused/failed runs, pending approvals, resume tokens, and latest event cursor |
-| `runoff_query_traces` | Find runs by status/time; `traceId` for one run; `format=postmortem` on failures |
-| `runoff_score_trace` | Record numeric quality score → `~/.runoff/traces/scores.jsonl`; read back via `runoff_query_traces traceId=<id> format=postmortem` → `humanScores` |
-| `runoff_query_experiments` | A/B variants; `format=eval-report` for winner recommendation |
-| `runoff_harness_evolve` | Harness evolution substrate: trigger scans, coreset selection, failure signature mining, taskset/verifier registry, trajectory/replay manifests, dataset/split objects, full run orchestration, role policy evidence, run reports, connector writebacks, change manifest, isolated proposer with rejected-buffer history context and observed variant diff, dataset/taskset evaluation, leakage/overfit audit, skill patch gate, pairwise rank, persisted frontier, acceptance guard/rollback, promotion bundle export |
-| `runoff_memory_status` | Before enabling Mem0/Zep; `probe=true` checks remote reachability |
-| `runoff_query_memory` | Hybrid search (local + remote); ops/debug — **not** the hot pipeline read path |
-| `runoff_dream_run` | After several runs — offline ADD/UPDATE/FORGET on `~/.runoff/memory/` |
-| `runoff_dreamify_tune` | After experiments exist — tune semantic threshold / decay / limits |
-| `runoff_dream_export` | Export jsonl for manual external knowledge-base ingest |
+| Tool                       | When to use                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `runoff_query_runs`        | Check active/paused/failed runs, pending approvals, resume tokens, and latest event cursor                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| `runoff_query_traces`      | Find runs by status/time; `traceId` for one run; `format=postmortem` on failures                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| `runoff_score_trace`       | Record numeric quality score → `~/.runoff/traces/scores.jsonl`; read back via `runoff_query_traces traceId=<id> format=postmortem` → `humanScores`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| `runoff_query_experiments` | A/B variants; `format=eval-report` for winner recommendation                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| `runoff_harness_evolve`    | Harness evolution substrate: trigger scans, coreset selection, failure signature mining, taskset/verifier registry, trajectory/replay manifests, training-ready trajectory export, paddock adapter registry, sandbox leases, rollout batches, reward registry/reports, rule registry, feedback compiler, GC loop, autonomy gate, context topology/router, artifact store index/doctor, dataset/split objects, full run orchestration, role policy evidence, run reports, connector writebacks, change manifest, isolated proposer with rejected-buffer history context and observed variant diff, dataset/taskset evaluation, leakage/overfit audit, skill patch gate, pairwise rank, persisted frontier, acceptance guard/rollback, promotion bundle export |
+| `runoff_memory_status`     | Before enabling Mem0/Zep; `probe=true` checks remote reachability                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| `runoff_query_memory`      | Hybrid search (local + remote); ops/debug — **not** the hot pipeline read path                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| `runoff_dream_run`         | After several runs — offline ADD/UPDATE/FORGET on `~/.runoff/memory/`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| `runoff_dreamify_tune`     | After experiments exist — tune semantic threshold / decay / limits                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| `runoff_dream_export`      | Export jsonl for manual external knowledge-base ingest                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 
 Enable `orchestration.dream.promoteGlobalKnowledge: true` to promote approved-run trace insights into `lesson` memory (Dream rule B7).
 
@@ -101,18 +108,20 @@ Hot-path remote pattern search requires `orchestration.memoryHybridRetrieve: tru
 
 Memory architecture: [docs/architecture/memory-layers.md](../docs/architecture/memory-layers.md)
 
+Harness maturity boundary: core pipeline execution, local artifact persistence, artifact indexing, and artifact-store doctor checks are implemented; paddock, sandbox, rollout, connector, and training-export objects are adapter contracts unless an explicit adapter is configured. Use `runoff_harness_evolve(action="index"|"doctor")` before assuming local harness state is healthy. Do not treat `runoff_harness_evolve` output as permission to mutate user repositories; user-repo edits still go through pipeline/workspace paths and explicit accept/apply decisions.
+
 ---
 
 ## MCP response contract
 
-| Outcome | `content[0].text` | `isError` |
-|---------|-------------------|-----------|
-| Success | JSON payload | false / omitted |
-| Exception / validation | JSON `{ "error": "…", "prefix": "…" }` | true |
-| Pipeline terminal failure | JSON `PipelineResult` with `status` `failed`, `aborted`, or `max_rounds` | true |
-| Pipeline pause (resume needed) | JSON `PipelineResult` with `status` `awaiting_*` | false |
-| Step config error | JSON `{ "status": "error", "reason": "…" }` | true |
-| Race partial cleanup | JSON result with non-empty `cleanupErrors` | false — inspect `cleanupErrors` in body |
+| Outcome                        | `content[0].text`                                                        | `isError`                               |
+| ------------------------------ | ------------------------------------------------------------------------ | --------------------------------------- |
+| Success                        | JSON payload                                                             | false / omitted                         |
+| Exception / validation         | JSON `{ "error": "…", "prefix": "…" }`                                   | true                                    |
+| Pipeline terminal failure      | JSON `PipelineResult` with `status` `failed`, `aborted`, or `max_rounds` | true                                    |
+| Pipeline pause (resume needed) | JSON `PipelineResult` with `status` `awaiting_*` or `needs_clarification` | false                                  |
+| Step config error              | JSON `{ "status": "error", "reason": "…" }`                              | true                                    |
+| Race partial cleanup           | JSON result with non-empty `cleanupErrors`                               | false — inspect `cleanupErrors` in body |
 
 Non-JSON exceptions: `runoff_show_agent_graph` with `format=mermaid|html|editor|canvas` returns raw text/HTML (not JSON).
 
@@ -120,17 +129,26 @@ Hosts must parse JSON body fields (`status`, `error`, `reason`, `cleanupErrors`)
 
 Pipeline results may include `observation`, and completed steps may include `stepResults.<step>.observation`. These deterministic, schema-versioned work-memory summaries carry evidence, coverage gaps, next-action hints, and references back to `artifacts`, checkpoints, and traces. Use them for next-turn reasoning, then inspect artifacts/traces for complete audit material.
 
-Host reading order after `runoff_run_pipeline`: parse JSON → inspect `observation.status` / `observation.nextHint` → inspect relevant `stepResults.<step>.observation` → open referenced `artifacts` or query traces when full evidence is needed. For `awaiting_judge`, follow `observation.nextHint` and then call `runoff_race_apply` or `runoff_race_abort`; for `awaiting_approval`, resume with `approvalDecision`.
+Host reading order after `runoff_run_pipeline`: parse JSON → inspect `observation.status` / `observation.nextHint` → inspect relevant `stepResults.<step>.observation` → open referenced `artifacts` or query traces when full evidence is needed. For `needs_clarification`, answer `scopePreflight.clarificationQuestions` and resume with the same `sessionId` plus explicit `scopePreflight` overrides. For `awaiting_judge`, follow `observation.nextHint` and then call `runoff_race_apply` or `runoff_race_abort`; for `awaiting_approval`, resume with `approvalDecision`.
+
+### Host resume explanation
+
+- Parse JSON body from `content[0].text` — do not rely on `isError` alone.
+- Prefer `PipelineResult.resumeReusePlan` → `observation.resumeReusePlan` → `runoff_query_runs` `format=full` → `run.resumePlanner`.
+- Explain **rerun** steps first; include **downstreamOf** when present; collapse **skipped** to counts unless the user asks for audit.
+- When no planner is present, do not claim "no reruns" or "all reused" — say planner evidence is unavailable.
+
+Full decision matrix, bilingual templates, and anti-patterns: [docs/guides/host-resume-ux.md](../docs/guides/host-resume-ux.md).
 
 ---
 
 ## Tier 3 — Config author (graph & governance)
 
-| Tool | When to use |
-|------|-------------|
+| Tool                      | When to use                                                         |
+| ------------------------- | ------------------------------------------------------------------- |
 | `runoff_show_agent_graph` | Export compiled graph; `format=editor` / `canvas` for visualization |
-| `runoff_run_pipeline` | `approvalDecision` when checkpoint status is `awaiting_approval` |
-| `runoff_run_step` | Single step with cache; avoid for `builtin` steps (handled by host) |
+| `runoff_run_pipeline`     | `approvalDecision` when checkpoint status is `awaiting_approval`    |
+| `runoff_run_step`         | Single step with cache; avoid for `builtin` steps (handled by host) |
 
 Orchestration modes (`orchestration.mode`): `dag` (default) · `workflow` · `llm-driven`.
 
@@ -140,24 +158,24 @@ Governance order: Policy → Guardrails → Approval. See [docs/architecture/gov
 
 ## All MCP tools (16)
 
-| Tool | Purpose |
-|------|---------|
-| `runoff_run_pipeline` | Full pipeline: DAG, retry, routing, cache, approval resume |
-| `runoff_run_step` | Single configured step |
-| `runoff_query_runs` | Harness control-plane status, approvals, resume hints |
-| `runoff_show_config` | Config, providers, routing, cache stats, memory/dreamify summary |
-| `runoff_show_agent_graph` | AgentGraph export / patch / editor / canvas |
-| `runoff_query_traces` | Trace query, postmortem, aggregates |
-| `runoff_score_trace` | Persist trace score |
-| `runoff_query_experiments` | Local A/B log |
-| `runoff_harness_evolve` | Harness evolution control plane |
-| `runoff_memory_status` | Memory backend describe + optional probe |
-| `runoff_query_memory` | `retrieveMerged` hybrid search |
-| `runoff_dream_run` | Offline Dream worker (A/B/C tracks) |
-| `runoff_dreamify_tune` | Retrieval hyperparameter grid search |
-| `runoff_dream_export` | Export memory jsonl |
-| `runoff_race_apply` | Apply winning race candidate to repo |
-| `runoff_race_abort` | Abort race, cleanup workspaces |
+| Tool                       | Purpose                                                          |
+| -------------------------- | ---------------------------------------------------------------- |
+| `runoff_run_pipeline`      | Full pipeline: DAG, retry, routing, cache, approval resume       |
+| `runoff_run_step`          | Single configured step                                           |
+| `runoff_query_runs`        | Harness control-plane status, approvals, resume hints            |
+| `runoff_show_config`       | Config, providers, routing, cache stats, memory/dreamify summary |
+| `runoff_show_agent_graph`  | AgentGraph export / patch / editor / canvas                      |
+| `runoff_query_traces`      | Trace query, postmortem, aggregates                              |
+| `runoff_score_trace`       | Persist trace score                                              |
+| `runoff_query_experiments` | Local A/B log                                                    |
+| `runoff_harness_evolve`    | Harness evolution control plane                                  |
+| `runoff_memory_status`     | Memory backend describe + optional probe                         |
+| `runoff_query_memory`      | `retrieveMerged` hybrid search                                   |
+| `runoff_dream_run`         | Offline Dream worker (A/B/C tracks)                              |
+| `runoff_dreamify_tune`     | Retrieval hyperparameter grid search                             |
+| `runoff_dream_export`      | Export memory jsonl                                              |
+| `runoff_race_apply`        | Apply winning race candidate to repo                             |
+| `runoff_race_abort`        | Abort race, cleanup workspaces                                   |
 
 ---
 
@@ -194,13 +212,13 @@ runoff_race_abort(sessionId: "...")
 
 ## CLI helpers (not MCP)
 
-| Command | Purpose |
-|---------|---------|
-| `npm run runoff:doctor -- --config …` | Config + provider health |
-| `npm run runoff:init -- --work-dir … --profile mock\|feature\|…` | Scaffold `pipeline.config.json` |
-| `npm run runoff:runs -- list --config …` | List active/paused/failed runs from the durable control plane |
-| `npm run runoff:runs -- show <runId> --config …` | Inspect one run's next action, resume token, approval, and event cursor |
-| `npm run clean:test-traces` | Remove `tests/.tmp-traces-*` |
+| Command                                                          | Purpose                                                                 |
+| ---------------------------------------------------------------- | ----------------------------------------------------------------------- |
+| `npm run runoff:doctor -- --config …`                            | Config + provider health                                                |
+| `npm run runoff:init -- --work-dir … --profile mock\|feature\|…` | Scaffold `pipeline.config.json`                                         |
+| `npm run runoff:runs -- list --config …`                         | List active/paused/failed runs from the durable control plane           |
+| `npm run runoff:runs -- show <runId> --config …`                 | Inspect one run's next action, resume token, approval, and event cursor |
+| `npm run clean:test-traces`                                      | Remove `tests/.tmp-traces-*`                                            |
 
 ---
 

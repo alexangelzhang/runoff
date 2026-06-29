@@ -40,6 +40,7 @@ test("pipelineMcpIsError covers terminal failures only", () => {
   assert.equal(pipelineMcpIsError("awaiting_judge"), false);
   assert.equal(pipelineMcpIsError("awaiting_approval"), false);
   assert.equal(pipelineMcpIsError("awaiting_plan_approval"), false);
+  assert.equal(pipelineMcpIsError("needs_clarification"), false);
   assert.equal(pipelineMcpIsError("running"), false);
   assert.equal(pipelineMcpIsError("queued"), false);
   assert.equal(pipelineMcpIsError("approved"), false);

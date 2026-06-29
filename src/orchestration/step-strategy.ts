@@ -4,6 +4,7 @@
  */
 
 import type { Candidate } from "../core/candidate.js";
+import type { StepContextContract } from "../core/state.js";
 import { getCandidateContent, getCandidateContentLabel } from "../core/candidate.js";
 import {
   buildGeneratePrompt,
@@ -24,6 +25,7 @@ export type StepPromptBuildInput = {
   /** Populated after a review pass; feeds generate rounds. */
   lastReviewFeedback?: string;
   context?: string;
+  outputKind?: "text" | "agent" | "mixed";
 };
 
 export type StepKind = "review" | "generate";
@@ -35,6 +37,61 @@ export function isReviewStep(stepName: string, reviewStepName: string): boolean 
 /** Classify step for prompt builder selection (issue 6.8 / 7.16). */
 export function resolveStepKind(stepName: string, reviewStepName: string): StepKind {
   return isReviewStep(stepName, reviewStepName) ? "review" : "generate";
+}
+
+export function buildStepContextContract(input: StepPromptBuildInput): StepContextContract {
+  if (resolveStepKind(input.stepName, input.reviewStepName) === "review") {
+    return {
+      kind: "review",
+      inputs: [
+        "spec",
+        "acceptanceCriteria",
+        "verifyResults",
+        "candidateContent",
+        "knowledge",
+      ],
+      forbidden: [
+        "full_trace_history",
+        "unrelated_artifacts",
+        "unbounded_repo_context",
+      ],
+      requiredEvidence: [
+        "verdict",
+        "artifactRefs",
+        "review_feedback",
+      ],
+      scopeNotes: [
+        "Focus on the supplied candidate and explicit verification results.",
+      ],
+    };
+  }
+
+  const requiredEvidence =
+    input.outputKind === "text"
+      ? ["code", "artifacts"]
+      : input.outputKind === "mixed"
+        ? ["artifacts"]
+        : ["filesModified", "diffStat", "artifacts"];
+
+  return {
+    kind: "generate",
+    inputs: [
+      "spec",
+      "lastReviewFeedback",
+      "previousContent",
+      "context",
+      "knowledge",
+    ],
+    forbidden: [
+      "full_trace_history",
+      "unrelated_artifacts",
+      "unbounded_repo_context",
+    ],
+    requiredEvidence,
+    scopeNotes: [
+      "Prefer the smallest edit surface that satisfies the spec and review feedback.",
+    ],
+  };
 }
 
 export function buildStructuredPromptForStep(input: StepPromptBuildInput): StructuredPrompt {

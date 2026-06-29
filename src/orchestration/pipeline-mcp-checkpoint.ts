@@ -4,7 +4,13 @@
 
 import type { PipelineConfig } from "../core/config.js";
 import { getCandidateContent, emptyCandidate, type Candidate } from "../core/candidate.js";
-import type { StepResult, PipelineState, PipelineStatus } from "../core/state.js";
+import type {
+  StepResult,
+  PipelineState,
+  PipelineStatus,
+  ResumeReusePlanReport,
+  ScopePreflightReport,
+} from "../core/state.js";
 import type { StepTrace } from "../observability/trace.js";
 import type { SessionWorkspace } from "../runtime/workspace.js";
 import type { ResumeMetadata } from "../core/state.js";
@@ -45,6 +51,8 @@ export function buildPipelineCheckpointState(args: {
   pendingRaceTraceId?: string;
   raceCandidates?: PipelineState["raceCandidates"];
   workspace?: SessionWorkspace | null;
+  scopePreflight?: ScopePreflightReport;
+  resumeReusePlan?: ResumeReusePlanReport;
   pendingExecutionPlan?: PipelineState["pendingExecutionPlan"];
 }): PipelineState {
   const {
@@ -65,6 +73,8 @@ export function buildPipelineCheckpointState(args: {
     pendingRaceTraceId,
     raceCandidates,
     workspace,
+    scopePreflight,
+    resumeReusePlan,
     pendingExecutionPlan,
   } = args;
 
@@ -86,6 +96,8 @@ export function buildPipelineCheckpointState(args: {
     dynamicPipeline: runtimePipeline,
     pendingRaceTraceId,
     raceCandidates: raceCandidates?.map((candidateInfo) => ({ ...candidateInfo })),
+    scopePreflight,
+    resumeReusePlan,
     ...(pendingExecutionPlan ? { pendingExecutionPlan } : {}),
     ...(workspace
       ? {

@@ -19,9 +19,12 @@ import {
   auditHarnessCandidate,
   createHarnessCandidate,
   createHarnessDataset,
+  createHarnessTaskSet,
   decideHarnessCandidate,
   evaluateHarnessCandidate,
+  evaluateHarnessTaskSet,
   loadHarnessCandidate,
+  registerHarnessVerifier,
 } from "../../src/orchestration/harness-evolution.ts";
 import {
   recordTrace,
@@ -1434,6 +1437,378 @@ test("pipeline-cli harness export writes accepted promotion bundle", async () =>
     assert.equal(body.bundle.candidateId, "cli-export");
     assert.equal(body.bundle.files[0]?.copied, true);
     assert.equal(existsSync(join(body.bundle.bundleDir, "bundle.json")), true);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("pipeline-cli harness exposes training substrate commands", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "pipeline-cli-harness-training-"));
+  try {
+    const home = join(dir, "home");
+    const oldHome = process.env.RUNOFF_HOME;
+    try {
+      process.env.RUNOFF_HOME = home;
+      recordTrace(
+        trace("cli-train-base", {
+          finalStatus: "failed",
+          timestamp: "2026-06-20T00:00:01.000Z",
+        }),
+      );
+      recordTrace(
+        trace("cli-train-cand", {
+          finalStatus: "approved",
+          timestamp: "2026-06-20T00:00:02.000Z",
+        }),
+      );
+      createHarnessCandidate({
+        candidateId: "cli-train-candidate",
+        summary: "CLI train candidate",
+      });
+      const verifier = registerHarnessVerifier({
+        verifierId: "cli-train-verifier",
+        kind: "trace_process",
+        summary: "trace ok",
+        requiredTraceStatuses: ["approved"],
+      });
+      const taskSet = createHarnessTaskSet({
+        taskSetId: "cli-train-taskset",
+        name: "CLI train taskset",
+        tasks: [
+          {
+            taskId: "cli-train-task",
+            prompt: "fix cli train",
+            toolsets: ["files"],
+            verifierId: verifier.verifierId,
+            timeoutSec: 60,
+            forbiddenPaths: [],
+            expectedArtifacts: [],
+            criticality: "selection",
+            sourceTraceId: "cli-train-base",
+          },
+        ],
+      });
+      evaluateHarnessTaskSet({
+        candidateId: "cli-train-candidate",
+        taskSetId: taskSet.taskSetId,
+        candidateTraceIdsByTask: { "cli-train-task": "cli-train-cand" },
+      });
+    } finally {
+      if (oldHome !== undefined) process.env.RUNOFF_HOME = oldHome;
+      else delete process.env.RUNOFF_HOME;
+    }
+
+    const run = async (args: string[]) => {
+      const child = spawn(
+        "npx",
+        ["tsx", CLI, ...args, "--home", home, "--json"],
+        {
+          cwd: ROOT,
+          stdio: ["ignore", "pipe", "pipe"],
+        },
+      );
+      let stdout = "";
+      let stderr = "";
+      child.stdout?.on("data", (d) => {
+        stdout += d.toString();
+      });
+      child.stderr?.on("data", (d) => {
+        stderr += d.toString();
+      });
+      const code = await new Promise<number>((resolve, reject) => {
+        child.on("error", reject);
+        child.on("close", (x) => resolve(x ?? 1));
+      });
+      assert.equal(code, 0, stderr);
+      return JSON.parse(stdout) as Record<string, unknown>;
+    };
+
+    const reward = (await run([
+      "harness",
+      "reward",
+      "--reward-id",
+      "cli-reward",
+      "--kind",
+      "verifier_score",
+      "--summary",
+      "CLI reward",
+    ])) as { reward: { rewardId: string } };
+    assert.equal(reward.reward.rewardId, "cli-reward");
+
+    const report = (await run([
+      "harness",
+      "reward",
+      "--reward-id",
+      "cli-reward",
+      "--taskset-id",
+      "cli-train-taskset",
+      "--candidate-id",
+      "cli-train-candidate",
+    ])) as { report: { reportId: string; aggregateReward: number } };
+    assert.equal(report.report.aggregateReward, 1);
+
+    const paddock = (await run([
+      "harness",
+      "paddock",
+      "--paddock-id",
+      "cli-paddock",
+      "--kind",
+      "local_cli",
+      "--protocol",
+      "runoff_provider",
+      "--summary",
+      "CLI paddock",
+      "--command-json",
+      '["node","agent.js"]',
+    ])) as { paddock: { paddockId: string } };
+    assert.equal(paddock.paddock.paddockId, "cli-paddock");
+
+    const sandbox = (await run([
+      "harness",
+      "sandbox",
+      "--lease-id",
+      "cli-lease",
+      "--candidate-id",
+      "cli-train-candidate",
+      "--taskset-id",
+      "cli-train-taskset",
+      "--spec-json",
+      JSON.stringify({
+        provider: "local_directory",
+        workspaceRoot: dir,
+        serviceEndpoints: [],
+        cleanupPolicy: "manual",
+      }),
+    ])) as { lease: { leaseId: string } };
+    assert.equal(sandbox.lease.leaseId, "cli-lease");
+
+    const rollout = (await run([
+      "harness",
+      "rollout-batch",
+      "--batch-id",
+      "cli-batch",
+      "--taskset-id",
+      "cli-train-taskset",
+      "--candidate-id",
+      "cli-train-candidate",
+      "--paddock-id",
+      "cli-paddock",
+      "--sandbox-lease-ids-json",
+      '["cli-lease"]',
+      "--candidate-trace-map-by-task-json",
+      '{"cli-train-task":"cli-train-cand"}',
+    ])) as { batch: { batchId: string; status: string } };
+    assert.equal(rollout.batch.status, "completed");
+
+    const trajectories = JSON.parse(
+      readFileSync(
+        join(
+          home,
+          "harness-evolution",
+          "tasksets",
+          "cli-train-taskset",
+          "evaluations",
+          "cli-train-candidate.json",
+        ),
+        "utf-8",
+      ),
+    ) as { results: Array<{ trajectoryId?: string }> };
+    const trajectoryId = trajectories.results[0]?.trajectoryId;
+    assert.ok(trajectoryId);
+    const training = (await run([
+      "harness",
+      "training-export",
+      "--export-id",
+      "cli-training-export",
+      "--trajectory-ids-json",
+      JSON.stringify([trajectoryId]),
+      "--taskset-id",
+      "cli-train-taskset",
+      "--candidate-id",
+      "cli-train-candidate",
+      "--reward-refs-json",
+      JSON.stringify([report.report.reportId]),
+    ])) as { export: { exportId: string; sampleCount: number } };
+    assert.equal(training.export.sampleCount, 1);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("pipeline-cli harness exposes operating layer commands", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "pipeline-cli-harness-operating-"));
+  try {
+    const home = join(dir, "home");
+    const oldHome = process.env.RUNOFF_HOME;
+    try {
+      process.env.RUNOFF_HOME = home;
+      recordTrace(
+        trace("cli-ops-fail", {
+          finalStatus: "failed",
+          hasVerifyResults: false,
+          steps: [
+            {
+              name: "implement",
+              provider: "mock",
+              durationMs: 10,
+              round: 1,
+              filesModified: ["src/core/unsafe.ts"],
+              error: "unknown type escaped boundary",
+            },
+          ],
+        }),
+      );
+      createHarnessCandidate({
+        candidateId: "cli-ops-candidate",
+        summary: "CLI ops candidate",
+        editableSurface: ["src/core/"],
+        evidenceTraceIds: ["cli-ops-fail"],
+      });
+    } finally {
+      if (oldHome !== undefined) process.env.RUNOFF_HOME = oldHome;
+      else delete process.env.RUNOFF_HOME;
+    }
+
+    const run = async (args: string[]) => {
+      const child = spawn(
+        "npx",
+        ["tsx", CLI, ...args, "--home", home, "--json"],
+        {
+          cwd: ROOT,
+          stdio: ["ignore", "pipe", "pipe"],
+        },
+      );
+      let stdout = "";
+      let stderr = "";
+      child.stdout?.on("data", (d) => {
+        stdout += d.toString();
+      });
+      child.stderr?.on("data", (d) => {
+        stderr += d.toString();
+      });
+      const code = await new Promise<number>((resolve, reject) => {
+        child.on("error", reject);
+        child.on("close", (x) => resolve(x ?? 1));
+      });
+      assert.equal(code, 0, stderr);
+      return JSON.parse(stdout) as Record<string, unknown>;
+    };
+
+    const rule = (await run([
+      "harness",
+      "rule",
+      "--rule-id",
+      "cli-rule-boundary",
+      "--kind",
+      "coding_standard",
+      "--summary",
+      "Parse at boundaries",
+      "--guidance",
+      "Parse unknown values at system boundaries.",
+      "--applies-to-json",
+      '["src/core/"]',
+      "--triggers-json",
+      '["unknown type"]',
+    ])) as { rule: { ruleId: string } };
+    assert.equal(rule.rule.ruleId, "cli-rule-boundary");
+
+    const feedback = (await run([
+      "harness",
+      "feedback",
+      "--feedback-id",
+      "cli-feedback",
+      "--trace-id",
+      "cli-ops-fail",
+      "--candidate-id",
+      "cli-ops-candidate",
+    ])) as { feedback: { feedbackId: string; ruleIds: string[] } };
+    assert.equal(feedback.feedback.ruleIds[0], "cli-rule-boundary");
+
+    const gc = (await run(["harness", "gc", "--report-id", "cli-gc"])) as {
+      report: { reportId: string; items: unknown[] };
+    };
+    assert.equal(gc.report.reportId, "cli-gc");
+
+    const autonomy = (await run([
+      "harness",
+      "autonomy",
+      "--policy-id",
+      "cli-policy",
+      "--summary",
+      "CLI autonomy policy",
+      "--default-decision",
+      "ask_approval",
+    ])) as { policy: { policyId: string } };
+    assert.equal(autonomy.policy.policyId, "cli-policy");
+
+    const decision = (await run([
+      "harness",
+      "autonomy",
+      "--policy-id",
+      "cli-policy",
+      "--decision-id",
+      "cli-decision",
+      "--action",
+      "continue",
+      "--risk",
+      "4",
+      "--confidence",
+      "0.7",
+      "--candidate-id",
+      "cli-ops-candidate",
+    ])) as { decision: { decision: string } };
+    assert.equal(decision.decision.decision, "ask_approval");
+
+    const topology = (await run([
+      "harness",
+      "context",
+      "--topology-id",
+      "cli-topology",
+      "--summary",
+      "CLI context topology",
+      "--include-rules",
+      "--context-nodes-json",
+      JSON.stringify([
+        {
+          nodeId: "dir:src/core",
+          kind: "directory",
+          ref: "src/core",
+          summary: "Core runtime",
+          tags: ["core"],
+          priority: 80,
+        },
+      ]),
+    ])) as { topology: { topologyId: string; nodes: unknown[] } };
+    assert.equal(topology.topology.topologyId, "cli-topology");
+
+    const route = (await run([
+      "harness",
+      "context",
+      "--route-id",
+      "cli-route",
+      "--topology-id",
+      "cli-topology",
+      "--candidate-id",
+      "cli-ops-candidate",
+      "--changed-files-json",
+      '["src/core/unsafe.ts"]',
+    ])) as { route: { selectedRefs: Array<{ ref: string }> } };
+    assert.equal(
+      route.route.selectedRefs.some((ref) => ref.ref === "src/core"),
+      true,
+    );
+
+    const index = (await run(["harness", "index"])) as {
+      index: { countsByKind: { candidate?: number; rule?: number } };
+    };
+    assert.equal(index.index.countsByKind.candidate, 1);
+    assert.equal(index.index.countsByKind.rule, 1);
+
+    const doctor = (await run(["harness", "doctor"])) as {
+      report: { status: string; invalidCount: number };
+    };
+    assert.equal(doctor.report.status, "ok");
+    assert.equal(doctor.report.invalidCount, 0);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

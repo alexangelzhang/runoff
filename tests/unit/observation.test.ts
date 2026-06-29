@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { StepResult } from "../../src/core/state.ts";
-import { createDiffArtifact } from "../../src/orchestration/artifacts.ts";
+import { createCodeArtifact, createDiffArtifact } from "../../src/orchestration/artifacts.ts";
 import { buildPipelineObservation, buildStepObservation } from "../../src/orchestration/observation.ts";
 
 test("buildStepObservation summarizes successful step with artifact references", () => {
@@ -13,6 +13,17 @@ test("buildStepObservation summarizes successful step with artifact references",
     summary: "Updated the retry policy.",
     filesModified: ["src/retry.ts"],
     diffStat: "1 file changed, 3 insertions(+)",
+    resumeMetadata: {
+      schemaVersion: 1,
+      stepName: "implement",
+      round: 1,
+      inputHash: "input-hash-1",
+      artifactCompleteness: "complete",
+      providerResultPresent: true,
+      workspaceAttachment: "session_workspace",
+      canSkipOnResume: true,
+      evidenceRefs: ["stepResults.implement.status"],
+    },
     artifacts: [
       createDiffArtifact(
         "diff --git a/src/retry.ts b/src/retry.ts",
@@ -33,6 +44,7 @@ test("buildStepObservation summarizes successful step with artifact references",
   assert.ok(observation.evidence.includes("provider=codex"));
   assert.ok(observation.evidence.includes("filesModified=src/retry.ts"));
   assert.deepEqual(observation.coverageGaps, []);
+  assert.deepEqual(observation.typedCoverageGaps, []);
   assert.deepEqual(observation.artifactRefs, [
     {
       artifactId: undefined,
@@ -44,6 +56,16 @@ test("buildStepObservation summarizes successful step with artifact references",
       producedBy: "implement",
     },
   ]);
+  assert.deepEqual(observation.claims, [
+    {
+      claim: "Updated the retry policy.",
+      evidenceRefs: ["stepResults.implement.artifacts[0]"],
+    },
+  ]);
+  assert.equal(observation.contextContract?.kind, "generate");
+  assert.ok(observation.contextContract?.requiredEvidence.includes("artifacts"));
+  assert.equal(observation.resumeMetadata?.inputHash, "input-hash-1");
+  assert.ok(observation.evidence.includes("inputHash=input-hash-1"));
 });
 
 test("buildStepObservation keeps failure evidence without inventing artifacts", () => {
@@ -61,7 +83,60 @@ test("buildStepObservation keeps failure evidence without inventing artifacts", 
   assert.ok(observation.evidence.includes("error=provider timed out"));
   assert.ok(observation.coverageGaps.includes("No typed artifact was produced for this step."));
   assert.ok(observation.coverageGaps.includes("Step failed before producing a complete successful result."));
+  assert.deepEqual(observation.typedCoverageGaps?.map((gap) => gap.kind), ["evidence", "process"]);
+  assert.ok(observation.claims?.[0]?.evidenceRefs.includes("error=provider timed out"));
   assert.deepEqual(observation.artifactRefs, []);
+});
+
+test("buildStepObservation warns when required evidence is missing", () => {
+  const result: StepResult = {
+    status: "success",
+    provider: "codex",
+    kind: "agent",
+    summary: "Changed retry behavior.",
+    filesModified: ["src/retry.ts"],
+    contextContract: {
+      kind: "generate",
+      inputs: ["spec"],
+      forbidden: ["unbounded_repo_context"],
+      requiredEvidence: ["filesModified", "diffStat"],
+    },
+  };
+
+  const observation = buildStepObservation("implement", result);
+
+  assert.equal(observation.status, "success");
+  assert.ok(
+    observation.coverageGaps.includes('Missing required evidence "diffStat" from step context contract.'),
+  );
+  assert.ok(
+    observation.typedCoverageGaps?.some(
+      (gap) =>
+        gap.kind === "evidence" &&
+        gap.detail === 'Missing required evidence "diffStat" from step context contract.' &&
+        gap.evidenceRefs?.includes("stepResults.implement.diffStat"),
+    ),
+  );
+});
+
+test("buildStepObservation fallback contract accepts text code artifacts", () => {
+  const result: StepResult = {
+    status: "success",
+    provider: "mock",
+    kind: "text",
+    code: "export const ok = true;",
+    explanation: "Generated code.",
+    artifacts: [
+      createCodeArtifact("export const ok = true;", "Generated code."),
+    ],
+  };
+
+  const observation = buildStepObservation("generate", result);
+
+  assert.deepEqual(observation.contextContract?.requiredEvidence, ["code", "artifacts"]);
+  assert.equal(observation.coverageGaps.includes('Missing required evidence "filesModified" from step context contract.'), false);
+  assert.equal(observation.coverageGaps.includes('Missing required evidence "diffStat" from step context contract.'), false);
+  assert.deepEqual(observation.typedCoverageGaps, []);
 });
 
 test("buildPipelineObservation summarizes pause states with next action", () => {
@@ -86,6 +161,8 @@ test("buildPipelineObservation summarizes pause states with next action", () => 
   assert.ok(observation.coverageGaps.includes("Race winner has not been applied yet."));
   assert.equal(observation.traceRef.traceId, "trace-1");
   assert.deepEqual(observation.checkpointRef, { sessionId: "session-1", status: "awaiting_judge" });
+  assert.equal(observation.contextContract?.kind, "pipeline");
+  assert.deepEqual(observation.typedCoverageGaps?.map((gap) => gap.kind), ["process"]);
   assert.deepEqual(observation.stepRefs, [
     {
       stepName: "implement",
@@ -94,6 +171,8 @@ test("buildPipelineObservation summarizes pause states with next action", () => 
       summary: "candidate ready",
     },
   ]);
+  assert.equal(observation.stageEvaluations?.[0]?.kind, "implement");
+  assert.equal(observation.claims?.[0]?.claim, "Pipeline awaiting_judge; latest step \"implement\" completed.");
   assert.match(observation.nextHint ?? "", /runoff_race_apply/);
 });
 
@@ -108,4 +187,122 @@ test("buildPipelineObservation preserves failure error evidence", () => {
   assert.equal(observation.summary, "Pipeline failed: approval rejected");
   assert.ok(observation.evidence.includes("error=approval rejected"));
   assert.ok(observation.coverageGaps.includes("No step results are present in this pipeline result."));
+  assert.ok(observation.coverageGaps.includes("Pipeline failed with error: approval rejected"));
+  assert.deepEqual(observation.typedCoverageGaps?.map((gap) => gap.kind), ["process", "evidence"]);
+  assert.equal(observation.claims?.[0]?.claim, "Pipeline failed: approval rejected");
+});
+
+test("buildPipelineObservation carries scope preflight blockers", () => {
+  const observation = buildPipelineObservation({
+    status: "needs_clarification",
+    traceId: "trace-preflight",
+    checkpointFile: "session-preflight",
+    stepResults: {},
+    scopePreflight: {
+      schemaVersion: 1,
+      decision: "needs_clarification",
+      risk: "high",
+      checks: [
+        {
+          name: "workDir",
+          status: "block",
+          detail: "Agent write steps require an explicit workDir.",
+          clarificationQuestion: "Pass workDir.",
+        },
+      ],
+      assumptions: [],
+      warnings: [],
+      blockers: ["Agent write steps require an explicit workDir."],
+      clarificationQuestions: ["Pass workDir."],
+      evidenceRefs: ["pipeline.agentWriteSteps=true"],
+      safeDefaults: [],
+    },
+  });
+
+  assert.equal(observation.status, "needs_clarification");
+  assert.equal(observation.scopePreflight?.decision, "needs_clarification");
+  assert.ok(observation.coverageGaps.some((gap) => /Scope preflight/.test(gap)));
+  assert.ok(observation.typedCoverageGaps?.some((gap) => gap.evidenceRefs?.includes("pipeline.scopePreflight")));
+  assert.match(observation.nextHint ?? "", /scopePreflight/);
+});
+
+test("buildPipelineObservation aggregates step-level claims when present", () => {
+  const implement: StepResult = {
+    status: "success",
+    provider: "codex",
+    kind: "agent",
+    summary: "Updated retry behavior.",
+    filesModified: ["src/retry.ts"],
+    diffStat: "1 file changed",
+    artifacts: [
+      createDiffArtifact(
+        "diff --git a/src/retry.ts b/src/retry.ts",
+        "Updated retry behavior.",
+        ["src/retry.ts"],
+        "1 file changed",
+        { producedBy: "implement" },
+      ),
+    ],
+  };
+  implement.observation = buildStepObservation("implement", implement);
+
+  const observation = buildPipelineObservation({
+    status: "approved",
+    traceId: "trace-claims",
+    stepResults: { implement },
+  });
+
+  assert.ok(observation.claims?.some((claim) => claim.claim === "Updated retry behavior."));
+  assert.ok(observation.claims?.some((claim) => claim.evidenceRefs.includes("stepResults.implement.artifacts[0]")));
+});
+
+test("buildPipelineObservation exposes resume reuse planner decisions", () => {
+  const observation = buildPipelineObservation({
+    status: "approved",
+    traceId: "trace-resume-plan",
+    checkpointFile: "session-resume-plan",
+    stepResults: {
+      generate: { status: "success", round: 1, summary: "regenerated" },
+      review: { status: "success", round: 1, summary: "reviewed regenerated output" },
+    },
+    resumeReusePlan: {
+      schemaVersion: 1,
+      round: 1,
+      entries: [
+        {
+          stepName: "generate",
+          decision: "rerun",
+          reason: "artifact completeness is partial",
+          round: 1,
+          evidenceRefs: ["stepResults.generate.resumeMetadata"],
+        },
+        {
+          stepName: "review",
+          decision: "rerun",
+          reason: "downstream dependency generate must rerun on resume",
+          round: 1,
+          downstreamOf: "generate",
+          evidenceRefs: ["stepResults.review.resumeMetadata"],
+        },
+      ],
+      summary: { skipped: 0, rerun: 2 },
+      evidenceRefs: ["stepResults.generate.resumeMetadata", "stepResults.review.resumeMetadata"],
+    },
+  });
+
+  assert.equal(observation.resumeReusePlan?.summary.rerun, 2);
+  assert.ok(observation.evidence.includes("resumeReusePlan=rerun:2,skipped:0"));
+  assert.ok(
+    observation.coverageGaps.includes(
+      "Resume planner reruns review: downstream dependency generate must rerun on resume",
+    ),
+  );
+  assert.ok(
+    observation.typedCoverageGaps?.some(
+      (gap) =>
+        gap.kind === "process" &&
+        gap.detail === "Resume planner reruns generate: artifact completeness is partial" &&
+        gap.evidenceRefs?.includes("pipeline.resumeReusePlan.entries.generate"),
+    ),
+  );
 });

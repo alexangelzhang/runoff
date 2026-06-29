@@ -5,7 +5,17 @@
 import { loadConfigFromPath } from "../core/config.js";
 import { createControlPlane } from "../orchestration/control-plane.js";
 import type { RunStatus } from "../orchestration/run-store.js";
-import { queryRuns, type RunSummary } from "../orchestration/run-query.js";
+import type { RunResumePlannerSummary } from "../orchestration/run-control.js";
+import {
+  queryRuns,
+  summarizeRun,
+  type FullRunQueryRun,
+  type RunSummary,
+} from "../orchestration/run-query.js";
+import {
+  formatResumePlannerRunShowSection,
+  formatResumePlannerSummaryMark,
+} from "./resume-planner-format.js";
 
 export type RunsListOptions = {
   configPath: string;
@@ -58,7 +68,7 @@ export function runsShow(opts: RunsShowOptions): void {
     eventLog: controlPlane.eventLog,
     controlPlaneMode: controlPlane.mode,
     runId: opts.runId,
-    format: opts.json ? "full" : "summary",
+    format: "full",
   });
 
   if (opts.json) {
@@ -66,18 +76,27 @@ export function runsShow(opts: RunsShowOptions): void {
     return;
   }
 
-  const run = result.runs[0] as RunSummary | undefined;
-  if (!run) throw new Error(`Run not found: ${opts.runId}`);
-  console.log(formatRunDetails(run, result.controlPlaneMode, result.eventCount ?? 0));
+  const fullRun = result.runs[0] as FullRunQueryRun | undefined;
+  if (!fullRun) throw new Error(`Run not found: ${opts.runId}`);
+  const summary = summarizeRun(fullRun, controlPlane.eventLog);
+  console.log(
+    formatRunDetails(summary, fullRun.resumePlanner, result.controlPlaneMode, result.eventCount ?? 0),
+  );
 }
 
 function formatRunSummary(run: RunSummary): string {
   const pipelineStatus = run.pipelineStatus ? ` pipeline=${run.pipelineStatus}` : "";
   const cursor = run.eventCursor !== undefined ? ` event=${run.eventCursor}` : "";
-  return `${new Date(run.updatedAt).toISOString()}  ${run.runId}  ${run.status.padEnd(17)}${pipelineStatus}  session=${run.sessionId} round=${run.round}${cursor} next=${run.nextAction}`;
+  const resumeMark = run.resumePlanner ? formatResumePlannerSummaryMark(run.resumePlanner) : "";
+  return `${new Date(run.updatedAt).toISOString()}  ${run.runId}  ${run.status.padEnd(17)}${pipelineStatus}  session=${run.sessionId} round=${run.round}${cursor}${resumeMark} next=${run.nextAction}`;
 }
 
-function formatRunDetails(run: RunSummary, controlPlaneMode: string, eventCount: number): string {
+function formatRunDetails(
+  run: RunSummary,
+  resumePlanner: RunResumePlannerSummary | undefined,
+  controlPlaneMode: string,
+  eventCount: number,
+): string {
   const lines = [
     `runId:        ${run.runId}`,
     `sessionId:    ${run.sessionId}`,
@@ -101,6 +120,9 @@ function formatRunDetails(run: RunSummary, controlPlaneMode: string, eventCount:
       `  action:      ${run.pendingApproval.action}`,
       `  description: ${run.pendingApproval.description}`,
     );
+  }
+  if (resumePlanner) {
+    lines.push(...formatResumePlannerRunShowSection(resumePlanner));
   }
   return lines.join("\n");
 }

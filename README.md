@@ -3,11 +3,11 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![CI](https://github.com/alexangelzhang/runoff/actions/workflows/ci-gates.yml/badge.svg)](https://github.com/alexangelzhang/runoff/actions/workflows/ci-gates.yml)
 
-> **Local harness for observable, recoverable coding-agent pipelines.**
+> **Local harness control plane for observable, recoverable coding-agent pipelines.**
 
 Give runoff one prompt. It turns **Claude Code, Codex, Gemini, OpenCode**, or any CLI/MCP-backed coding agent into a repo-change pipeline: config DAG, isolated git worktrees, governance gates, checkpoints, durable run state, traces, and resumable handoffs.
 
-Its sharpest demo is still race mode: run two coding agents on the identical task, compare real diffs, pick the winner, and merge only that candidate.
+Its sharpest first-run demo is still race mode: run two coding agents on the identical task, compare real diffs, pick the winner, and merge only that candidate.
 
 ```
 $ npx runoff run --prompt "Add formatRelativeTime() with edge cases"
@@ -27,6 +27,8 @@ No more hoping a single model got it right. The harness keeps the run observable
 Works as an **MCP server** (Cursor, Claude Desktop, Claude Code) or a standalone **CLI**. Runs entirely local — no SaaS, no telemetry, traces stay on your machine.
 
 Every pipeline result includes a schema-versioned **Observation**: a concise work-memory summary with status, evidence, next-action hints, and links back to full artifacts and traces. The control plane can also be queried for active runs, pending approvals, resume tokens, and event cursors, so a host agent can continue or recover work without scraping logs.
+
+For teams building agent workflows, runoff has a second surface beyond the race demo: a **local harness evolution control plane**. It records datasets, tasksets, verifiers, trajectories, replay manifests, reward reports, rule/feedback/GC decisions, context routes, candidate lineage, acceptance checks, rollback records, and promotion bundles under `~/.runoff/harness-evolution/`. A shared artifact store owns durable paths plus `harness index` / `harness doctor` health checks, so host agents can inspect the control plane without scraping directories. These are audit artifacts and adapter contracts by default; applying edits to a user repo still goes through explicit pipeline/workspace paths.
 
 ## Install
 
@@ -50,7 +52,7 @@ Put two providers in an array — they run in parallel, each in its own git work
 {
   "pipeline": {
     "implement": [["claude-code", "opencode"]],
-    "review":    ["claude-code", "implement"]
+    "review": ["claude-code", "implement"]
   }
 }
 ```
@@ -120,14 +122,23 @@ Auto-configure for Cursor / Claude Desktop / Claude Code:
 npm run setup:mcp
 ```
 
-| Tool | Purpose |
-|------|---------|
-| `runoff_run_pipeline` | Full DAG + retries + checkpoints + race pause |
-| `runoff_run_step` | Single step |
-| `runoff_query_runs` | Harness control plane: run status, approvals, resume hints |
-| `runoff_harness_evolve` | Harness evolution: trigger scan, coreset, failure mining, tasksets/verifiers, trajectory/replay, dataset splits, orchestrated runs, role policy, isolated proposer + observed variant diff, leakage audit, frontier, skill patch gate, rejected buffer, connector writeback, acceptance guard, promotion bundle |
-| `runoff_query_traces` / `runoff_query_experiments` | Local observability |
-| `runoff_race_apply` / `runoff_race_abort` | Race finalization |
+| Tool                                               | Purpose                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| -------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `runoff_run_pipeline`                              | Full DAG + retries + checkpoints + race pause                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| `runoff_run_step`                                  | Single step                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| `runoff_query_runs`                                | Harness control plane: run status, approvals, resume hints                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| `runoff_harness_evolve`                            | Harness evolution: trigger scan, coreset, failure mining, tasksets/verifiers, trajectory/replay, training export, paddock adapters, sandbox leases, rollout batches, reward registry, rule registry, feedback compiler, GC loop, autonomy gate, context topology, dataset splits, orchestrated runs, role policy, isolated proposer + observed variant diff, leakage audit, frontier, skill patch gate, rejected buffer, connector writeback, acceptance guard, promotion bundle |
+| `runoff_query_traces` / `runoff_query_experiments` | Local observability                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| `runoff_race_apply` / `runoff_race_abort`          | Race finalization                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+
+### Capability maturity
+
+| Layer                   | Status                      | What it means                                                                                                                                                                                |
+| ----------------------- | --------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Core runtime            | Production-ready local path | Config DAG, orchestration, governance, worktree isolation, durable run state, traces, Observation, and race apply/abort are exercised by `npm run ci:gates`.                                 |
+| Local control plane     | Implemented audit artifacts | Harness datasets, tasksets, verifiers, trajectories, rewards, rules, feedback, GC, autonomy decisions, context routes, frontier state, reports, and promotion bundles are persisted locally. |
+| Adapter contracts       | Contract-ready              | Paddock, sandbox lease, rollout, connector writeback, and training exports define stable local contracts; remote lifecycle or arbitrary blackbox execution requires explicit adapters.       |
+| Experimental / optional | Opt-in                      | A2A federation, external memory backends, Dream/Dreamify, OTel collector, and real-provider smoke depend on local environment and remain opt-in.                                             |
 
 CLI equivalent for the same control plane:
 
@@ -140,6 +151,18 @@ npm run runoff:harness -- dataset --summary "main regression split" --trace-ids-
 npm run runoff:harness -- verifier --verifier-kind trace_process --summary "approved trace"
 npm run runoff:harness -- taskset --summary "agent eval set" --trace-ids-json '["base-a","base-b"]' --verifier-id trace_process
 npm run runoff:harness -- evaluate-taskset <candidateId> --taskset-id <taskSetId> --candidate-trace-map-by-task-json '{"task-base-a":"cand-a"}'
+npm run runoff:harness -- training-export --trajectory-ids-json '["traj-cand-a"]' --taskset-id <taskSetId> --candidate-id <candidateId>
+npm run runoff:harness -- paddock --paddock-id local-agent --kind local_cli --protocol runoff_provider --summary "local CLI agent" --command-json '["node","agent.js"]'
+npm run runoff:harness -- sandbox --lease-id local-lease --candidate-id <candidateId> --taskset-id <taskSetId> --spec-json '{"provider":"local_directory","serviceEndpoints":[],"cleanupPolicy":"manual"}'
+npm run runoff:harness -- reward --reward-id verifier-score --kind verifier_score --summary "verifier score reward"
+npm run runoff:harness -- reward --reward-id verifier-score --taskset-id <taskSetId> --candidate-id <candidateId>
+npm run runoff:harness -- rollout-batch --taskset-id <taskSetId> --candidate-id <candidateId> --paddock-id local-agent --sandbox-lease-ids-json '["local-lease"]' --reward-report-id <rewardReportId>
+npm run runoff:harness -- rule --rule-id boundary-parse --kind coding_standard --summary "parse at boundaries" --guidance "Parse unknown values at system boundaries." --applies-to-json '["src/core/"]'
+npm run runoff:harness -- feedback --trace-id <traceId> --candidate-id <candidateId>
+npm run runoff:harness -- gc --report-id weekly-gc
+npm run runoff:harness -- autonomy --policy-id assisted --summary "assisted autonomy" --default-decision ask_approval
+npm run runoff:harness -- context --topology-id main --summary "main context topology" --include-rules --include-tasksets
+npm run runoff:harness -- context --topology-id main --changed-files-json '["src/core/config.ts"]'
 npm run runoff:harness -- skill-patch <candidateId> --base-skill "skill@v1"
 npm run runoff:harness -- rejected <candidateId> --reason "regression gate failed"
 npm run runoff:harness -- propose --summary "tighten recovery hints" --provider codex
@@ -157,15 +180,15 @@ Full list + governance/memory tools: [`docs/README.md`](docs/README.md)
 
 ## Why runoff?
 
-| | runoff | LangGraph | CrewAI | AutoGen | OpenHands |
-|-|:------:|:---------:|:------:|:-------:|:---------:|
-| Declarative config DAG (JSON) | ✅ | code-first | Crew/Task | code-first | UI + agent |
-| Git worktree + lock contract | ✅ | — | — | — | partial |
-| Provider race + judge pause | ✅ | — | — | — | — |
-| MCP tool surface for IDE hosts | ✅ | optional | recent | — | different |
-| Durable run control plane | ✅ | checkpointer | partial | partial | partial |
-| Observation + local trace/eval | ✅ | +LangSmith | DIY | DIY | partial |
-| Harness evolution substrate | ✅ trigger/role/connectors/taskset/verifier/trajectory/replay/skill-patch/rejected-buffer/dataset/run/report/audit/frontier/export | DIY | DIY | DIY | partial |
+|                                |                                                                                                                                  runoff                                                                                                                                   |  LangGraph   |  CrewAI   |  AutoGen   | OpenHands  |
+| ------------------------------ | :-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------: | :----------: | :-------: | :--------: | :--------: |
+| Declarative config DAG (JSON)  |                                                                                                                                    ✅                                                                                                                                     |  code-first  | Crew/Task | code-first | UI + agent |
+| Git worktree + lock contract   |                                                                                                                                    ✅                                                                                                                                     |      —       |     —     |     —      |  partial   |
+| Provider race + judge pause    |                                                                                                                                    ✅                                                                                                                                     |      —       |     —     |     —      |     —      |
+| MCP tool surface for IDE hosts |                                                                                                                                    ✅                                                                                                                                     |   optional   |  recent   |     —      | different  |
+| Durable run control plane      |                                                                                                                                    ✅                                                                                                                                     | checkpointer |  partial  |  partial   |  partial   |
+| Observation + local trace/eval |                                                                                                                                    ✅                                                                                                                                     |  +LangSmith  |    DIY    |    DIY     |  partial   |
+| Harness evolution substrate    | ✅ local control-plane artifacts + adapter contracts for trigger/role/connectors/taskset/verifier/trajectory/replay/training-export/paddock/sandbox/rollout/reward/rule/feedback/gc/autonomy/context/skill-patch/rejected-buffer/dataset/run/report/audit/frontier/export |     DIY      |    DIY    |    DIY     |  partial   |
 
 Full comparison: [`docs/reference/differentiation.md`](docs/reference/differentiation.md)
 
@@ -179,28 +202,28 @@ bash scripts/shell/check-prereqs.sh
 
 ## Development & CI
 
-| Command | Purpose |
-|---------|---------|
-| `npm test` | Full suite (~800 tests) |
-| `npm run ci:gates` | IPC sync + gate e2e + unit tests |
+| Command                  | Purpose                               |
+| ------------------------ | ------------------------------------- |
+| `npm test`               | Full suite (~800 tests)               |
+| `npm run ci:gates`       | IPC sync + gate e2e + unit tests      |
 | `npm run ci:gates:smoke` | PR smoke (allow-skip without secrets) |
-| `npm run check-ipc-sync` | After `src/core/ipc.ts` changes |
-| `npm run typecheck` | `tsc --noEmit` (required in CI) |
+| `npm run check-ipc-sync` | After `src/core/ipc.ts` changes       |
+| `npm run typecheck`      | `tsc --noEmit` (required in CI)       |
 
 ## Documentation
 
 Full index: [**docs/README.md**](docs/README.md)
 
-| Doc | Topic |
-|-----|-------|
-| [getting-started-30min.md](docs/guides/getting-started-30min.md) | First run → real repo |
-| [coding-agent-backends.md](docs/guides/coding-agent-backends.md) | Codex, Gemini, Claude Code, OpenCode |
-| [race-mode.md](docs/features/race-mode.md) | Running multiple LLMs on the same step |
-| [observability.md](docs/features/observability.md) | Trace + experiment (no LangSmith required) |
-| [differentiation.md](docs/reference/differentiation.md) | vs LangGraph, CrewAI, AutoGen, OpenHands |
-| [security-model.md](docs/architecture/security-model.md) | Threat model (self-hosted) |
-| [structure.md](docs/architecture/structure.md) | `src/` + `scripts/` layout |
-| [advanced/](docs/advanced/README.md) | A2A, Dream, Dreamify (optional) |
+| Doc                                                              | Topic                                      |
+| ---------------------------------------------------------------- | ------------------------------------------ |
+| [getting-started-30min.md](docs/guides/getting-started-30min.md) | First run → real repo                      |
+| [coding-agent-backends.md](docs/guides/coding-agent-backends.md) | Codex, Gemini, Claude Code, OpenCode       |
+| [race-mode.md](docs/features/race-mode.md)                       | Running multiple LLMs on the same step     |
+| [observability.md](docs/features/observability.md)               | Trace + experiment (no LangSmith required) |
+| [differentiation.md](docs/reference/differentiation.md)          | vs LangGraph, CrewAI, AutoGen, OpenHands   |
+| [security-model.md](docs/architecture/security-model.md)         | Threat model (self-hosted)                 |
+| [structure.md](docs/architecture/structure.md)                   | `src/` + `scripts/` layout                 |
+| [advanced/](docs/advanced/README.md)                             | A2A, Dream, Dreamify (optional)            |
 
 ## Features
 
@@ -210,6 +233,7 @@ Full index: [**docs/README.md**](docs/README.md)
 - Governance: policy, guardrails, plan approval gate
 - Checkpoint / resume; durable run store
 - Local trace + experiment logs at `~/.runoff/` (no SaaS required)
+- Local harness evolution control plane for datasets, verifiers, rewards, rules, context routing, acceptance, rollback, and promotion audit bundles
 - Optional: external memory, Dream offline worker, A2A federation (**experimental**)
 
 ## License

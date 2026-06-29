@@ -18,6 +18,7 @@ import {
 import { getPipelineHomeDir } from "../core/paths.js";
 import { loadTraceById } from "./trace.js";
 import { postmortemOneLiner } from "./trace-postmortem.js";
+import type { StageEvaluationHint, StageEvaluationKind } from "./stage-evaluation.js";
 
 export const OBSERVABILITY_DATASET_SCHEMA = "runoff-eval-v1" as const;
 
@@ -104,6 +105,23 @@ export type ExperimentTraceInsight = {
   observationSummary?: string;
 };
 
+export type ExperimentStageEvaluationKindSummary = {
+  kind: StageEvaluationKind;
+  traceCount: number;
+  stepCount: number;
+  stepNames: string[];
+  metricNames: string[];
+  evidenceRefs: string[];
+};
+
+export type ExperimentStageEvaluationSummary = {
+  evaluatedTraceCount: number;
+  stageEvaluationCount: number;
+  missingTraceCount: number;
+  missingStageEvaluationCount: number;
+  byKind: ExperimentStageEvaluationKindSummary[];
+};
+
 export type ExperimentEvalReport = {
   experimentId: string;
   schema: typeof OBSERVABILITY_DATASET_SCHEMA;
@@ -113,9 +131,20 @@ export type ExperimentEvalReport = {
   variants: VariantSummary[];
   winnerVariant?: string;
   recommendation: string;
+  /** Stage-specific metric hints aggregated from PipelineObservation.stageEvaluations. */
+  stageEvaluationSummary: ExperimentStageEvaluationSummary;
   /** Failed / regression runs with one-line postmortem for dashboards. */
   traceInsights?: ExperimentTraceInsight[];
 };
+
+const STAGE_KIND_ORDER: StageEvaluationKind[] = [
+  "analyze",
+  "implement",
+  "review",
+  "test",
+  "final_summary",
+  "other",
+];
 
 function pickWinnerVariant(summaries: VariantSummary[]): string | undefined {
   if (!summaries.length) return undefined;
@@ -165,11 +194,96 @@ function buildTraceInsights(entries: ExperimentEntry[]): ExperimentTraceInsight[
   });
 }
 
+function uniqueSorted(values: Iterable<string>): string[] {
+  return [...new Set([...values])].sort((a, b) => a.localeCompare(b));
+}
+
+type StageEvaluationAccumulator = {
+  traceIds: Set<string>;
+  stepNames: Set<string>;
+  metricNames: Set<string>;
+  evidenceRefs: Set<string>;
+  stepCount: number;
+};
+
+function addStageEvaluationHint(
+  byKind: Map<StageEvaluationKind, StageEvaluationAccumulator>,
+  traceId: string,
+  hint: StageEvaluationHint,
+): void {
+  const acc =
+    byKind.get(hint.kind) ??
+    {
+      traceIds: new Set<string>(),
+      stepNames: new Set<string>(),
+      metricNames: new Set<string>(),
+      evidenceRefs: new Set<string>(),
+      stepCount: 0,
+    };
+
+  acc.traceIds.add(traceId);
+  acc.stepNames.add(hint.stepName);
+  acc.stepCount += 1;
+  for (const metric of hint.metrics) {
+    acc.metricNames.add(metric.name);
+    for (const ref of metric.evidenceRefs) acc.evidenceRefs.add(ref);
+  }
+  byKind.set(hint.kind, acc);
+}
+
+function buildStageEvaluationSummary(entries: ExperimentEntry[]): ExperimentStageEvaluationSummary {
+  const byKind = new Map<StageEvaluationKind, StageEvaluationAccumulator>();
+  const evaluatedTraceIds = new Set<string>();
+  let stageEvaluationCount = 0;
+  let missingTraceCount = 0;
+  let missingStageEvaluationCount = 0;
+
+  for (const entry of entries) {
+    const trace = loadTraceById(entry.traceId);
+    if (!trace) {
+      missingTraceCount += 1;
+      continue;
+    }
+
+    const stageEvaluations = trace.observation?.stageEvaluations ?? [];
+    if (!stageEvaluations.length) {
+      missingStageEvaluationCount += 1;
+      continue;
+    }
+
+    evaluatedTraceIds.add(entry.traceId);
+    stageEvaluationCount += stageEvaluations.length;
+    for (const hint of stageEvaluations) {
+      addStageEvaluationHint(byKind, entry.traceId, hint);
+    }
+  }
+
+  const byKindRows = [...byKind.entries()]
+    .sort(([left], [right]) => STAGE_KIND_ORDER.indexOf(left) - STAGE_KIND_ORDER.indexOf(right))
+    .map(([kind, acc]) => ({
+      kind,
+      traceCount: acc.traceIds.size,
+      stepCount: acc.stepCount,
+      stepNames: uniqueSorted(acc.stepNames),
+      metricNames: uniqueSorted(acc.metricNames),
+      evidenceRefs: uniqueSorted(acc.evidenceRefs),
+    }));
+
+  return {
+    evaluatedTraceCount: evaluatedTraceIds.size,
+    stageEvaluationCount,
+    missingTraceCount,
+    missingStageEvaluationCount,
+    byKind: byKindRows,
+  };
+}
+
 /** Aggregate variant stats + winner for A/B dashboards (Phase 9+). */
 export function buildExperimentEvalReport(experimentId: string): ExperimentEvalReport {
   const entries = queryExperiments({ experimentId });
   const variants = summarizeExperiment(experimentId);
   const winnerVariant = pickWinnerVariant(variants);
+  const stageEvaluationSummary = buildStageEvaluationSummary(entries);
   const traceInsights = buildTraceInsights(entries);
   return {
     experimentId,
@@ -180,6 +294,7 @@ export function buildExperimentEvalReport(experimentId: string): ExperimentEvalR
     variants,
     winnerVariant,
     recommendation: buildRecommendation(experimentId, variants, winnerVariant),
+    stageEvaluationSummary,
     ...(traceInsights.length ? { traceInsights } : {}),
   };
 }

@@ -8,8 +8,10 @@ import {
   queryTraces,
   loadTraceById,
   type TraceQuery,
+  type PipelineTrace,
 } from "../observability/trace.js";
 import { buildTracePostmortem } from "../observability/trace-postmortem.js";
+import { formatResumePlannerTraceShowSection } from "./resume-planner-format.js";
 
 export type TracesListOptions = TraceQuery & { json?: boolean };
 
@@ -41,7 +43,20 @@ export function tracesShow(traceId: string, opts: { postmortem?: boolean; json?:
     console.log(opts.json ? JSON.stringify(pm, null, 2) : formatPostmortemText(pm));
     return;
   }
-  console.log(opts.json ? JSON.stringify(trace, null, 2) : JSON.stringify(trace, null, 2));
+  console.log(opts.json ? JSON.stringify(trace, null, 2) : formatTraceText(trace));
+}
+
+function formatTraceText(trace: PipelineTrace): string {
+  const lines = [
+    `trace=${trace.id}`,
+    `session=${trace.sessionId ?? "—"}`,
+    `status=${trace.finalStatus}`,
+    `steps=${trace.steps.length}`,
+    `duration=${trace.totalDurationMs}ms`,
+    `timestamp=${trace.timestamp}`,
+  ];
+  lines.push(...formatResumePlannerTraceShowSection(trace.resumeReusePlan));
+  return lines.join("\n");
 }
 
 function formatPostmortemText(pm: ReturnType<typeof buildTracePostmortem>): string {

@@ -3,7 +3,15 @@
  * Kept in core/ so orchestration does not depend on src/tools/.
  */
 
-import type { StepResult, PipelineStatus } from "./state.js";
+import type {
+  ObservationClaim,
+  ObservationCoverageGap,
+  ResumeReusePlanReport,
+  ScopePreflightReport,
+  StepContextContract,
+  StepResult,
+  PipelineStatus,
+} from "./state.js";
 
 export interface PipelineParams {
   prompt: string;
@@ -13,6 +21,14 @@ export interface PipelineParams {
   acceptanceCriteria?: string[];
   verifyResults?: string;
   configHash?: string;
+  scopePreflight?: {
+    allowDirtyWorktree?: boolean;
+    allowDocUpdates?: boolean;
+    allowRace?: boolean;
+    verificationCommand?: string;
+    requireVerificationCommand?: boolean;
+    requireCleanWorktree?: boolean;
+  };
   sessionId?: string;
   maxRounds?: number;
   setPipelineTraceId?: (id: string) => void;
@@ -43,6 +59,8 @@ export interface PipelineResult {
   usage: { promptTokens: number; completionTokens: number };
   costBreakdown: Record<string, number>;
   observation?: PipelineObservation;
+  scopePreflight?: ScopePreflightReport;
+  resumeReusePlan?: ResumeReusePlanReport;
   error?: string;
   /** Non-fatal warnings (trace persist, enrichment, etc.). */
   warnings?: string[];
@@ -70,8 +88,22 @@ export interface PipelineObservation {
   summary: string;
   evidence: string[];
   coverageGaps: string[];
+  typedCoverageGaps?: ObservationCoverageGap[];
   stepRefs: PipelineObservationStepRef[];
+  claims?: ObservationClaim[];
+  scopePreflight?: ScopePreflightReport;
+  resumeReusePlan?: ResumeReusePlanReport;
+  contextContract?: StepContextContract;
+  stageEvaluations?: import("../observability/stage-evaluation.js").StageEvaluationHint[];
   traceRef: { traceId: string };
   checkpointRef?: { sessionId: string; status: PipelineStatus };
   nextHint?: string;
 }
+
+export type {
+  ObservationClaim,
+  ObservationCoverageGap,
+  ResumeReusePlanReport,
+  ScopePreflightReport,
+  StepContextContract,
+};

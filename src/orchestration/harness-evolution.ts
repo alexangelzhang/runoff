@@ -18,10 +18,10 @@ import {
   statSync,
   writeFileSync,
 } from "node:fs";
-import { dirname, join, normalize, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { createHash, randomUUID } from "node:crypto";
 import type { LLMProvider, LLMResponse } from "../providers/types.js";
-import { getHarnessEvolutionDir, getTracesDir } from "../core/paths.js";
+import { getTracesDir } from "../core/paths.js";
 import type { PipelineTrace } from "../observability/trace.js";
 import { loadTraceById, queryTraces } from "../observability/trace.js";
 import {
@@ -30,12 +30,108 @@ import {
   safePathSegment,
 } from "./durable-io.js";
 import {
+  auditPath,
+  buildHarnessArtifactIndex,
+  candidateDir,
+  candidatePath,
+  candidatesDir,
+  connectorDefaultPath,
+  connectorsDir,
+  datasetEvaluationPath,
+  datasetPath,
+  datasetsDir,
+  decisionPath,
+  doctorHarnessArtifactStore,
+  frontierPath,
+  frontiersDir,
+  gatePath,
+  isHarnessSurfaceAllowed,
+  normalizeHarnessSurfacePath,
+  paddockPath,
+  paddocksDir,
+  promotionDir,
+  proposalPath,
+  rankingPath,
+  rejectedBufferDir,
+  rejectedEntryPath,
+  replayDir,
+  replayManifestPath,
+  rewardFunctionPath,
+  rewardReportPath,
+  rewardsDir,
+  rolloutBatchPath,
+  rolloutBatchesDir,
+  runDir,
+  runPath,
+  runPlanPath,
+  runReportPath,
+  runsDir,
+  sandboxLeasePath,
+  sandboxesDir,
+  signaturePath,
+  signaturesDir,
+  skillPatchPath,
+  taskSetEvaluationPath,
+  taskSetPath,
+  taskSetsDir,
+  trainingExportDir,
+  trainingExportPath,
+  trainingExportsDir,
+  trainingExportSamplesPath,
+  trajectoriesDir,
+  trajectoryPath,
+  triggerEventPath,
+  triggersDir,
+  triggerScanPath,
+  variantDir,
+  verifierPath,
+  verifiersDir,
+  type HarnessArtifactDoctorReport,
+  type HarnessArtifactIndex,
+} from "./harness-artifact-store.js";
+import {
   compareRegression,
   evaluatePipelineTrace,
   type RegressionTolerance,
 } from "./harness.js";
 
 export const HARNESS_EVOLUTION_SCHEMA = "runoff-harness-evolution-v1" as const;
+
+export {
+  compileHarnessFeedback,
+  createHarnessContextTopology,
+  decideHarnessAutonomy,
+  listHarnessAutonomyDecisions,
+  listHarnessAutonomyPolicies,
+  listHarnessContextRoutes,
+  listHarnessContextTopologies,
+  listHarnessFeedback,
+  listHarnessGcReports,
+  listHarnessRules,
+  loadHarnessAutonomyPolicy,
+  loadHarnessContextTopology,
+  loadHarnessRule,
+  registerHarnessAutonomyPolicy,
+  registerHarnessRule,
+  routeHarnessContext,
+  runHarnessGcLoop,
+  type HarnessAutonomyDecision,
+  type HarnessAutonomyPolicy,
+  type HarnessCompiledFeedback,
+  type HarnessContextNode,
+  type HarnessContextRoute,
+  type HarnessContextTopology,
+  type HarnessGcDebtItem,
+  type HarnessGcReport,
+  type HarnessRule,
+  type HarnessRuleKind,
+} from "./harness-operating-layer.js";
+export {
+  buildHarnessArtifactIndex,
+  doctorHarnessArtifactStore,
+  type HarnessArtifactDoctorReport,
+  type HarnessArtifactIndex,
+} from "./harness-artifact-store.js";
 
 export interface HarnessChangeManifest {
   schema: typeof HARNESS_EVOLUTION_SCHEMA;
@@ -359,6 +455,7 @@ export interface HarnessEvolutionRun {
   bundle?: HarnessPromotionBundle;
   trajectories?: HarnessTrajectory[];
   replay?: HarnessReplayManifest;
+  gateResults?: HarnessGateStageResult[];
   missingCandidateTraceIds: string[];
   artifactRefs: string[];
   nextAction: string;
@@ -529,6 +626,88 @@ export interface HarnessProposalResult {
   historyContextPath?: string;
 }
 
+/**
+ * One iteration of an iterative (GEPA-style) evolution loop.
+ *
+ * Each iteration is a full `proposeHarnessCandidate` call against its own
+ * candidateId, scored by a cheap local heuristic so the loop can reflect and
+ * improve without paying for an LLM judge on every round.
+ */
+export interface HarnessIterationRecord {
+  iteration: number;
+  candidateId: string;
+  score: number;
+  feedback: string;
+  filesModified: string[];
+  diffStat?: string;
+  durationMs: number;
+  skipped?: boolean;
+  skipReason?: string;
+}
+
+/**
+ * Result of an iterative evolution run that wraps `proposeHarnessCandidate`
+ * in a reflect-and-improve loop and returns the best-scoring iteration.
+ */
+export interface HarnessEvolutionResult {
+  schema: typeof HARNESS_EVOLUTION_SCHEMA;
+  baseCandidateId: string;
+  totalIterations: number;
+  bestIteration: number;
+  bestScore: number;
+  earlyStopped: boolean;
+  history: HarnessIterationRecord[];
+  finalCandidate: HarnessCandidateRecord;
+  finalProposal: HarnessProposalResult;
+}
+
+/**
+ * Rubric for the LLM-as-judge fitness function. Mirrors Hermes-ASE's
+ * multi-dimensional scoring (correctness / procedure / conciseness) with a
+ * length penalty to discourage evolutionary bloat.
+ */
+export interface HarnessLLMJudgeRubric {
+  correctnessWeight: number;
+  procedureWeight: number;
+  concisenessWeight: number;
+  /** Size ratio (evolved/baseline) above which a length penalty starts. */
+  lengthPenaltyThreshold?: number;
+}
+
+export const DEFAULT_LLM_JUDGE_RUBRIC: HarnessLLMJudgeRubric = {
+  correctnessWeight: 0.5,
+  procedureWeight: 0.3,
+  concisenessWeight: 0.2,
+  lengthPenaltyThreshold: 1.2,
+};
+
+/**
+ * A single stage in the graded gate pipeline. Encodes the Hermes-ASE
+ * principle "benchmarks are GATES, not fitness functions": constraint and
+ * benchmark stages can reject a candidate, while fitness stages only score.
+ */
+export interface HarnessGateStage {
+  name: string;
+  kind: "constraint" | "quick_fitness" | "fitness" | "full_benchmark" | "coherence";
+  required: boolean;
+  order: number;
+}
+
+export const DEFAULT_GATE_STAGES: HarnessGateStage[] = [
+  { name: "constraints", kind: "constraint", required: true, order: 1 },
+  { name: "quick_fitness", kind: "quick_fitness", required: false, order: 2 },
+  { name: "dataset_gate", kind: "fitness", required: true, order: 3 },
+  { name: "audit", kind: "coherence", required: true, order: 4 },
+];
+
+export interface HarnessGateStageResult {
+  stage: HarnessGateStage;
+  passed: boolean;
+  score?: number;
+  feedback?: string;
+  durationMs: number;
+}
+
 export interface HarnessPromotionBundle {
   schema: typeof HARNESS_EVOLUTION_SCHEMA;
   candidateId: string;
@@ -634,6 +813,186 @@ export interface HarnessRejectedBufferEntry {
   optimizerOnly: true;
 }
 
+export type HarnessTrainingExportFormat =
+  | "runoff_training_jsonl"
+  | "dressage_compatible_jsonl";
+
+export interface HarnessTrainingSample {
+  sampleId: string;
+  trajectoryId: string;
+  traceId: string;
+  taskId?: string;
+  runId?: string;
+  candidateId?: string;
+  prompt: string;
+  messages: Array<{
+    role: "user" | "assistant" | "tool" | "system";
+    content: string;
+    source: string;
+  }>;
+  steps: HarnessTrajectoryStep[];
+  outcome: {
+    completed: boolean;
+    score: number;
+    finalStatus?: PipelineTrace["finalStatus"];
+    totalRounds?: number;
+    totalDurationMs?: number;
+  };
+  usage?: PipelineTrace["totalUsage"];
+  rewardRefs: string[];
+  provenance: {
+    tracePath?: string;
+    trajectoryPath: string;
+    artifactHashes: HarnessTrajectory["artifactHashes"];
+  };
+}
+
+export interface HarnessTrainingTrajectoryExport {
+  schema: typeof HARNESS_EVOLUTION_SCHEMA;
+  exportId: string;
+  createdAt: string;
+  format: HarnessTrainingExportFormat;
+  taskSetId?: string;
+  candidateId?: string;
+  trajectoryIds: string[];
+  sampleCount: number;
+  manifestPath: string;
+  samplesPath: string;
+  artifactRefs: string[];
+  tokenTelemetry: {
+    status: "not_captured" | "partial";
+    availableFields: string[];
+    note: string;
+  };
+  samples: HarnessTrainingSample[];
+}
+
+export type HarnessPaddockAdapterKind =
+  | "local_cli"
+  | "mcp_host"
+  | "http_blackbox";
+
+export type HarnessPaddockProtocol =
+  | "runoff_provider"
+  | "openai_compatible"
+  | "blackbox_http";
+
+export interface HarnessPaddockAdapter {
+  schema: typeof HARNESS_EVOLUTION_SCHEMA;
+  paddockId: string;
+  createdAt: string;
+  kind: HarnessPaddockAdapterKind;
+  protocol: HarnessPaddockProtocol;
+  summary: string;
+  command?: string[];
+  endpoint?: string;
+  toolsets: string[];
+  capabilities: string[];
+  headerNames: string[];
+  isolationRequired: boolean;
+}
+
+export type HarnessSandboxProvider =
+  | "local_worktree"
+  | "local_directory"
+  | "remote_e2b"
+  | "custom";
+
+export interface HarnessSandboxSpec {
+  provider: HarnessSandboxProvider;
+  workspaceRoot?: string;
+  serviceEndpoints: string[];
+  cleanupPolicy: "manual" | "on_release" | "ephemeral";
+  artifactArchive?: string;
+  metadata?: Record<string, string>;
+}
+
+export interface HarnessSandboxLease {
+  schema: typeof HARNESS_EVOLUTION_SCHEMA;
+  leaseId: string;
+  createdAt: string;
+  updatedAt: string;
+  status: "active" | "released";
+  candidateId?: string;
+  taskSetId?: string;
+  spec: HarnessSandboxSpec;
+  variantDir?: string;
+  releaseReason?: string;
+}
+
+export type HarnessRolloutMode = "sync" | "async" | "partial";
+
+export interface HarnessRolloutItem {
+  itemId: string;
+  taskId: string;
+  status: "planned" | "running" | "completed" | "blocked";
+  candidateTraceId?: string;
+  baselineTraceId?: string;
+  trajectoryId?: string;
+  sandboxLeaseId?: string;
+  reward?: number;
+  reason?: string;
+}
+
+export interface HarnessRolloutBatch {
+  schema: typeof HARNESS_EVOLUTION_SCHEMA;
+  batchId: string;
+  createdAt: string;
+  updatedAt: string;
+  mode: HarnessRolloutMode;
+  status: "planned" | "running" | "completed" | "blocked";
+  taskSetId: string;
+  candidateId: string;
+  paddockId?: string;
+  sandboxLeaseIds: string[];
+  candidateTraceIdsByTask: Record<string, string>;
+  trainingExportId?: string;
+  rewardReportId?: string;
+  items: HarnessRolloutItem[];
+  reason?: string;
+}
+
+export type HarnessRewardFunctionKind =
+  | "verifier_score"
+  | "binary_success"
+  | "regression_delta"
+  | "policy_safe"
+  | "heuristic_overlap"
+  | "llm_judge"
+  | "custom";
+
+export interface HarnessRewardFunction {
+  schema: typeof HARNESS_EVOLUTION_SCHEMA;
+  rewardId: string;
+  createdAt: string;
+  kind: HarnessRewardFunctionKind;
+  summary: string;
+  weight: number;
+  sourceVerifierId?: string;
+  rubric?: string;
+}
+
+export interface HarnessRewardReport {
+  schema: typeof HARNESS_EVOLUTION_SCHEMA;
+  reportId: string;
+  createdAt: string;
+  rewardId: string;
+  taskSetId: string;
+  candidateId: string;
+  evaluationPath?: string;
+  rolloutBatchId?: string;
+  trainingExportId?: string;
+  rewards: Array<{
+    taskId: string;
+    reward: number;
+    sourceScore: number;
+    passed: boolean;
+    reason: string;
+  }>;
+  aggregateReward: number;
+  accepted: boolean;
+}
+
 interface FileSnapshotEntry {
   hash: string;
   size: number;
@@ -647,183 +1006,8 @@ interface VariantDiff {
   diffStat: string;
 }
 
-function evolutionDir(): string {
-  return getHarnessEvolutionDir();
-}
-
-function candidatesDir(): string {
-  return join(evolutionDir(), "candidates");
-}
-
-function signaturesDir(): string {
-  return join(evolutionDir(), "failure-signatures");
-}
-
-function datasetsDir(): string {
-  return join(evolutionDir(), "datasets");
-}
-
-function taskSetsDir(): string {
-  return join(evolutionDir(), "tasksets");
-}
-
-function verifiersDir(): string {
-  return join(evolutionDir(), "verifiers");
-}
-
-function frontiersDir(): string {
-  return join(evolutionDir(), "frontiers");
-}
-
-function runsDir(): string {
-  return join(evolutionDir(), "runs");
-}
-
-function trajectoriesDir(): string {
-  return join(evolutionDir(), "trajectories");
-}
-
-function replayDir(): string {
-  return join(evolutionDir(), "replay");
-}
-
-function rejectedBufferDir(): string {
-  return join(evolutionDir(), "rejected-buffer");
-}
-
-function triggersDir(): string {
-  return join(evolutionDir(), "triggers");
-}
-
-function connectorsDir(): string {
-  return join(evolutionDir(), "connectors");
-}
-
-function candidateDir(candidateId: string): string {
-  return join(candidatesDir(), safePathSegment(candidateId));
-}
-
-function candidatePath(candidateId: string): string {
-  return join(candidateDir(candidateId), "candidate.json");
-}
-
-function signaturePath(signatureId: string): string {
-  return join(signaturesDir(), `${safePathSegment(signatureId)}.json`);
-}
-
-function datasetPath(datasetId: string): string {
-  return join(datasetsDir(), `${safePathSegment(datasetId)}.json`);
-}
-
-function datasetEvaluationPath(datasetId: string, candidateId: string): string {
-  return join(
-    datasetsDir(),
-    safePathSegment(datasetId),
-    "evaluations",
-    `${safePathSegment(candidateId)}.json`,
-  );
-}
-
-function verifierPath(verifierId: string): string {
-  return join(verifiersDir(), `${safePathSegment(verifierId)}.json`);
-}
-
-function taskSetPath(taskSetId: string): string {
-  return join(taskSetsDir(), `${safePathSegment(taskSetId)}.json`);
-}
-
-function taskSetEvaluationPath(taskSetId: string, candidateId: string): string {
-  return join(
-    taskSetsDir(),
-    safePathSegment(taskSetId),
-    "evaluations",
-    `${safePathSegment(candidateId)}.json`,
-  );
-}
-
-function frontierPath(frontierId = "default"): string {
-  return join(frontiersDir(), `${safePathSegment(frontierId)}.json`);
-}
-
-function runDir(runId: string): string {
-  return join(runsDir(), safePathSegment(runId));
-}
-
-function runPath(runId: string): string {
-  return join(runDir(runId), "run.json");
-}
-
-function runPlanPath(runId: string): string {
-  return join(runDir(runId), "plan.json");
-}
-
-function runReportPath(runId: string): string {
-  return join(runDir(runId), "report.json");
-}
-
-function trajectoryPath(trajectoryId: string): string {
-  return join(trajectoriesDir(), `${safePathSegment(trajectoryId)}.json`);
-}
-
-function replayManifestPath(replayId: string): string {
-  return join(replayDir(), `${safePathSegment(replayId)}.json`);
-}
-
-function triggerEventPath(eventId: string): string {
-  return join(triggersDir(), "events", `${safePathSegment(eventId)}.json`);
-}
-
-function triggerScanPath(scanId: string): string {
-  return join(triggersDir(), "scans", `${safePathSegment(scanId)}.json`);
-}
-
-function connectorDefaultPath(
-  runId: string,
-  kind: HarnessConnectorKind,
-): string {
-  const extension = kind === "markdown" ? "md" : "jsonl";
-  return join(connectorsDir(), `${safePathSegment(runId)}.${extension}`);
-}
-
-function gatePath(candidateId: string): string {
-  return join(candidateDir(candidateId), "gate.json");
-}
-
-function rankingPath(candidateId: string): string {
-  return join(candidateDir(candidateId), "ranking.json");
-}
-
-function decisionPath(candidateId: string): string {
-  return join(candidateDir(candidateId), "decision.json");
-}
-
-function skillPatchPath(candidateId: string): string {
-  return join(candidateDir(candidateId), "skill-patch.json");
-}
-
-function proposalPath(candidateId: string): string {
-  return join(candidateDir(candidateId), "proposal.json");
-}
-
-function promotionDir(candidateId: string): string {
-  return join(candidateDir(candidateId), "promotion");
-}
-
-function auditPath(candidateId: string): string {
-  return join(candidateDir(candidateId), "audit.json");
-}
-
-function rejectedEntryPath(rejectedId: string): string {
-  return join(rejectedBufferDir(), `${safePathSegment(rejectedId)}.json`);
-}
-
-function variantDir(candidateId: string): string {
-  return join(candidateDir(candidateId), "variant");
-}
-
-function normalizeSurfacePath(path: string): string {
-  return normalize(path).replace(/\\/g, "/").replace(/^\.\//, "");
-}
+const normalizeSurfacePath = normalizeHarnessSurfacePath;
+const isAllowedBySurface = isHarnessSurfaceAllowed;
 
 function snapshotVariantFiles(
   dir: string,
@@ -1235,6 +1419,272 @@ export async function proposeHarnessCandidate(input: {
   atomicWriteJson(candidatePath(candidate.candidateId), next);
   atomicWriteJson(proposalPath(candidate.candidateId), proposal);
   return { candidate: next, proposal };
+}
+
+/**
+ * Cheap, local fitness heuristic — zero API calls. Used inside the iterative
+ * evolution loop to score every round so reflection can proceed without an
+ * LLM judge. Mirrors Hermes-ASE's keyword-overlap proxy plus a length penalty.
+ *
+ * Score (0-1) is composed of:
+ *  - 0.30 base for producing a non-empty diff
+ *  - 0.30 weighted by how many declared expectedFixes appear in the diff
+ *  - 0.20 for passing constraints
+ *  - 0.20 weighted by (1 - lengthPenalty), where the penalty ramps once the
+ *    evolved artifact grows past 90% of the allowed growth budget
+ */
+export function heuristicFitness(input: {
+  expectedFixes: string[];
+  observedDiff: string;
+  constraintsPassed: boolean;
+  baselineSize: number;
+  evolvedSize: number;
+}): { score: number; feedback: string } {
+  const diff = input.observedDiff ?? "";
+  const hasDiff = diff.trim().length > 0;
+  if (!hasDiff) {
+    return { score: 0, feedback: "no diff produced" };
+  }
+
+  const diffLower = diff.toLowerCase();
+  const fixes = input.expectedFixes.filter((f) => f.trim().length > 0);
+  let matched = 0;
+  for (const fix of fixes) {
+    const tokens = fix
+      .toLowerCase()
+      .match(/[a-z0-9_]{3,}/g)
+      ?.filter((t) => t.length >= 3);
+    if (!tokens || tokens.length === 0) continue;
+    const hit = tokens.filter((t) => diffLower.includes(t)).length / tokens.length;
+    if (hit >= 0.5) matched += 1;
+  }
+  const fixRatio = fixes.length ? matched / fixes.length : 1;
+
+  // Length penalty: ramps from 0 at 90% growth ratio to 0.3 at >=100%.
+  let lengthPenalty = 0;
+  if (input.baselineSize > 0) {
+    const ratio = input.evolvedSize / input.baselineSize;
+    if (ratio > 1.9) lengthPenalty = 0.3;
+    else if (ratio > 1.0) lengthPenalty = Math.min(0.3, (ratio - 1.0) * 0.333);
+  }
+
+  const raw =
+    0.3 +
+    0.3 * fixRatio +
+    0.2 * (input.constraintsPassed ? 1 : 0) +
+    0.2 * (1 - Math.min(1, lengthPenalty / 0.2));
+  const score = Number(Math.max(0, Math.min(1, raw)).toFixed(4));
+
+  const feedback = [
+    `matched fixes: ${matched}/${fixes.length}`,
+    `constraints: ${input.constraintsPassed ? "pass" : "fail"}`,
+    `size: ${input.baselineSize}→${input.evolvedSize} chars`,
+    lengthPenalty > 0 ? `length penalty: -${lengthPenalty.toFixed(2)}` : "no length penalty",
+  ].join("; ");
+
+  return { score, feedback };
+}
+
+function variantSurfaceSize(record: HarnessCandidateRecord): number {
+  const files =
+    record.proposal?.observedFilesModified?.length
+      ? record.proposal.observedFilesModified
+      : record.manifest.editableSurface;
+  return readVariantTextFiles(record, files).reduce(
+    (sum, f) => sum + f.text.length,
+    0,
+  );
+}
+
+function buildReflectionInstructions(
+  base: string | undefined,
+  previous: HarnessIterationRecord,
+  previousProposal: HarnessProposalResult | undefined,
+): string {
+  return [
+    base?.trim() || "Make the smallest harness change that satisfies the manifest.",
+    "",
+    "--- Reflection on the previous attempt ---",
+    `Previous iteration ${previous.iteration} scored ${previous.score.toFixed(3)}/1.0.`,
+    `Score breakdown: ${previous.feedback}`,
+    previousProposal?.summary
+      ? `Previous change summary: ${previousProposal.summary}`
+      : "",
+    previousProposal?.observedDiffStat
+      ? `Previous diff stat: ${previousProposal.observedDiffStat}`
+      : "",
+    previousProposal?.surfaceViolations?.length
+      ? `Previous attempt edited files outside the allowed surface: ${previousProposal.surfaceViolations.join(", ")}. Stay within the editable surface this time.`
+      : "",
+    "Improve on the previous attempt: address the unmatched expected fixes, keep the change concise, and stay within the editable surface.",
+  ]
+    .filter((line) => line !== "")
+    .join("\n");
+}
+
+/**
+ * GEPA-style iterative evolution. Wraps {@link proposeHarnessCandidate} in a
+ * reflect-and-improve loop: each round produces a fresh candidate variant,
+ * scores it with the cheap local {@link heuristicFitness}, then feeds the diff
+ * and score back into the next round's prompt as reflection. Returns the
+ * best-scoring iteration.
+ *
+ * This does not import DSPy/GEPA — it reuses runoff's existing provider,
+ * variant isolation, and editable-surface contract. To plug in a real GEPA
+ * optimizer process, expose it as a cli/MCP provider and pass it as `provider`.
+ */
+export async function evolveHarnessCandidate(input: {
+  provider: LLMProvider;
+  candidateId?: string;
+  summary?: string;
+  sourceDir?: string;
+  editableSurface?: string[];
+  expectedFixes?: string[];
+  possibleRegressions?: string[];
+  evidenceTraceIds?: string[];
+  failureSignatureIds?: string[];
+  parentCandidateIds?: string[];
+  datasetIds?: string[];
+  instructions?: string;
+  iterations?: number;
+  earlyStopThreshold?: number;
+  reflectOnTrajectory?: boolean;
+}): Promise<HarnessEvolutionResult> {
+  const maxIterations = Math.max(1, Math.min(20, input.iterations ?? 5));
+  const earlyStop = input.earlyStopThreshold ?? 0.9;
+  const reflect = input.reflectOnTrajectory !== false;
+  const baseId =
+    input.candidateId?.trim() || `evolve-${randomUUID().slice(0, 8)}`;
+
+  const history: HarnessIterationRecord[] = [];
+  let best:
+    | { record: HarnessCandidateRecord; proposal: HarnessProposalResult; score: number; iteration: number }
+    | undefined;
+  let previousParents = input.parentCandidateIds ?? [];
+  let earlyStopped = false;
+
+  for (let iteration = 0; iteration < maxIterations; iteration++) {
+    const started = Date.now();
+    const iterationCandidateId = `${baseId}-iter-${iteration}`;
+
+    let instructions = input.instructions;
+    if (reflect && iteration > 0 && history.length) {
+      const prev = history[history.length - 1]!;
+      const prevRecord = loadHarnessCandidate(prev.candidateId);
+      instructions = buildReflectionInstructions(
+        input.instructions,
+        prev,
+        prevRecord?.proposal,
+      );
+    }
+
+    const { candidate, proposal } = await proposeHarnessCandidate({
+      candidateId: iterationCandidateId,
+      provider: input.provider,
+      summary: input.summary,
+      sourceDir: input.sourceDir,
+      editableSurface: input.editableSurface,
+      expectedFixes: input.expectedFixes,
+      possibleRegressions: input.possibleRegressions,
+      evidenceTraceIds: input.evidenceTraceIds,
+      failureSignatureIds: input.failureSignatureIds,
+      parentCandidateIds: previousParents,
+      datasetIds: input.datasetIds,
+      instructions,
+    });
+    previousParents = [iterationCandidateId];
+
+    // Constraint gate: a failed proposal (e.g. surface violation) is skipped.
+    if (proposal.failed) {
+      const record: HarnessIterationRecord = {
+        iteration,
+        candidateId: iterationCandidateId,
+        score: 0,
+        feedback: proposal.error ?? "proposal failed constraints",
+        filesModified: proposal.filesModified,
+        diffStat: proposal.diffStat,
+        durationMs: Date.now() - started,
+        skipped: true,
+        skipReason: proposal.error ?? "proposal failed",
+      };
+      history.push(record);
+      continue;
+    }
+
+    const evolvedSize = variantSurfaceSize(candidate);
+    const baselineSize = input.sourceDir
+      ? readVariantTextFiles(
+          { ...candidate, variant: { ...candidate.variant, variantDir: input.sourceDir } },
+          proposal.observedFilesModified.length
+            ? proposal.observedFilesModified
+            : candidate.manifest.editableSurface,
+        ).reduce((sum, f) => sum + f.text.length, 0)
+      : evolvedSize;
+
+    const fitness = heuristicFitness({
+      expectedFixes: candidate.manifest.expectedFixes,
+      observedDiff: [
+        proposal.observedDiffStat,
+        proposal.diffStat,
+        proposal.summary,
+      ]
+        .filter(Boolean)
+        .join(" "),
+      constraintsPassed: !proposal.failed,
+      baselineSize,
+      evolvedSize,
+    });
+
+    const record: HarnessIterationRecord = {
+      iteration,
+      candidateId: iterationCandidateId,
+      score: fitness.score,
+      feedback: fitness.feedback,
+      filesModified: proposal.filesModified,
+      diffStat: proposal.diffStat,
+      durationMs: Date.now() - started,
+    };
+    history.push(record);
+
+    if (!best || fitness.score > best.score) {
+      best = { record: candidate, proposal, score: fitness.score, iteration };
+    }
+    if (fitness.score >= earlyStop) {
+      earlyStopped = true;
+      break;
+    }
+  }
+
+  // If every iteration was skipped, fall back to the last attempt so callers
+  // always get a concrete candidate to inspect.
+  if (!best) {
+    const lastId = history[history.length - 1]?.candidateId ?? `${baseId}-iter-0`;
+    const fallback = loadHarnessCandidate(lastId);
+    if (!fallback?.proposal) {
+      throw new Error(
+        `Harness evolution produced no usable candidate (base ${baseId})`,
+      );
+    }
+    best = {
+      record: fallback,
+      proposal: fallback.proposal,
+      score: 0,
+      iteration: history[history.length - 1]?.iteration ?? 0,
+    };
+  }
+
+  const result: HarnessEvolutionResult = {
+    schema: HARNESS_EVOLUTION_SCHEMA,
+    baseCandidateId: baseId,
+    totalIterations: history.length,
+    bestIteration: best.iteration,
+    bestScore: best.score,
+    earlyStopped,
+    history,
+    finalCandidate: best.record,
+    finalProposal: best.proposal,
+  };
+  return result;
 }
 
 function traceDifficulty(trace: PipelineTrace): number {
@@ -2023,6 +2473,684 @@ export function createHarnessReplayManifest(input: {
   mkdirSync(replayDir(), { recursive: true });
   atomicWriteJson(replayManifestPath(replayId), replay);
   return replay;
+}
+
+function trainingSampleFromTrajectory(
+  trajectory: HarnessTrajectory,
+  rewardRefs: string[],
+): HarnessTrainingSample {
+  const trace = loadTraceById(trajectory.traceId);
+  const messages: HarnessTrainingSample["messages"] = [];
+  if (trace?.prompt) {
+    messages.push({
+      role: "user",
+      content: trace.prompt,
+      source: "pipeline_trace.prompt",
+    });
+  }
+  for (const step of trace?.steps ?? []) {
+    if (step.observation?.summary) {
+      messages.push({
+        role: "assistant",
+        content: step.observation.summary,
+        source: `step.${step.name}.observation.summary`,
+      });
+    }
+    for (const ref of step.observation?.artifactRefs ?? []) {
+      messages.push({
+        role: "tool",
+        content:
+          ref.ref ||
+          ref.artifactId ||
+          `${ref.stepName}:${ref.kind}:${ref.artifactIndex}`,
+        source: `step.${step.name}.artifact_ref`,
+      });
+    }
+  }
+  return {
+    sampleId: `sample-${trajectory.trajectoryId}`,
+    trajectoryId: trajectory.trajectoryId,
+    traceId: trajectory.traceId,
+    taskId: trajectory.taskId,
+    runId: trajectory.runId,
+    candidateId: trajectory.candidateId,
+    prompt: trace?.prompt ?? "",
+    messages,
+    steps: trajectory.steps,
+    outcome: {
+      completed: trajectory.completed,
+      score: trajectory.score,
+      finalStatus: trace?.finalStatus,
+      totalRounds: trace?.totalRounds,
+      totalDurationMs: trace?.totalDurationMs,
+    },
+    usage: trace?.totalUsage,
+    rewardRefs,
+    provenance: {
+      tracePath: trajectory.tracePath,
+      trajectoryPath: trajectory.trajectoryPath,
+      artifactHashes: trajectory.artifactHashes,
+    },
+  };
+}
+
+function writeJsonLines(path: string, rows: unknown[]): void {
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(
+    path,
+    rows.map((row) => JSON.stringify(row)).join("\n") +
+      (rows.length ? "\n" : ""),
+    "utf-8",
+  );
+}
+
+export function exportHarnessTrainingTrajectories(input: {
+  exportId?: string;
+  trajectoryIds: string[];
+  taskSetId?: string;
+  candidateId?: string;
+  format?: HarnessTrainingExportFormat;
+  rewardRefs?: string[];
+}): HarnessTrainingTrajectoryExport {
+  const exportId =
+    input.exportId?.trim() || `train-export-${randomUUID().slice(0, 8)}`;
+  const trajectories = input.trajectoryIds.flatMap((id) => {
+    const trajectory = loadHarnessTrajectory(id);
+    return trajectory ? [trajectory] : [];
+  });
+  if (!trajectories.length)
+    throw new Error("Training export requires at least one known trajectory");
+  const samplesPath = trainingExportSamplesPath(exportId);
+  const manifestPath = trainingExportPath(exportId);
+  const samples = trajectories.map((trajectory) =>
+    trainingSampleFromTrajectory(trajectory, input.rewardRefs ?? []),
+  );
+  const availableFields = [
+    "prompt",
+    "step.provider",
+    "step.durationMs",
+    "step.filesModified",
+    "step.observation.summary",
+    "usage.promptTokens",
+    "usage.completionTokens",
+  ];
+  const exportRecord: HarnessTrainingTrajectoryExport = {
+    schema: HARNESS_EVOLUTION_SCHEMA,
+    exportId,
+    createdAt: new Date().toISOString(),
+    format: input.format ?? "runoff_training_jsonl",
+    taskSetId: input.taskSetId,
+    candidateId: input.candidateId,
+    trajectoryIds: input.trajectoryIds,
+    sampleCount: samples.length,
+    manifestPath,
+    samplesPath,
+    artifactRefs: [
+      ...new Set(
+        samples.flatMap((sample) => [
+          sample.provenance.trajectoryPath,
+          ...(sample.provenance.tracePath ? [sample.provenance.tracePath] : []),
+          ...sample.provenance.artifactHashes.map((hash) => hash.path),
+        ]),
+      ),
+    ],
+    tokenTelemetry: {
+      status: "not_captured",
+      availableFields,
+      note: "runoff traces do not capture token-level logprobs/loss masks; export preserves available usage and step telemetry without fabricating trainer-only fields.",
+    },
+    samples,
+  };
+  writeJsonLines(samplesPath, samples);
+  atomicWriteJson(manifestPath, exportRecord);
+  return exportRecord;
+}
+
+export function listHarnessTrainingExports(
+  limit = 20,
+): HarnessTrainingTrajectoryExport[] {
+  if (!existsSync(trainingExportsDir())) return [];
+  return readdirSync(trainingExportsDir())
+    .flatMap((name) => {
+      const record = readJsonFile<HarnessTrainingTrajectoryExport>(
+        join(trainingExportsDir(), name, "manifest.json"),
+      );
+      return record ? [record] : [];
+    })
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+    .slice(0, Math.max(1, limit));
+}
+
+export function registerHarnessPaddockAdapter(input: {
+  paddockId?: string;
+  kind: HarnessPaddockAdapterKind;
+  protocol: HarnessPaddockProtocol;
+  summary: string;
+  command?: string[];
+  endpoint?: string;
+  toolsets?: string[];
+  capabilities?: string[];
+  headerNames?: string[];
+  isolationRequired?: boolean;
+}): HarnessPaddockAdapter {
+  const paddockId =
+    input.paddockId?.trim() || `paddock-${randomUUID().slice(0, 8)}`;
+  if (input.kind === "local_cli" && !input.command?.length)
+    throw new Error("local_cli paddock adapter requires command");
+  if (input.kind === "http_blackbox" && !input.endpoint?.trim())
+    throw new Error("http_blackbox paddock adapter requires endpoint");
+  const adapter: HarnessPaddockAdapter = {
+    schema: HARNESS_EVOLUTION_SCHEMA,
+    paddockId,
+    createdAt: new Date().toISOString(),
+    kind: input.kind,
+    protocol: input.protocol,
+    summary: input.summary,
+    command: input.command,
+    endpoint: input.endpoint,
+    toolsets: [...new Set(input.toolsets ?? [])].sort(),
+    capabilities: [...new Set(input.capabilities ?? [])].sort(),
+    headerNames: [...new Set(input.headerNames ?? [])].sort(),
+    isolationRequired: input.isolationRequired ?? true,
+  };
+  mkdirSync(paddocksDir(), { recursive: true });
+  atomicWriteJson(paddockPath(paddockId), adapter);
+  return adapter;
+}
+
+export function loadHarnessPaddockAdapter(
+  paddockId: string,
+): HarnessPaddockAdapter | undefined {
+  return readJsonFile<HarnessPaddockAdapter>(paddockPath(paddockId));
+}
+
+export function listHarnessPaddockAdapters(
+  limit = 20,
+): HarnessPaddockAdapter[] {
+  if (!existsSync(paddocksDir())) return [];
+  return readdirSync(paddocksDir())
+    .flatMap((name) => {
+      const adapter = readJsonFile<HarnessPaddockAdapter>(
+        join(paddocksDir(), name),
+      );
+      return adapter ? [adapter] : [];
+    })
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+    .slice(0, Math.max(1, limit));
+}
+
+export function createHarnessSandboxLease(input: {
+  leaseId?: string;
+  candidateId?: string;
+  taskSetId?: string;
+  spec: HarnessSandboxSpec;
+}): HarnessSandboxLease {
+  const leaseId =
+    input.leaseId?.trim() || `sandbox-${randomUUID().slice(0, 8)}`;
+  const candidate = input.candidateId
+    ? loadHarnessCandidate(input.candidateId)
+    : undefined;
+  if (input.candidateId && !candidate)
+    throw new Error(`Harness candidate not found: ${input.candidateId}`);
+  if (input.taskSetId && !loadHarnessTaskSet(input.taskSetId))
+    throw new Error(`Harness task set not found: ${input.taskSetId}`);
+  const now = new Date().toISOString();
+  const lease: HarnessSandboxLease = {
+    schema: HARNESS_EVOLUTION_SCHEMA,
+    leaseId,
+    createdAt: now,
+    updatedAt: now,
+    status: "active",
+    candidateId: input.candidateId,
+    taskSetId: input.taskSetId,
+    spec: {
+      ...input.spec,
+      serviceEndpoints: [...new Set(input.spec.serviceEndpoints ?? [])].sort(),
+    },
+    variantDir: candidate?.variant.variantDir,
+  };
+  mkdirSync(sandboxesDir(), { recursive: true });
+  atomicWriteJson(sandboxLeasePath(leaseId), lease);
+  return lease;
+}
+
+export function loadHarnessSandboxLease(
+  leaseId: string,
+): HarnessSandboxLease | undefined {
+  return readJsonFile<HarnessSandboxLease>(sandboxLeasePath(leaseId));
+}
+
+export function listHarnessSandboxLeases(limit = 20): HarnessSandboxLease[] {
+  if (!existsSync(sandboxesDir())) return [];
+  return readdirSync(sandboxesDir())
+    .flatMap((name) => {
+      const lease = readJsonFile<HarnessSandboxLease>(
+        join(sandboxesDir(), name),
+      );
+      return lease ? [lease] : [];
+    })
+    .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+    .slice(0, Math.max(1, limit));
+}
+
+export function releaseHarnessSandboxLease(input: {
+  leaseId: string;
+  reason?: string;
+}): HarnessSandboxLease {
+  const lease = loadHarnessSandboxLease(input.leaseId);
+  if (!lease)
+    throw new Error(`Harness sandbox lease not found: ${input.leaseId}`);
+  const released: HarnessSandboxLease = {
+    ...lease,
+    updatedAt: new Date().toISOString(),
+    status: "released",
+    releaseReason: input.reason ?? "released by harness control plane",
+  };
+  atomicWriteJson(sandboxLeasePath(input.leaseId), released);
+  return released;
+}
+
+function rolloutItemsFromTaskSet(
+  taskSet: HarnessTaskSet,
+  candidateTraceIdsByTask: Record<string, string>,
+  sandboxLeaseIds: string[],
+): HarnessRolloutItem[] {
+  return taskSet.tasks.map((task, index) => {
+    const candidateTraceId = candidateTraceIdsByTask[task.taskId];
+    return {
+      itemId: `rollout-item-${task.taskId}`,
+      taskId: task.taskId,
+      status: candidateTraceId ? "completed" : "planned",
+      candidateTraceId,
+      baselineTraceId: task.sourceTraceId,
+      sandboxLeaseId:
+        sandboxLeaseIds[index % Math.max(1, sandboxLeaseIds.length)],
+    };
+  });
+}
+
+export function createHarnessRolloutBatch(input: {
+  batchId?: string;
+  mode?: HarnessRolloutMode;
+  taskSetId: string;
+  candidateId: string;
+  paddockId?: string;
+  sandboxLeaseIds?: string[];
+  candidateTraceIdsByTask?: Record<string, string>;
+  trainingExportId?: string;
+  rewardReportId?: string;
+}): HarnessRolloutBatch {
+  const taskSet = loadHarnessTaskSet(input.taskSetId);
+  if (!taskSet)
+    throw new Error(`Harness task set not found: ${input.taskSetId}`);
+  if (!loadHarnessCandidate(input.candidateId))
+    throw new Error(`Harness candidate not found: ${input.candidateId}`);
+  if (input.paddockId && !loadHarnessPaddockAdapter(input.paddockId))
+    throw new Error(`Harness paddock adapter not found: ${input.paddockId}`);
+  for (const leaseId of input.sandboxLeaseIds ?? []) {
+    if (!loadHarnessSandboxLease(leaseId))
+      throw new Error(`Harness sandbox lease not found: ${leaseId}`);
+  }
+  const batchId =
+    input.batchId?.trim() || `rollout-${randomUUID().slice(0, 8)}`;
+  const items = rolloutItemsFromTaskSet(
+    taskSet,
+    input.candidateTraceIdsByTask ?? {},
+    input.sandboxLeaseIds ?? [],
+  );
+  const completed = items.filter((item) => item.status === "completed").length;
+  const now = new Date().toISOString();
+  const batch: HarnessRolloutBatch = {
+    schema: HARNESS_EVOLUTION_SCHEMA,
+    batchId,
+    createdAt: now,
+    updatedAt: now,
+    mode: input.mode ?? "sync",
+    status:
+      completed === items.length
+        ? "completed"
+        : completed > 0
+          ? "running"
+          : "planned",
+    taskSetId: input.taskSetId,
+    candidateId: input.candidateId,
+    paddockId: input.paddockId,
+    sandboxLeaseIds: input.sandboxLeaseIds ?? [],
+    candidateTraceIdsByTask: input.candidateTraceIdsByTask ?? {},
+    trainingExportId: input.trainingExportId,
+    rewardReportId: input.rewardReportId,
+    items,
+    reason:
+      completed === items.length
+        ? "all rollout task traces are mapped"
+        : "waiting for candidate traces",
+  };
+  mkdirSync(rolloutBatchesDir(), { recursive: true });
+  atomicWriteJson(rolloutBatchPath(batchId), batch);
+  return batch;
+}
+
+export function loadHarnessRolloutBatch(
+  batchId: string,
+): HarnessRolloutBatch | undefined {
+  return readJsonFile<HarnessRolloutBatch>(rolloutBatchPath(batchId));
+}
+
+export function listHarnessRolloutBatches(limit = 20): HarnessRolloutBatch[] {
+  if (!existsSync(rolloutBatchesDir())) return [];
+  return readdirSync(rolloutBatchesDir())
+    .flatMap((name) => {
+      const batch = readJsonFile<HarnessRolloutBatch>(
+        join(rolloutBatchesDir(), name),
+      );
+      return batch ? [batch] : [];
+    })
+    .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+    .slice(0, Math.max(1, limit));
+}
+
+export function registerHarnessRewardFunction(input: {
+  rewardId?: string;
+  kind: HarnessRewardFunctionKind;
+  summary: string;
+  weight?: number;
+  sourceVerifierId?: string;
+  rubric?: string;
+}): HarnessRewardFunction {
+  const rewardId =
+    input.rewardId?.trim() ||
+    `reward-${input.kind}-${randomUUID().slice(0, 8)}`;
+  const reward: HarnessRewardFunction = {
+    schema: HARNESS_EVOLUTION_SCHEMA,
+    rewardId,
+    createdAt: new Date().toISOString(),
+    kind: input.kind,
+    summary: input.summary,
+    weight: input.weight ?? 1,
+    sourceVerifierId: input.sourceVerifierId,
+    rubric: input.rubric,
+  };
+  mkdirSync(dirname(rewardFunctionPath(rewardId)), { recursive: true });
+  atomicWriteJson(rewardFunctionPath(rewardId), reward);
+  return reward;
+}
+
+export function loadHarnessRewardFunction(
+  rewardId: string,
+): HarnessRewardFunction | undefined {
+  return readJsonFile<HarnessRewardFunction>(rewardFunctionPath(rewardId));
+}
+
+export function listHarnessRewardFunctions(
+  limit = 20,
+): HarnessRewardFunction[] {
+  const dir = join(rewardsDir(), "functions");
+  if (!existsSync(dir)) return [];
+  return readdirSync(dir)
+    .flatMap((name) => {
+      const reward = readJsonFile<HarnessRewardFunction>(join(dir, name));
+      return reward ? [reward] : [];
+    })
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+    .slice(0, Math.max(1, limit));
+}
+
+function loadHarnessTaskSetEvaluation(
+  taskSetId: string,
+  candidateId: string,
+): HarnessTaskSetEvaluation | undefined {
+  return readJsonFile<HarnessTaskSetEvaluation>(
+    taskSetEvaluationPath(taskSetId, candidateId),
+  );
+}
+
+function rewardForResult(
+  reward: HarnessRewardFunction,
+  result: HarnessTaskRunResult,
+  evaluation: HarnessTaskSetEvaluation,
+): number {
+  if (reward.kind === "binary_success") return result.verifier.passed ? 1 : 0;
+  if (reward.kind === "policy_safe")
+    return result.verifier.kind === "policy"
+      ? result.verifier.passed
+        ? 1
+        : 0
+      : evaluation.policyPassed
+        ? 1
+        : 0;
+  if (reward.kind === "regression_delta")
+    return Math.max(-1, Math.min(1, evaluation.selectionDelta));
+  // heuristic_overlap: cheap proxy — blend the verifier score with the
+  // selection delta so a reward report can be produced without an LLM judge.
+  if (reward.kind === "heuristic_overlap")
+    return Math.max(
+      0,
+      Math.min(1, 0.7 * result.score + 0.3 * Math.max(0, evaluation.selectionDelta)),
+    );
+  // llm_judge / verifier_score / custom: use the verifier-derived score that
+  // was computed during task-set evaluation. The expensive LLM-as-judge pass
+  // is provided separately by `llmJudgeFitness` for final/top-N comparison.
+  return result.score;
+}
+
+export function evaluateHarnessReward(input: {
+  rewardId: string;
+  taskSetId: string;
+  candidateId: string;
+  rolloutBatchId?: string;
+  trainingExportId?: string;
+}): HarnessRewardReport {
+  const reward = loadHarnessRewardFunction(input.rewardId);
+  if (!reward)
+    throw new Error(`Harness reward function not found: ${input.rewardId}`);
+  const evaluation = loadHarnessTaskSetEvaluation(
+    input.taskSetId,
+    input.candidateId,
+  );
+  if (!evaluation)
+    throw new Error(
+      `Harness task set evaluation not found: ${input.taskSetId}/${input.candidateId}`,
+    );
+  const reportId = `reward-report-${safePathSegment(input.candidateId)}-${randomUUID().slice(0, 8)}`;
+  const rewards = evaluation.results.map((result) => {
+    const rawReward = rewardForResult(reward, result, evaluation);
+    const scaled = Number((rawReward * reward.weight).toFixed(4));
+    return {
+      taskId: result.taskId,
+      reward: scaled,
+      sourceScore: result.score,
+      passed: result.verifier.passed,
+      reason: result.verifier.reason,
+    };
+  });
+  const aggregateReward = rewards.length
+    ? Number(
+        (
+          rewards.reduce((sum, item) => sum + item.reward, 0) / rewards.length
+        ).toFixed(4),
+      )
+    : 0;
+  const report: HarnessRewardReport = {
+    schema: HARNESS_EVOLUTION_SCHEMA,
+    reportId,
+    createdAt: new Date().toISOString(),
+    rewardId: input.rewardId,
+    taskSetId: input.taskSetId,
+    candidateId: input.candidateId,
+    evaluationPath: taskSetEvaluationPath(input.taskSetId, input.candidateId),
+    rolloutBatchId: input.rolloutBatchId,
+    trainingExportId: input.trainingExportId,
+    rewards,
+    aggregateReward,
+    accepted: evaluation.accepted && aggregateReward > 0,
+  };
+  mkdirSync(dirname(rewardReportPath(reportId)), { recursive: true });
+  atomicWriteJson(rewardReportPath(reportId), report);
+  return report;
+}
+
+/**
+ * LLM-as-judge fitness — expensive, multi-dimensional scoring via an LLM call.
+ * Use for final/top-N comparison or when called from an explicit "llm_judge"
+ * reward pipeline. Do NOT call inside tight loops; prefer {@link heuristicFitness}
+ * for cheap per-iteration scoring.
+ *
+ * The judge evaluates the evolved artifact against the baseline on three
+ * dimensions (correctness, procedure-following, conciseness) weighted by
+ * the provided rubric, with a length penalty for bloat.
+ */
+export async function llmJudgeFitness(input: {
+  provider: LLMProvider;
+  rubric?: HarnessLLMJudgeRubric;
+  taskDescription: string;
+  baselineText: string;
+  evolvedText: string;
+  maxTokens?: number;
+}): Promise<{
+  score: number;
+  feedback: string;
+  dimensions: Record<string, number>;
+}> {
+  const rubric = input.rubric ?? DEFAULT_LLM_JUDGE_RUBRIC;
+  const prompt = [
+    "You are an evaluation judge for a harness artifact evolution system.",
+    "Score the evolved artifact against the baseline on three dimensions (0.0 to 1.0 each):",
+    `1. correctness (weight ${rubric.correctnessWeight}): Did the evolved version correctly address the task?`,
+    `2. procedure_following (weight ${rubric.procedureWeight}): Does it follow the expected approach/procedure?`,
+    `3. conciseness (weight ${rubric.concisenessWeight}): Is it appropriately concise without omitting important info?`,
+    "",
+    "Also provide specific, actionable feedback on what could be improved.",
+    "",
+    `Task description: ${input.taskDescription}`,
+    "",
+    "--- BASELINE ---",
+    input.baselineText.slice(0, 4000),
+    "",
+    "--- EVOLVED ---",
+    input.evolvedText.slice(0, 4000),
+    "",
+    "Respond with ONLY a JSON object: {\"correctness\": <0-1>, \"procedure_following\": <0-1>, \"conciseness\": <0-1>, \"feedback\": \"<text>\"}",
+  ].join("\n");
+
+  const response = await input.provider.execute({
+    prompt,
+    stepName: "llm-judge-fitness",
+    round: 1,
+  });
+
+  const text =
+    response.kind === "text" ? response.content : response.summary ?? "";
+
+  // Parse JSON from response, tolerating surrounding text
+  let correctness = 0.5;
+  let procedureFollowing = 0.5;
+  let conciseness = 0.5;
+  let feedback = "";
+  try {
+    const jsonMatch = text.match(/\{[\s\S]*?\}/);
+    if (jsonMatch) {
+      const parsed = JSON.parse(jsonMatch[0]) as Record<string, unknown>;
+      correctness = clampScore(parsed.correctness);
+      procedureFollowing = clampScore(parsed.procedure_following);
+      conciseness = clampScore(parsed.conciseness);
+      feedback = typeof parsed.feedback === "string" ? parsed.feedback : "";
+    }
+  } catch {
+    feedback = `judge parse error — raw: ${text.slice(0, 200)}`;
+  }
+
+  // Length penalty (mirrors Hermes-ASE)
+  let lengthPenalty = 0;
+  const threshold = rubric.lengthPenaltyThreshold ?? 1.2;
+  if (input.baselineText.length > 0) {
+    const ratio = input.evolvedText.length / input.baselineText.length;
+    if (ratio > threshold) {
+      lengthPenalty = Math.min(0.3, (ratio - threshold) * 0.5);
+    }
+  }
+
+  const raw =
+    rubric.correctnessWeight * correctness +
+    rubric.procedureWeight * procedureFollowing +
+    rubric.concisenessWeight * conciseness;
+  const score = Number(Math.max(0, Math.min(1, raw - lengthPenalty)).toFixed(4));
+
+  return {
+    score,
+    feedback,
+    dimensions: {
+      correctness,
+      procedure_following: procedureFollowing,
+      conciseness,
+      length_penalty: lengthPenalty,
+    },
+  };
+}
+
+function clampScore(value: unknown): number {
+  if (typeof value === "number") return Math.max(0, Math.min(1, value));
+  const n = Number(value);
+  return Number.isFinite(n) ? Math.max(0, Math.min(1, n)) : 0.5;
+}
+
+export function listHarnessRewardReports(limit = 20): HarnessRewardReport[] {
+  const dir = join(rewardsDir(), "reports");
+  if (!existsSync(dir)) return [];
+  return readdirSync(dir)
+    .flatMap((name) => {
+      const report = readJsonFile<HarnessRewardReport>(join(dir, name));
+      return report ? [report] : [];
+    })
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+    .slice(0, Math.max(1, limit));
+}
+
+export function completeHarnessRolloutBatch(input: {
+  batchId: string;
+  candidateTraceIdsByTask?: Record<string, string>;
+  trainingExportId?: string;
+  rewardReportId?: string;
+  reason?: string;
+}): HarnessRolloutBatch {
+  const batch = loadHarnessRolloutBatch(input.batchId);
+  if (!batch)
+    throw new Error(`Harness rollout batch not found: ${input.batchId}`);
+  const candidateTraceIdsByTask = {
+    ...batch.candidateTraceIdsByTask,
+    ...(input.candidateTraceIdsByTask ?? {}),
+  };
+  const taskSet = loadHarnessTaskSet(batch.taskSetId);
+  if (!taskSet)
+    throw new Error(`Harness task set not found: ${batch.taskSetId}`);
+  const previousByTask = new Map(
+    batch.items.map((item) => [item.taskId, item]),
+  );
+  const items = rolloutItemsFromTaskSet(
+    taskSet,
+    candidateTraceIdsByTask,
+    batch.sandboxLeaseIds,
+  ).map((item) => ({
+    ...item,
+    trajectoryId: previousByTask.get(item.taskId)?.trajectoryId,
+    reward: previousByTask.get(item.taskId)?.reward,
+  }));
+  const completed = items.filter((item) => item.status === "completed").length;
+  const updated: HarnessRolloutBatch = {
+    ...batch,
+    updatedAt: new Date().toISOString(),
+    status: completed === items.length ? "completed" : "running",
+    candidateTraceIdsByTask,
+    trainingExportId: input.trainingExportId ?? batch.trainingExportId,
+    rewardReportId: input.rewardReportId ?? batch.rewardReportId,
+    items,
+    reason:
+      input.reason ??
+      (completed === items.length
+        ? "all rollout task traces are mapped"
+        : "rollout still has unmapped task traces"),
+  };
+  atomicWriteJson(rolloutBatchPath(input.batchId), updated);
+  return updated;
 }
 
 export function evaluateHarnessTaskSet(input: {
@@ -3465,6 +4593,39 @@ export async function runHarnessEvolution(input: {
   let status: HarnessEvolutionRunStatus = "awaiting_candidate_traces";
   let nextAction = `provide candidateTraceIdsByBaseline for: ${missingCandidateTraceIds.join(", ")}`;
 
+  // Graded gate pipeline — "benchmarks are GATES, not fitness functions"
+  // (Hermes-ASE). GATE 1 (constraint) + GATE 2 (quick fitness) are recorded
+  // right after the proposal; GATE 3 (fitness) + GATE 4 (coherence/audit) are
+  // recorded once the dataset/audit evaluation runs below.
+  const gateResults: HarnessGateStageResult[] = [];
+  const constraintStage = DEFAULT_GATE_STAGES.find((s) => s.kind === "constraint")!;
+  gateResults.push({
+    stage: constraintStage,
+    passed: !proposal.proposal.failed,
+    feedback: proposal.proposal.failed
+      ? (proposal.proposal.error ?? "proposal failed constraints")
+      : "no surface violations; diff within editable surface",
+    durationMs: 0,
+  });
+  const quickFitnessStage = DEFAULT_GATE_STAGES.find(
+    (s) => s.kind === "quick_fitness",
+  )!;
+  const quickFitness = heuristicFitness({
+    expectedFixes: plan.expectedFixes,
+    observedDiff:
+      proposal.proposal.observedDiffStat || proposal.proposal.diffStat || proposal.proposal.summary,
+    constraintsPassed: !proposal.proposal.failed,
+    baselineSize: 0,
+    evolvedSize: 0,
+  });
+  gateResults.push({
+    stage: quickFitnessStage,
+    passed: true,
+    score: quickFitness.score,
+    feedback: quickFitness.feedback,
+    durationMs: 0,
+  });
+
   if (!missingCandidateTraceIds.length) {
     evaluation = evaluateHarnessDataset({
       candidateId: plan.candidateId,
@@ -3504,6 +4665,24 @@ export async function runHarnessEvolution(input: {
       candidateId: plan.candidateId,
       datasetId: plan.datasetId,
       leakageTerms: plan.leakageTerms,
+    });
+    const fitnessStage = DEFAULT_GATE_STAGES.find((s) => s.kind === "fitness")!;
+    gateResults.push({
+      stage: fitnessStage,
+      passed: evaluation.gate.accepted,
+      feedback: evaluation.gate.reason,
+      durationMs: 0,
+    });
+    const coherenceStage = DEFAULT_GATE_STAGES.find(
+      (s) => s.kind === "coherence",
+    )!;
+    gateResults.push({
+      stage: coherenceStage,
+      passed: audit.passed,
+      feedback: audit.passed
+        ? "audit passed"
+        : `audit findings: ${audit.findings.length}`,
+      durationMs: 0,
     });
     ranks = rankHarnessCandidates([plan.candidateId]);
     frontier = updateHarnessFrontier({
@@ -3575,6 +4754,7 @@ export async function runHarnessEvolution(input: {
     bundle,
     trajectories,
     replay,
+    gateResults,
     missingCandidateTraceIds,
     artifactRefs: artifactRefsForRun(runId, plan, Boolean(bundle)),
     nextAction,

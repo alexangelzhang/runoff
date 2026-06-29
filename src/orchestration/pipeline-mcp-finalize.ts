@@ -4,7 +4,7 @@
 
 import type { PipelineConfig } from "../core/config.js";
 import type { PipelineResult } from "../core/pipeline-run-types.js";
-import type { PipelineStatus } from "../core/state.js";
+import type { PipelineStatus, ResumeReusePlanReport, ScopePreflightReport } from "../core/state.js";
 import type { StepResult } from "../core/state.js";
 import type { PipelineCostAccumulator } from "../routing/pricing.js";
 import { enrichTraceWithEventLog } from "./replay.js";
@@ -25,6 +25,8 @@ export async function finalizePipelineRunResult(args: {
   costTracker: PipelineCostAccumulator;
   stepResults: Record<string, StepResult>;
   globalKnowledge: Record<string, string>;
+  scopePreflight?: ScopePreflightReport;
+  resumeReusePlan?: ResumeReusePlanReport;
   runtimeConfig: PipelineConfig;
   controlPlaneMode: "memory" | "file";
   eventLog?: EventLog;
@@ -42,6 +44,8 @@ export async function finalizePipelineRunResult(args: {
     costTracker,
     stepResults,
     globalKnowledge,
+    scopePreflight,
+    resumeReusePlan,
     runtimeConfig,
     controlPlaneMode,
     eventLog,
@@ -60,6 +64,8 @@ export async function finalizePipelineRunResult(args: {
     stepResults,
     usage: { promptTokens: summary.totalTokens, completionTokens: 0 },
     costBreakdown: {},
+    scopePreflight,
+    resumeReusePlan,
     error: undefined,
   };
   finalResult.observation = buildPipelineObservation({
@@ -70,6 +76,8 @@ export async function finalizePipelineRunResult(args: {
     rounds: finalResult.rounds,
     totalDurationMs: finalResult.totalDurationMs,
     error: finalResult.error,
+    scopePreflight,
+    resumeReusePlan,
   });
 
   let finalTrace: PipelineTrace = {
@@ -88,6 +96,8 @@ export async function finalizePipelineRunResult(args: {
     lifecycle: "final",
     globalKnowledge: Object.keys(globalKnowledge).length > 0 ? globalKnowledge : undefined,
     observation: finalResult.observation,
+    scopePreflight,
+    resumeReusePlan,
   };
   if (controlPlaneMode === "file" && eventLog) {
     finalTrace = enrichTraceWithEventLog(finalTrace, eventLog, traceId);
@@ -109,6 +119,12 @@ export async function finalizePipelineRunResult(args: {
   }
   if (endCtx.warnings?.length) {
     finalResult.warnings = endCtx.warnings;
+  }
+  if (scopePreflight?.warnings.length) {
+    finalResult.warnings = [
+      ...(finalResult.warnings ?? []),
+      ...scopePreflight.warnings.map((warning) => `scopePreflight: ${warning}`),
+    ];
   }
 
   return finalResult;

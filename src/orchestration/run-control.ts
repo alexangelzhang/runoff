@@ -4,6 +4,37 @@
 
 import type { ApprovalResponse } from "./approval.js";
 import type { RunState, RunStore } from "./run-store.js";
+import type { ResumeReusePlanReport } from "../core/state.js";
+
+export interface RunResumePlannerSummary {
+  round: number;
+  rerun: number;
+  skipped: number;
+  rerunSteps: Array<{
+    stepName: string;
+    reason: string;
+    downstreamOf?: string;
+  }>;
+  skippedHidden: number;
+}
+
+export function summarizeResumeReusePlanForRun(
+  report: ResumeReusePlanReport | undefined,
+): RunResumePlannerSummary | undefined {
+  if (!report) return undefined;
+  const rerunEntries = report.entries.filter((entry) => entry.decision === "rerun");
+  return {
+    round: report.round,
+    rerun: report.summary.rerun,
+    skipped: report.summary.skipped,
+    rerunSteps: rerunEntries.map((entry) => ({
+      stepName: entry.stepName,
+      reason: entry.reason,
+      downstreamOf: entry.downstreamOf,
+    })),
+    skippedHidden: report.summary.skipped,
+  };
+}
 
 export function pauseRunForApproval(
   store: RunStore,
@@ -66,6 +97,8 @@ export function mapPipelineStatusToRunStatus(
       return "failed";
     case "max_rounds":
       return "paused";
+    case "needs_clarification":
+      return "paused";
     case "awaiting_judge":
     case "awaiting_approval":
     case "awaiting_plan_approval":
@@ -83,10 +116,12 @@ export function syncRunStoreFromPipeline(
     round: number;
     pipelineStatus: string;
     resumeToken?: string;
+    resumeReusePlan?: ResumeReusePlanReport;
   },
 ): RunState {
   const existing = store.load(input.runId);
   const now = Date.now();
+  const resumePlanner = summarizeResumeReusePlanForRun(input.resumeReusePlan);
   const run: RunState = {
     runId: input.runId,
     sessionId: input.sessionId,
@@ -96,7 +131,11 @@ export function syncRunStoreFromPipeline(
     resumeToken: input.resumeToken ?? input.sessionId,
     pendingApproval: existing?.pendingApproval,
     agentStates: existing?.agentStates,
-    metadata: { ...existing?.metadata, pipelineStatus: input.pipelineStatus },
+    metadata: {
+      ...existing?.metadata,
+      pipelineStatus: input.pipelineStatus,
+      ...(resumePlanner ? { resumePlanner } : {}),
+    },
     createdAt: existing?.createdAt ?? now,
     updatedAt: now,
   };

@@ -4,6 +4,7 @@ import type { Candidate } from "../core/candidate.js";
 import type { RaceCandidateSnapshot } from "../runtime/race-registry.js";
 import {
   assertStepTransition,
+  type ResumeReusePlanReport,
   type StepResult,
   type StepStatus,
   type PipelineStatus,
@@ -52,6 +53,11 @@ import type { EventLog } from "./event-log.js";
 import { applyReflectReplan, shouldReflectOnTrigger } from "./reflect.js";
 import { buildStepObservation } from "./observation.js";
 import { assignArtifactIds } from "./artifacts.js";
+import {
+  buildStepResumeMetadata,
+  hashStepInput,
+  resolveWorkspaceAttachment,
+} from "./step-resume-metadata.js";
 
 export type MutablePipelineRunState = {
   stepResults: Record<string, StepResult>;
@@ -64,6 +70,8 @@ export type MutablePipelineRunState = {
   lastRetryFailure?: { reason: FailureReason; error?: string; provider?: string };
   pendingRaceTraceId?: string;
   raceCandidates?: RaceCandidateSnapshot[];
+  /** Resume planner report applied at DAG-loop start. */
+  resumeReusePlan?: ResumeReusePlanReport;
   /** Parallel-stage branch/merge (Phase 7.4); recreated each round. */
   sharedContext?: SharedContext;
 };
@@ -105,8 +113,10 @@ export type PipelineDAGLoopOptions = {
 };
 
 import {
+  applyResumeStepReusePlan,
   failedStepOutcome,
   isStepCompletedForRound,
+  latestCandidateFromCompletedSteps,
   outcomeToAgentResult,
   resolvePipelineStages,
 } from "./pipeline-runner-helpers.js";
@@ -165,7 +175,12 @@ async function tryReflectReplan(opts: {
  */
 export async function runPipelineDAGLoop(
   opts: PipelineDAGLoopOptions
-): Promise<{ finalStatus: PipelineStatus; completedRounds: number; endRound: number }> {
+): Promise<{
+  finalStatus: PipelineStatus;
+  completedRounds: number;
+  endRound: number;
+  resumeReusePlan?: ResumeReusePlanReport;
+}> {
   const {
     runtimeConfig,
     costTracker,
@@ -206,6 +221,23 @@ export async function runPipelineDAGLoop(
   let completedRounds = 0;
   const workspaceLeases = new WorkspaceOwnershipRegistry();
   const stageMergeMode = resolveStageMergeMode(runtimeConfig);
+  if (startRound > 0) {
+    const reusePlan = applyResumeStepReusePlan({
+      stepResults: state.stepResults,
+      pipeline: runtimeConfig.pipeline,
+      round: startRound,
+    });
+    state.resumeReusePlan = reusePlan.report;
+    if (reusePlan.rerunSteps.length) {
+      state.candidate = latestCandidateFromCompletedSteps(state.stepResults);
+      logger.info(
+        "orchestrator",
+        `Resume planner marked ${reusePlan.rerunSteps.length} step(s) for rerun: ${reusePlan.rerunSteps
+          .map((item) => `${item.stepName} (${item.reason})`)
+          .join(", ")}`,
+      );
+    }
+  }
 
   for (; round <= maxRounds; round++) {
     let stepFailed = false;
@@ -294,6 +326,18 @@ export async function runPipelineDAGLoop(
             ensureWorkDirForStep(stepName, runtimeConfig, workDir);
 
             const prior = state.stepResults[stepName];
+            const plannerRerunReason =
+              prior?.round === round && prior.status === "queued"
+                ? prior.resumeMetadata?.rerunReason ?? prior.reason
+                : undefined;
+            const rerunReason =
+              prior?.status === "failed"
+                ? `Retrying after failed result from round ${prior.round ?? "unknown"}.`
+                : plannerRerunReason
+                  ? plannerRerunReason
+                : prior?.round !== undefined && prior.round < round
+                  ? `Executing new round ${round} after prior ${prior.status} result from round ${prior.round}.`
+                  : undefined;
             const fromStatus: StepStatus =
               prior && prior.round === round ? prior.status : "queued";
             if (fromStatus === "queued" || fromStatus === "failed") {
@@ -363,6 +407,7 @@ export async function runPipelineDAGLoop(
             }
 
             const outcome = await stepRunner.executeStep(stepName, ctx);
+            outcome.rerunReason = rerunReason;
 
             if (governance) {
               await governance.afterStep(outcomeToAgentResult(outcome));
@@ -393,6 +438,7 @@ export async function runPipelineDAGLoop(
           artifacts,
           awaitingJudge,
           raceSession,
+          inputHash,
         } = outcome;
 
         const stepResult: StepResult = {
@@ -402,6 +448,7 @@ export async function runPipelineDAGLoop(
           routedFrom: outcome.routedFrom,
           kind: response.kind,
           model: response.model,
+          contextContract: outcome.contextContract,
           durationMs: outcome.durationMs,
           error: response.error,
           usage: response.usage,
@@ -422,8 +469,32 @@ export async function runPipelineDAGLoop(
         if (artifactsForStep?.length) {
           stepResult.artifacts = artifactsForStep;
         }
+        stepResult.resumeMetadata = buildStepResumeMetadata({
+          stepName,
+          round,
+          inputHash:
+            inputHash ??
+            hashStepInput({
+              stepName,
+              round,
+              prompt,
+              context,
+              workDir: effectiveWorkDir,
+              fallback: "missing-step-input-hash",
+            }),
+          stepResult,
+          artifacts: artifactsForStep,
+          promptVersionId: trace.promptVersionId,
+          workspaceAttachment: resolveWorkspaceAttachment({
+            effectiveWorkDir,
+            sourceWorkDir: workDir,
+            raceCandidateWorkspace: Boolean(awaitingJudge && raceSession),
+          }),
+          rerunReason: outcome.rerunReason,
+        });
         stepResult.observation = buildStepObservation(stepName, stepResult);
         trace.observation = stepResult.observation;
+        trace.resumeMetadata = stepResult.resumeMetadata;
 
         if (isParallelStage) {
           const branchId = branchIdByStep.get(stepName);
@@ -668,7 +739,7 @@ export async function runPipelineDAGLoop(
     finalStatus = round > maxRounds ? "max_rounds" : "approved";
   }
 
-  return { finalStatus, completedRounds, endRound: round };
+  return { finalStatus, completedRounds, endRound: round, resumeReusePlan: state.resumeReusePlan };
 }
 
 /** Alias: orchestrator `executionPlan` drives stage waves (Backlog B3). */

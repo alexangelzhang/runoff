@@ -184,6 +184,15 @@ export type PipelineRuntimeConfig = {
    * `auto-pick` applies resolveProviderRaceWinner choice immediately.
    */
   raceFinalize?: "defer" | "auto-pick";
+  /** P2: scope preflight before pipeline execution. */
+  scopePreflight?: {
+    enabled?: boolean;
+    dirtyWorktree?: "allow" | "warn" | "clarify";
+    docUpdates?: "allow" | "warn" | "clarify";
+    race?: "allow" | "warn" | "clarify";
+    requireVerificationCommand?: boolean;
+    requireCleanWorktree?: boolean;
+  };
 };
 
 export type PipelineConfig = {
