@@ -52,6 +52,7 @@ import { resolveStepRunner, type StepRunner } from "./step-runner.js";
 import type { EventLog } from "./event-log.js";
 import { applyReflectReplan, shouldReflectOnTrigger } from "./reflect.js";
 import { buildStepObservation } from "./observation.js";
+import { updateHarnessStateAfterStep } from "./contract-negotiation.js";
 import { assignArtifactIds } from "./artifacts.js";
 import {
   buildStepResumeMetadata,
@@ -74,6 +75,8 @@ export type MutablePipelineRunState = {
   resumeReusePlan?: ResumeReusePlanReport;
   /** Parallel-stage branch/merge (Phase 7.4); recreated each round. */
   sharedContext?: SharedContext;
+  /** Session completion contract; updated after generator/evaluator steps. */
+  completionContract?: import("../core/state.js").CompletionContract;
 };
 
 export type PipelineDAGLoopOptions = {
@@ -95,6 +98,7 @@ export type PipelineDAGLoopOptions = {
   effectiveWorkDir?: string;
   acceptanceCriteria?: string[];
   verifyResults?: string;
+  completionContract?: import("../core/state.js").CompletionContract;
   signal?: AbortSignal;
   onRoundComplete: (round: number) => Promise<void>;
   /** Called after each step completes (for cost tracking, event logging). */
@@ -214,6 +218,9 @@ export async function runPipelineDAGLoop(
   const reviewStepName = reviewStepNameOpt ?? "review";
   const workflowMode = useWorkflowAgents(runtimeConfig);
   const initialPipelineSize = Object.keys(runtimeConfig.pipeline).length;
+  if (opts.completionContract && !state.completionContract) {
+    state.completionContract = opts.completionContract;
+  }
 
   let round = startRound;
   let finalStatus: PipelineStatus = "running";
@@ -290,6 +297,7 @@ export async function runPipelineDAGLoop(
                 candidate: { ...state.candidate },
                 acceptanceCriteria,
                 verifyResults,
+                completionContract: state.completionContract,
                 signal,
                 reviewStepName,
                 lastReviewFeedback: state.lastReviewFeedback,
@@ -314,6 +322,7 @@ export async function runPipelineDAGLoop(
                 candidate: { ...state.candidate },
                 acceptanceCriteria,
                 verifyResults,
+                completionContract: state.completionContract,
                 signal: task.signal,
                 reviewStepName,
                 lastReviewFeedback: task.reviewFeedback ?? state.lastReviewFeedback,
@@ -374,6 +383,7 @@ export async function runPipelineDAGLoop(
               candidate: isParallelStage ? { ...state.candidate } : state.candidate,
               acceptanceCriteria,
               verifyResults,
+              completionContract: state.completionContract,
               signal,
               reviewStepName,
               lastReviewFeedback: state.lastReviewFeedback,
@@ -449,6 +459,7 @@ export async function runPipelineDAGLoop(
           kind: response.kind,
           model: response.model,
           contextContract: outcome.contextContract,
+          contextComposition: outcome.contextComposition,
           durationMs: outcome.durationMs,
           error: response.error,
           usage: response.usage,
@@ -492,7 +503,26 @@ export async function runPipelineDAGLoop(
           }),
           rerunReason: outcome.rerunReason,
         });
+
+        if (state.completionContract && pipelineSessionId) {
+          const harnessUpdate = await updateHarnessStateAfterStep({
+            sessionId: pipelineSessionId,
+            stepName,
+            round,
+            reviewStepName,
+            stepResult,
+            contract: state.completionContract,
+            stepResults: { ...state.stepResults, [stepName]: stepResult },
+            verdict: outcome.verdict,
+          });
+          state.completionContract = harnessUpdate.contract;
+          if (harnessUpdate.assertionCoverage) {
+            stepResult.contractAssertionCoverage = harnessUpdate.assertionCoverage;
+          }
+        }
+
         stepResult.observation = buildStepObservation(stepName, stepResult);
+        stepResult.contextComposition = stepResult.observation.contextComposition;
         trace.observation = stepResult.observation;
         trace.resumeMetadata = stepResult.resumeMetadata;
 

@@ -1,7 +1,7 @@
 # PRINCE Lessons for runoff — context 与 harness 契约化
 
 Date: 2026-06-25
-Status: In progress — P1/P2/P3/P4 runtime contracts started
+Status: Done — P1 context contract + P4 stage evaluation implemented in runtime
 
 ## 背景
 
@@ -188,6 +188,20 @@ Resume planner 的决策已从 logger 提升为结构化 runtime evidence：
 3. **可观测**：新增 contract 的缺口必须出现在 Observation、trace 或 eval report 中，不能只写日志。
 4. **可评估**：每个新检查都能说明对应 step 类型和失败例子。
 5. **可降级**：缺少 contract 时 pipeline 仍运行，但报告 coverage gap。
+
+## 已实现（2026-07）
+
+- `src/orchestration/context-contract.ts`：统一 `StepContextKind`（analyze / implement / review / test / final_summary / generate）、`buildStepContextContract`、`hasRequiredEvidence`、`composeBoundedStepContext`（默认 16k 字符截断 `unbounded_repo_context`）、`buildContextCompositionReport`。
+- `src/orchestration/harness-role.ts`：Loop 三角色（planner / generator / evaluator）与 prompt 输入隔离；`StepContextContract.harnessRole` / `roleOmittedInputs`。
+- `src/orchestration/completion-contract.ts`：会话级 `~/.runoff/sessions/<sessionId>/harness/contract.md` + `contract.json`；从 `acceptanceCriteria` + spec 种子化 testable assertions；`PipelineObservation.completionContract`。
+- `src/orchestration/contract-negotiation.ts` + `contract-debate.md`：Generator `CONTRACT_ADD:` 提案、Evaluator review 后写入 challenge；`negotiationStatus` draft/proposed/challenged/agreed。
+- `src/orchestration/harness-disk-state.ts`：`progress.md`（滚动状态）+ `log.md`（追加 `## [ISO] op | title`）。
+- `src/orchestration/contract-verdict-mapping.ts`：review verdict 文本 → 每条 assertion 的 pass/fail/partial/unknown；`StepObservation.contractAssertionCoverage`。
+- `step-execution.ts`：prompt 渲染前应用 bounded context + harness role isolation；`StepOutcome.contextComposition` 写入 trace / checkpoint。
+- `StepObservation.contextComposition` / `StepResult.contextComposition`：记录 supplied inputs、omitted forbidden、truncation warnings。
+- `evaluateStageForStep`：每个 step 的 metric 获得 `pass | fail | partial | unknown`；`StepObservation.stageEvaluation` 与 pipeline 级 `stageEvaluations` 汇总。
+- `ExperimentEvalReport.stageEvaluationSummary`：新增 `passCount` / `failCount` / `partialCount` / `unknownCount` 及 `byKind` 分 kind 计数。
+- `step-resume-metadata.ts`：复用 `context-contract.hasRequiredEvidence`，与 Observation gap 逻辑一致。
 
 ## 已开始
 

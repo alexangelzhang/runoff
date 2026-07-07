@@ -112,6 +112,10 @@ export type ExperimentStageEvaluationKindSummary = {
   stepNames: string[];
   metricNames: string[];
   evidenceRefs: string[];
+  passCount: number;
+  failCount: number;
+  partialCount: number;
+  unknownCount: number;
 };
 
 export type ExperimentStageEvaluationSummary = {
@@ -119,6 +123,10 @@ export type ExperimentStageEvaluationSummary = {
   stageEvaluationCount: number;
   missingTraceCount: number;
   missingStageEvaluationCount: number;
+  passCount: number;
+  failCount: number;
+  partialCount: number;
+  unknownCount: number;
   byKind: ExperimentStageEvaluationKindSummary[];
 };
 
@@ -204,7 +212,31 @@ type StageEvaluationAccumulator = {
   metricNames: Set<string>;
   evidenceRefs: Set<string>;
   stepCount: number;
+  passCount: number;
+  failCount: number;
+  partialCount: number;
+  unknownCount: number;
 };
+
+function incrementOverallStatus(
+  acc: StageEvaluationAccumulator,
+  status: StageEvaluationHint["overallStatus"],
+): void {
+  switch (status) {
+    case "pass":
+      acc.passCount += 1;
+      break;
+    case "fail":
+      acc.failCount += 1;
+      break;
+    case "partial":
+      acc.partialCount += 1;
+      break;
+    default:
+      acc.unknownCount += 1;
+      break;
+  }
+}
 
 function addStageEvaluationHint(
   byKind: Map<StageEvaluationKind, StageEvaluationAccumulator>,
@@ -219,11 +251,16 @@ function addStageEvaluationHint(
       metricNames: new Set<string>(),
       evidenceRefs: new Set<string>(),
       stepCount: 0,
+      passCount: 0,
+      failCount: 0,
+      partialCount: 0,
+      unknownCount: 0,
     };
 
   acc.traceIds.add(traceId);
   acc.stepNames.add(hint.stepName);
   acc.stepCount += 1;
+  incrementOverallStatus(acc, hint.overallStatus);
   for (const metric of hint.metrics) {
     acc.metricNames.add(metric.name);
     for (const ref of metric.evidenceRefs) acc.evidenceRefs.add(ref);
@@ -258,6 +295,16 @@ function buildStageEvaluationSummary(entries: ExperimentEntry[]): ExperimentStag
     }
   }
 
+  const totals = [...byKind.values()].reduce(
+    (acc, row) => ({
+      passCount: acc.passCount + row.passCount,
+      failCount: acc.failCount + row.failCount,
+      partialCount: acc.partialCount + row.partialCount,
+      unknownCount: acc.unknownCount + row.unknownCount,
+    }),
+    { passCount: 0, failCount: 0, partialCount: 0, unknownCount: 0 },
+  );
+
   const byKindRows = [...byKind.entries()]
     .sort(([left], [right]) => STAGE_KIND_ORDER.indexOf(left) - STAGE_KIND_ORDER.indexOf(right))
     .map(([kind, acc]) => ({
@@ -267,6 +314,10 @@ function buildStageEvaluationSummary(entries: ExperimentEntry[]): ExperimentStag
       stepNames: uniqueSorted(acc.stepNames),
       metricNames: uniqueSorted(acc.metricNames),
       evidenceRefs: uniqueSorted(acc.evidenceRefs),
+      passCount: acc.passCount,
+      failCount: acc.failCount,
+      partialCount: acc.partialCount,
+      unknownCount: acc.unknownCount,
     }));
 
   return {
@@ -274,6 +325,10 @@ function buildStageEvaluationSummary(entries: ExperimentEntry[]): ExperimentStag
     stageEvaluationCount,
     missingTraceCount,
     missingStageEvaluationCount,
+    passCount: totals.passCount,
+    failCount: totals.failCount,
+    partialCount: totals.partialCount,
+    unknownCount: totals.unknownCount,
     byKind: byKindRows,
   };
 }

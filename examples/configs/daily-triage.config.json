@@ -1,0 +1,15 @@
+{
+  "providers": {
+    "triage": {
+      "type": "mock"
+    }
+  },
+  "pipeline": {
+    "triage": ["triage"]
+  },
+  "runtime": {
+    "controlPlane": "file",
+    "costBudgetUSD": 1
+  },
+  "routing": []
+}

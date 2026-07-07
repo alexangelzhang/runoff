@@ -9,7 +9,16 @@ import type {
   StepObservation,
   StepResult,
 } from "../core/state.js";
-import { buildStageEvaluationHints } from "../observability/stage-evaluation.js";
+import {
+  buildStageEvaluationsFromStepResults,
+  evaluateStageForStep,
+  toStageEvaluationHints,
+} from "../observability/stage-evaluation.js";
+import {
+  buildFallbackStepContextContract,
+  buildRequiredEvidenceGaps,
+} from "./context-contract.js";
+import { summarizeCompletionContract } from "./completion-contract.js";
 import type { Artifact } from "./artifacts.js";
 
 function artifactSummary(artifact: Artifact): string | undefined {
@@ -29,62 +38,6 @@ function artifactSummary(artifact: Artifact): string | undefined {
   }
 }
 
-function buildStepContextContract(stepName: string, stepResult: StepResult): StepContextContract {
-  const kind = stepResult.observation?.contextContract?.kind ?? (stepName.toLowerCase().includes("review") ? "review" : "generate");
-  if (stepResult.observation?.contextContract) return stepResult.observation.contextContract;
-
-  if (kind === "review") {
-    return {
-      kind,
-      inputs: [
-        "spec",
-        "acceptanceCriteria",
-        "verifyResults",
-        "candidateContent",
-        "knowledge",
-      ],
-      forbidden: [
-        "full_trace_history",
-        "unrelated_artifacts",
-        "unbounded_repo_context",
-      ],
-      requiredEvidence: [
-        "verdict",
-        "artifactRefs",
-        "review_feedback",
-      ],
-      scopeNotes: [
-        "Focus on the supplied candidate and explicit verification results.",
-      ],
-    };
-  }
-
-  const requiredEvidence =
-    stepResult.kind === "text"
-      ? ["code", "artifacts"]
-      : ["filesModified", "diffStat", "artifacts"];
-
-  return {
-    kind,
-    inputs: [
-      "spec",
-      "lastReviewFeedback",
-      "previousContent",
-      "context",
-      "knowledge",
-    ],
-    forbidden: [
-      "full_trace_history",
-      "unrelated_artifacts",
-      "unbounded_repo_context",
-    ],
-    requiredEvidence,
-    scopeNotes: [
-      "Prefer the smallest edit surface that satisfies the spec and review feedback.",
-    ],
-  };
-}
-
 function buildEvidence(stepResult: StepResult): string[] {
   const evidence: string[] = [];
   if (stepResult.provider) evidence.push(`provider=${stepResult.provider}`);
@@ -95,7 +48,25 @@ function buildEvidence(stepResult: StepResult): string[] {
   if (stepResult.reason) evidence.push(`reason=${stepResult.reason}`);
   if (stepResult.error) evidence.push(`error=${stepResult.error}`);
   if (stepResult.resumeMetadata?.inputHash) evidence.push(`inputHash=${stepResult.resumeMetadata.inputHash}`);
+  for (const ref of stepResult.contextComposition?.contextRefs ?? []) {
+    evidence.push(`contextRef=${ref.ref}`);
+  }
   return evidence;
+}
+
+function aggregatePipelineContextRefs(
+  stepResults: Record<string, StepResult>,
+): import("../core/state.js").ContextEvidenceRef[] | undefined {
+  const seen = new Set<string>();
+  const refs: import("../core/state.js").ContextEvidenceRef[] = [];
+  for (const step of Object.values(stepResults)) {
+    for (const ref of step.contextComposition?.contextRefs ?? []) {
+      if (seen.has(ref.ref)) continue;
+      seen.add(ref.ref);
+      refs.push(ref);
+    }
+  }
+  return refs.length ? refs : undefined;
 }
 
 function buildTypedCoverageGaps(stepName: string, stepResult: StepResult): ObservationCoverageGap[] {
@@ -121,89 +92,27 @@ function buildTypedCoverageGaps(stepName: string, stepResult: StepResult): Obser
       evidenceRefs: [`stepResults.${stepName}.error`],
     });
   }
+  if (stepResult.contextComposition?.warnings.length) {
+    for (const warning of stepResult.contextComposition.warnings) {
+      gaps.push({
+        kind: "process",
+        detail: warning,
+        evidenceRefs: [`stepResults.${stepName}.contextComposition`],
+      });
+    }
+  }
+  if (stepResult.contractAssertionCoverage) {
+    for (const row of stepResult.contractAssertionCoverage.mappings) {
+      if (row.status === "fail" || row.status === "partial") {
+        gaps.push({
+          kind: "draft",
+          detail: `Contract assertion ${row.assertionId} ${row.status}: ${row.detail ?? row.assertion}`,
+          evidenceRefs: row.evidenceRefs,
+        });
+      }
+    }
+  }
   return gaps;
-}
-
-function requiredEvidenceRef(stepName: string, requirement: string): string {
-  switch (requirement) {
-    case "artifactRefs":
-    case "artifacts":
-      return `stepResults.${stepName}.artifacts`;
-    case "diffStat":
-      return `stepResults.${stepName}.diffStat`;
-    case "filesModified":
-      return `stepResults.${stepName}.filesModified`;
-    case "code":
-      return `stepResults.${stepName}.code`;
-    case "review_feedback":
-    case "verdict":
-      return `stepResults.${stepName}.artifacts`;
-    default:
-      return `stepResults.${stepName}`;
-  }
-}
-
-function hasRequiredEvidence(
-  requirement: string,
-  stepResult: StepResult,
-  artifactRefs: StepObservation["artifactRefs"],
-): boolean {
-  const artifacts = stepResult.artifacts ?? [];
-  switch (requirement) {
-    case "artifactRefs":
-    case "artifacts":
-      return artifactRefs.length > 0;
-    case "diffStat":
-      return Boolean(
-        stepResult.diffStat ||
-          artifacts.some((artifact) => (artifact.kind === "diff" || artifact.kind === "patch") && artifact.diffStat),
-      );
-    case "filesModified":
-      return Boolean(
-        stepResult.filesModified?.length ||
-          artifacts.some((artifact) => (artifact.kind === "diff" || artifact.kind === "patch") && artifact.filesModified.length),
-      );
-    case "code":
-      return Boolean(
-        stepResult.code ||
-          artifacts.some((artifact) => artifact.kind === "code" && artifact.code),
-      );
-    case "review_feedback":
-      return Boolean(
-        stepResult.reason ||
-          stepResult.summary ||
-          stepResult.explanation ||
-          artifacts.some((artifact) => {
-            if (artifact.kind === "review") {
-              return Boolean(artifact.reviewText || artifact.issues?.length || artifact.suggestions?.length);
-            }
-            if (artifact.kind === "verdict") {
-              return Boolean(artifact.feedback || artifact.sourceReview);
-            }
-            return false;
-          }),
-      );
-    case "verdict":
-      return artifacts.some((artifact) => artifact.kind === "verdict");
-    default:
-      return buildEvidence(stepResult).some((entry) => entry.toLowerCase().startsWith(`${requirement.toLowerCase()}=`));
-  }
-}
-
-function buildRequiredEvidenceGaps(
-  stepName: string,
-  stepResult: StepResult,
-  contextContract: StepContextContract,
-  artifactRefs: StepObservation["artifactRefs"],
-): ObservationCoverageGap[] {
-  if (stepResult.status !== "success") return [];
-  return contextContract.requiredEvidence
-    .filter((requirement) => !hasRequiredEvidence(requirement, stepResult, artifactRefs))
-    .map((requirement) => ({
-      kind: "evidence" as const,
-      detail: `Missing required evidence ${JSON.stringify(requirement)} from step context contract.`,
-      evidenceRefs: [requiredEvidenceRef(stepName, requirement)],
-    }));
 }
 
 function buildCoverageGaps(stepResult: StepResult): string[] {
@@ -217,21 +126,71 @@ function buildCoverageGaps(stepResult: StepResult): string[] {
   if (stepResult.error) {
     gaps.push("Step failed before producing a complete successful result.");
   }
+  if (stepResult.contextComposition?.warnings.length) {
+    gaps.push(...stepResult.contextComposition.warnings);
+  }
   return gaps;
 }
 
-function buildStepClaims(stepName: string, stepResult: StepResult, artifactRefs: StepObservation["artifactRefs"], evidence: string[]): ObservationClaim[] | undefined {
+function buildStepClaims(
+  stepName: string,
+  stepResult: StepResult,
+  artifactRefs: StepObservation["artifactRefs"],
+  evidence: string[],
+  stageEvaluation?: StepObservation["stageEvaluation"],
+): ObservationClaim[] | undefined {
+  const claims: ObservationClaim[] = [];
+  const summary = summarizeStep(stepName, stepResult);
   const claimEvidenceRefs = artifactRefs.length
     ? artifactRefs.map((ref) => ref.ref)
     : evidence;
-  const summary = summarizeStep(stepName, stepResult);
-  if (!summary && !claimEvidenceRefs.length) return undefined;
-  return [
-    {
-      claim: summary,
-      evidenceRefs: claimEvidenceRefs,
-    },
-  ];
+
+  if (summary) {
+    claims.push({ claim: summary, evidenceRefs: claimEvidenceRefs });
+  }
+
+  if (stepResult.filesModified?.length) {
+    claims.push({
+      claim: `Modified ${stepResult.filesModified.length} file(s): ${stepResult.filesModified.join(", ")}.`,
+      evidenceRefs: [`stepResults.${stepName}.filesModified`, ...artifactRefs.map((ref) => ref.ref)],
+    });
+  }
+
+  if (stepResult.diffStat) {
+    claims.push({
+      claim: `Diff stat: ${stepResult.diffStat}.`,
+      evidenceRefs: [`stepResults.${stepName}.diffStat`, ...artifactRefs.map((ref) => ref.ref)],
+    });
+  }
+
+  const verdictArtifact = stepResult.artifacts?.find((artifact) => artifact.kind === "verdict");
+  if (verdictArtifact && verdictArtifact.kind === "verdict") {
+    claims.push({
+      claim: `Review verdict recorded${verdictArtifact.approved ? " (approved)" : " (needs revision)"}.`,
+      evidenceRefs: artifactRefs.filter((ref) => ref.kind === "verdict").map((ref) => ref.ref),
+    });
+  }
+
+  if (stageEvaluation?.overallStatus === "fail") {
+    claims.push({
+      claim: `Stage evaluation failed for ${stepName}.`,
+      evidenceRefs: [`stepResults.${stepName}.stageEvaluation`],
+    });
+  }
+
+  if (stepResult.contractAssertionCoverage) {
+    const failed = stepResult.contractAssertionCoverage.mappings.filter(
+      (row) => row.status === "fail" || row.status === "partial",
+    );
+    for (const row of failed) {
+      claims.push({
+        claim: `Contract assertion ${row.assertionId} ${row.status}: ${row.assertion}`,
+        evidenceRefs: row.evidenceRefs,
+      });
+    }
+  }
+
+  return claims.length ? claims : undefined;
 }
 
 function summarizeStep(stepName: string, stepResult: StepResult): string {
@@ -252,14 +211,37 @@ export function buildStepObservation(stepName: string, stepResult: StepResult): 
     summary: artifactSummary(artifact),
     producedBy: artifact.producedBy,
   }));
-  const contextContract = stepResult.contextContract ?? buildStepContextContract(stepName, stepResult);
+  const contextContract = stepResult.contextContract ?? buildFallbackStepContextContract(stepName, stepResult);
   const evidence = buildEvidence(stepResult);
-  const requiredEvidenceGaps = buildRequiredEvidenceGaps(stepName, stepResult, contextContract, artifactRefs);
+  const requiredEvidenceGaps = buildRequiredEvidenceGaps(
+    stepName,
+    stepResult,
+    contextContract,
+    artifactRefs.length,
+  );
   const typedCoverageGaps = [
     ...buildTypedCoverageGaps(stepName, stepResult),
     ...requiredEvidenceGaps,
   ];
-  const claims = buildStepClaims(stepName, stepResult, artifactRefs, evidence);
+  const draftObservation: StepObservation = {
+    schemaVersion: 1,
+    action: "pipeline_step_result",
+    purpose: "",
+    status: stepResult.status,
+    summary: summarizeStep(stepName, stepResult),
+    evidence,
+    coverageGaps: [],
+    typedCoverageGaps,
+    artifactRefs,
+    contextContract,
+    contextComposition: stepResult.contextComposition,
+  };
+  const preliminaryClaims = buildStepClaims(stepName, stepResult, artifactRefs, evidence);
+  const stageEvaluation = evaluateStageForStep(stepName, stepResult, {
+    ...draftObservation,
+    claims: preliminaryClaims,
+  });
+  const claims = buildStepClaims(stepName, stepResult, artifactRefs, evidence, stageEvaluation);
 
   return {
     schemaVersion: 1,
@@ -276,6 +258,9 @@ export function buildStepObservation(stepName: string, stepResult: StepResult): 
     artifactRefs,
     claims,
     contextContract,
+    contextComposition: stepResult.contextComposition,
+    contractAssertionCoverage: stepResult.contractAssertionCoverage,
+    stageEvaluation,
     resumeMetadata: stepResult.resumeMetadata,
     nextHint: artifactRefs.length
       ? "Inspect artifactRefs for complete step output before making detailed claims."
@@ -299,7 +284,10 @@ function summarizePipeline(status: PipelineStatus, stepResults: Record<string, S
   return `Pipeline ${status}; no completed steps recorded.`;
 }
 
-function pipelineNextHint(status: PipelineStatus): string | undefined {
+function pipelineNextHint(
+  status: PipelineStatus,
+  loopAction?: "continue" | "stop_loop" | "escalate_human",
+): string | undefined {
   switch (status) {
     case "needs_clarification":
       return "Resolve scopePreflight.clarificationQuestions, then rerun runoff_run_pipeline with the same sessionId and explicit scopePreflight overrides.";
@@ -318,6 +306,40 @@ function pipelineNextHint(status: PipelineStatus): string | undefined {
     case "running":
       return "Poll or resume the run before treating the result as terminal.";
   }
+  if (loopAction === "stop_loop") {
+    return "loopAction=stop_loop: Pause loop scheduling until stage evaluation failures and coverageGaps are reviewed.";
+  }
+  if (loopAction === "escalate_human") {
+    return "loopAction=escalate_human: Human decision required before the next loop tick.";
+  }
+  return undefined;
+}
+
+function resolveLoopAction(input: {
+  status: PipelineStatus;
+  failedStageCount: number;
+  hasReviewStageFail: boolean;
+}): "continue" | "stop_loop" | "escalate_human" | undefined {
+  if (
+    input.status === "awaiting_approval" ||
+    input.status === "awaiting_plan_approval" ||
+    input.status === "awaiting_judge"
+  ) {
+    return "escalate_human";
+  }
+  if (input.status === "failed" || input.status === "aborted" || input.status === "max_rounds") {
+    return "stop_loop";
+  }
+  if (input.hasReviewStageFail || input.failedStageCount >= 2) {
+    return "stop_loop";
+  }
+  if (input.failedStageCount === 1) {
+    return "escalate_human";
+  }
+  if (input.status === "approved") {
+    return "continue";
+  }
+  return undefined;
 }
 
 function buildPipelineContextContract(input: {
@@ -421,6 +443,15 @@ function buildPipelineTypedCoverageGaps(input: {
       });
     }
   }
+  for (const [stepName, step] of Object.entries(input.stepResults)) {
+    if (step.observation?.stageEvaluation?.overallStatus === "fail") {
+      gaps.push({
+        kind: "draft",
+        detail: `Stage evaluation failed for ${stepName}.`,
+        evidenceRefs: [`stepResults.${stepName}.observation.stageEvaluation`],
+      });
+    }
+  }
   return gaps;
 }
 
@@ -456,6 +487,7 @@ export function buildPipelineObservation(input: {
   error?: string;
   scopePreflight?: ScopePreflightReport;
   resumeReusePlan?: ResumeReusePlanReport;
+  completionContract?: import("../core/state.js").CompletionContract;
 }): PipelineObservation {
   const evidence: string[] = [`traceId=${input.traceId}`];
   if (input.checkpointFile) evidence.push(`checkpoint=${input.checkpointFile}`);
@@ -467,6 +499,14 @@ export function buildPipelineObservation(input: {
     evidence.push(
       `resumeReusePlan=rerun:${input.resumeReusePlan.summary.rerun},skipped:${input.resumeReusePlan.summary.skipped}`,
     );
+  }
+  const contractSummary = summarizeCompletionContract(input.completionContract);
+  if (contractSummary) evidence.push(`completionContract=${contractSummary}`);
+
+  const stageEvaluations = buildStageEvaluationsFromStepResults(input.stepResults);
+  const failedStageCount = stageEvaluations.filter((entry) => entry.overallStatus === "fail").length;
+  if (failedStageCount) {
+    evidence.push(`stageEvaluationFailures=${failedStageCount}`);
   }
 
   const stepRefs = Object.entries(input.stepResults).map(([stepName, step]) => ({
@@ -496,6 +536,11 @@ export function buildPipelineObservation(input: {
         .map((entry) => `Resume planner reruns ${entry.stepName}: ${entry.reason}`),
     );
   }
+  for (const evaluation of stageEvaluations) {
+    if (evaluation.overallStatus === "fail") {
+      coverageGaps.push(`Stage evaluation failed for ${evaluation.stepName}.`);
+    }
+  }
 
   const summary = summarizePipeline(input.status, input.stepResults, input.error);
   const typedCoverageGaps = buildPipelineTypedCoverageGaps(input);
@@ -504,6 +549,21 @@ export function buildPipelineObservation(input: {
     summary,
     evidence,
   });
+
+  const loopAction = resolveLoopAction({
+    status: input.status,
+    failedStageCount,
+    hasReviewStageFail: stageEvaluations.some(
+      (entry) => entry.overallStatus === "fail" && entry.kind === "review",
+    ),
+  });
+
+  const contextRefs = aggregatePipelineContextRefs(input.stepResults);
+  if (contextRefs?.length) {
+    for (const ref of contextRefs) {
+      evidence.push(`contextRef=${ref.ref}`);
+    }
+  }
 
   return {
     schemaVersion: 1,
@@ -519,9 +579,12 @@ export function buildPipelineObservation(input: {
     scopePreflight: input.scopePreflight,
     resumeReusePlan: input.resumeReusePlan,
     contextContract: buildPipelineContextContract(input),
-    stageEvaluations: buildStageEvaluationHints(Object.keys(input.stepResults)),
+    completionContract: input.completionContract,
+    stageEvaluations: toStageEvaluationHints(stageEvaluations),
     traceRef: { traceId: input.traceId },
     checkpointRef: input.checkpointFile ? { sessionId: input.checkpointFile, status: input.status } : undefined,
-    nextHint: pipelineNextHint(input.status),
+    contextRefs,
+    loopAction,
+    nextHint: pipelineNextHint(input.status, loopAction),
   };
 }

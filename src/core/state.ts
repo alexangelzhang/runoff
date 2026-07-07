@@ -112,6 +112,10 @@ export interface StepResult {
   resumeMetadata?: StepResumeMetadata;
   /** Typed artifacts for this step (Wave 7.5 / Gate 2.7). */
   artifacts?: import("../orchestration/artifacts.js").Artifact[];
+  /** How context was composed and bounded before prompt render. */
+  contextComposition?: ContextCompositionReport;
+  /** Per-assertion verdict mapping after review/evaluator steps. */
+  contractAssertionCoverage?: ContractAssertionCoverage;
 }
 
 export interface StepObservationArtifactRef {
@@ -124,7 +128,50 @@ export interface StepObservationArtifactRef {
   producedBy?: string;
 }
 
-export type StepContextKind = "generate" | "review" | "pipeline";
+export type StepContextKind =
+  | "analyze"
+  | "implement"
+  | "review"
+  | "test"
+  | "final_summary"
+  | "generate"
+  | "pipeline"
+  | "other";
+
+/** Stable URI or path reference for host-side re-fetch (MFS cat, file read). */
+export interface ContextEvidenceRef {
+  ref: string;
+  scheme: "file" | "mfs" | "http" | "https" | "relative" | "unknown";
+  label?: string;
+}
+
+export interface ContextCompositionReport {
+  schemaVersion: 1;
+  suppliedInputs: string[];
+  omittedForbidden: string[];
+  warnings: string[];
+  originalContextChars?: number;
+  boundedContextChars?: number;
+  /** URIs extracted from host context (file://, mfs://, paths) for Observation / re-cat. */
+  contextRefs?: ContextEvidenceRef[];
+}
+
+export type StageMetricStatus = "pass" | "fail" | "partial" | "unknown";
+
+export interface StageEvaluationMetricResult {
+  name: string;
+  description: string;
+  status: StageMetricStatus;
+  evidenceRefs: string[];
+  detail?: string;
+}
+
+export interface StageEvaluationResult {
+  stepName: string;
+  kind: string;
+  metrics: StageEvaluationMetricResult[];
+  overallStatus: StageMetricStatus;
+}
 export type ObservationReflectionKind = "process" | "evidence" | "draft";
 
 export interface ObservationClaim {
@@ -215,6 +262,67 @@ export interface StepContextContract {
   forbidden: string[];
   requiredEvidence: string[];
   scopeNotes?: string[];
+  /** Loop harness role for planner / generator / evaluator isolation. */
+  harnessRole?: import("../orchestration/harness-role.js").LoopHarnessRole;
+  /** Prompt inputs omitted because of harness role isolation. */
+  roleOmittedInputs?: string[];
+}
+
+export type ContractAssertionSource = "spec" | "acceptance_criteria" | "negotiated";
+
+export interface ContractAssertion {
+  id: string;
+  assertion: string;
+  source: ContractAssertionSource;
+  testable: boolean;
+}
+
+export type ContractNegotiationStatus = "draft" | "proposed" | "challenged" | "agreed";
+
+export interface ContractDebateEntry {
+  round: number;
+  role: "generator" | "evaluator";
+  stepName: string;
+  timestamp: string;
+  message: string;
+  assertionIds?: string[];
+}
+
+export type ContractAssertionVerdictStatus = "pass" | "fail" | "partial" | "unknown" | "pending";
+
+export interface ContractAssertionMapping {
+  assertionId: string;
+  assertion: string;
+  status: ContractAssertionVerdictStatus;
+  evidenceRefs: string[];
+  detail?: string;
+}
+
+export interface ContractAssertionCoverage {
+  schemaVersion: 1;
+  stepName: string;
+  round: number;
+  verdictApproved: boolean;
+  mappings: ContractAssertionMapping[];
+  passCount: number;
+  failCount: number;
+  partialCount: number;
+  unknownCount: number;
+}
+
+export interface CompletionContract {
+  schemaVersion: 1;
+  sessionId: string;
+  specSummary: string;
+  assertions: ContractAssertion[];
+  assertionCount: number;
+  negotiatedAt?: string;
+  diskRef?: string;
+  negotiationStatus?: ContractNegotiationStatus;
+  negotiationRound?: number;
+  debateRef?: string;
+  lastDebateAt?: string;
+  latestAssertionCoverage?: ContractAssertionCoverage;
 }
 
 export interface StepObservation {
@@ -229,6 +337,9 @@ export interface StepObservation {
   artifactRefs: StepObservationArtifactRef[];
   claims?: ObservationClaim[];
   contextContract?: StepContextContract;
+  contextComposition?: ContextCompositionReport;
+  stageEvaluation?: StageEvaluationResult;
+  contractAssertionCoverage?: ContractAssertionCoverage;
   resumeMetadata?: StepResumeMetadata;
   nextHint?: string;
 }
@@ -279,6 +390,8 @@ export interface PipelineState {
   raceCandidates?: RaceCandidateSnapshot[];
   /** Last scope preflight report for this pipeline session. */
   scopePreflight?: ScopePreflightReport;
+  /** Disk-backed completion contract (contract.md / contract.json under sessions/<id>/harness/). */
+  completionContract?: CompletionContract;
   /** Resume planner decisions applied before the current run continued. */
   resumeReusePlan?: ResumeReusePlanReport;
   /** Experiment metadata carried through checkpoint/resume. */

@@ -53,6 +53,7 @@ export function buildPipelineCheckpointState(args: {
   workspace?: SessionWorkspace | null;
   scopePreflight?: ScopePreflightReport;
   resumeReusePlan?: ResumeReusePlanReport;
+  completionContract?: import("../core/state.js").CompletionContract;
   pendingExecutionPlan?: PipelineState["pendingExecutionPlan"];
 }): PipelineState {
   const {
@@ -76,6 +77,7 @@ export function buildPipelineCheckpointState(args: {
     scopePreflight,
     resumeReusePlan,
     pendingExecutionPlan,
+    completionContract,
   } = args;
 
   return {
@@ -98,6 +100,7 @@ export function buildPipelineCheckpointState(args: {
     raceCandidates: raceCandidates?.map((candidateInfo) => ({ ...candidateInfo })),
     scopePreflight,
     resumeReusePlan,
+    ...(completionContract ? { completionContract } : {}),
     ...(pendingExecutionPlan ? { pendingExecutionPlan } : {}),
     ...(workspace
       ? {

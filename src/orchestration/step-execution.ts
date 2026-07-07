@@ -14,7 +14,10 @@ import { executeProviderRace, resolveRaceBudgetUSD } from "../runtime/race-execu
 import { pickRetryProvider, type FailureReason } from "../routing/retry-strategy.js";
 import type { PipelineCostAccumulator } from "../routing/pricing.js";
 import { renderPrompt } from "../pipeline/prompt.js";
-import { buildStepContextContract, buildStructuredPromptForStep } from "./step-strategy.js";
+import { buildStepContextContract, buildStructuredPromptForStep, composeBoundedStepContext, buildContextCompositionReport } from "./step-strategy.js";
+import { applyHarnessRoleIsolation, resolveLoopHarnessRole, harnessRoleScopeNote } from "./harness-role.js";
+import { resolveStepContextKind } from "./context-contract.js";
+import { readContractDebateSummary } from "./harness-disk-state.js";
 import {
   type LLMProvider,
   type LLMRequest,
@@ -63,6 +66,7 @@ export interface SchedulerContext {
   costTracker?: PipelineCostAccumulator;
   raceBudgetUSD?: number;
   raceEarlyTermination?: boolean;
+  completionContract?: import("../core/state.js").CompletionContract;
 }
 
 export interface StepOutcome {
@@ -76,6 +80,7 @@ export interface StepOutcome {
   inputHash?: string;
   rerunReason?: string;
   contextContract?: import("../core/state.js").StepContextContract;
+  contextComposition?: import("../core/state.js").ContextCompositionReport;
   verdict?: { approved: boolean; feedback: string };
   candidateSnapshot?: Candidate;
   artifacts?: Artifact[];
@@ -151,19 +156,7 @@ export async function executePipelineStep(
       ? "mixed"
       : "text";
 
-  const structuredPrompt = buildStructuredPromptForStep({
-    stepName,
-    reviewStepName,
-    spec: ctx.prompt,
-    round: ctx.round,
-    globalKnowledge: ctx.globalKnowledge,
-    candidate: ctx.candidate,
-    acceptanceCriteria: ctx.acceptanceCriteria,
-    verifyResults: ctx.verifyResults,
-    lastReviewFeedback: ctx.lastReviewFeedback,
-    context: ctx.context,
-  });
-  const contextContract = buildStepContextContract({
+  const promptBuildInput = {
     stepName,
     reviewStepName,
     spec: ctx.prompt,
@@ -175,6 +168,42 @@ export async function executePipelineStep(
     lastReviewFeedback: ctx.lastReviewFeedback,
     context: ctx.context,
     outputKind,
+    completionContract: ctx.completionContract,
+  } as const;
+
+  const stepKind = resolveStepContextKind(stepName, reviewStepName);
+  const harnessRole = resolveLoopHarnessRole(stepKind);
+  const roleIsolation = applyHarnessRoleIsolation(promptBuildInput, harnessRole);
+
+  const contextContract = buildStepContextContract(roleIsolation.input, {
+    roleOmittedInputs: roleIsolation.omittedInputs,
+    harnessRole,
+  });
+  contextContract.scopeNotes = [
+    ...(contextContract.scopeNotes ?? []),
+    harnessRoleScopeNote(harnessRole),
+  ];
+  const bounded = composeBoundedStepContext(roleIsolation.input.context, contextContract);
+  const contextComposition = buildContextCompositionReport(
+    { ...roleIsolation.input, context: bounded.effectiveContext },
+    contextContract,
+    bounded.report,
+  );
+  if (roleIsolation.omittedInputs.length) {
+    contextComposition.warnings.push(
+      `Harness role ${JSON.stringify(harnessRole)} omitted prompt inputs: ${roleIsolation.omittedInputs.join(", ")}.`,
+    );
+  }
+
+  const contractDebateSummary = ctx.pipelineSessionId
+    ? await readContractDebateSummary(ctx.pipelineSessionId)
+    : undefined;
+
+  const structuredPrompt = buildStructuredPromptForStep({
+    ...roleIsolation.input,
+    context: bounded.effectiveContext,
+    completionContract: ctx.completionContract,
+    contractDebateSummary,
   });
 
   const renderedPrompt = renderPrompt(structuredPrompt);
@@ -416,6 +445,7 @@ export async function executePipelineStep(
     trace,
     inputHash,
     contextContract,
+    contextComposition,
     verdict: { approved: verdictParsed.approved, feedback: verdictParsed.feedback },
     candidateSnapshot,
     artifacts: artifacts.length > 0 ? artifacts : undefined,

@@ -19,6 +19,10 @@
 - [host-resume-ux.md](guides/host-resume-ux.md) — MCP hosts explaining checkpoint resume behavior
 - [mcp-host-setup.md](guides/mcp-host-setup.md)
 - [mock-to-real-cli.md](guides/mock-to-real-cli.md)
+- [harness-vs-loop.md](guides/harness-vs-loop.md) — loop-engineering mapping, L1–L3 rollout, doctor readiness
+- [host-loop-cookbook.md](guides/host-loop-cookbook.md) — schedule host loops (MCP, Actions, STATE.md)
+- [mfs-context-layer.md](guides/mfs-context-layer.md) — optional MFS context plane before runoff ticks
+- `npm run runoff:cost` — loop token/USD projection from traces or pattern defaults
 - [coding-agent-backends.md](guides/coding-agent-backends.md)
 - [testing.md](guides/testing.md)
 

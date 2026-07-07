@@ -37,6 +37,8 @@ import { PatternCache } from "./pattern-cache.js";
 import { getPipelineMemory } from "../memory/pipeline-memory.js";
 import type { HistoricalPattern } from "../core/pipeline-run-types.js";
 import { buildPipelineObservation } from "./observation.js";
+import { ensureCompletionContract } from "./completion-contract.js";
+import { appendHarnessLog } from "./harness-disk-state.js";
 import { runScopePreflight } from "./scope-preflight.js";
 
 export type PipelineRunParams = PipelineParams & { signal?: AbortSignal };
@@ -114,6 +116,18 @@ export async function executePipelineRun(args: PipelineRunParams): Promise<Pipel
 
   if (setPipelineTraceId) setPipelineTraceId(traceId);
 
+  const completionContract =
+    resumedState?.completionContract ??
+    (await ensureCompletionContract({ sessionId, spec: prompt, acceptanceCriteria }));
+  if (!resumedState?.completionContract) {
+    await appendHarnessLog(
+      sessionId,
+      "contract",
+      "seeded",
+      `${completionContract.assertionCount} assertion(s) from spec and acceptanceCriteria`,
+    );
+  }
+
   scopePreflight = runScopePreflight({
     config: runtimeConfig,
     prompt,
@@ -147,6 +161,7 @@ export async function executePipelineRun(args: PipelineRunParams): Promise<Pipel
       rounds: clarificationResult.rounds,
       totalDurationMs: clarificationResult.totalDurationMs,
       scopePreflight,
+      completionContract,
     });
     const clarificationState = buildPipelineCheckpointState({
       sessionId,
@@ -166,6 +181,7 @@ export async function executePipelineRun(args: PipelineRunParams): Promise<Pipel
       pendingRaceTraceId,
       raceCandidates,
       scopePreflight,
+      completionContract,
     });
     await saveCheckpoint(sessionId, clarificationState);
     syncRunStoreFromPipeline(controlPlane.runStore, {
@@ -231,6 +247,7 @@ export async function executePipelineRun(args: PipelineRunParams): Promise<Pipel
     pendingRaceTraceId,
     raceCandidates,
     resumeReusePlan: resumedState?.resumeReusePlan,
+    completionContract,
   };
 
   const checkpointSnapshot = (currentRound: number, status: PipelineStatus = "running") =>
@@ -254,6 +271,7 @@ export async function executePipelineRun(args: PipelineRunParams): Promise<Pipel
       workspace,
       scopePreflight,
       resumeReusePlan: runState.resumeReusePlan,
+      completionContract: runState.completionContract ?? completionContract,
     });
 
   try {
@@ -286,6 +304,7 @@ export async function executePipelineRun(args: PipelineRunParams): Promise<Pipel
       effectiveWorkDir,
       acceptanceCriteria,
       verifyResults,
+      completionContract,
       signal,
       onStepComplete: (ctx) => hooks.onStepComplete(ctx),
       onRoundComplete: async (currentRound) => {
@@ -355,8 +374,9 @@ export async function executePipelineRun(args: PipelineRunParams): Promise<Pipel
           rounds: pausedResult.rounds,
           totalDurationMs: pausedResult.totalDurationMs,
           scopePreflight,
-          resumeReusePlan: runState.resumeReusePlan,
-        });
+      resumeReusePlan: runState.resumeReusePlan,
+      completionContract: runState.completionContract ?? completionContract,
+    });
       return pausedResult;
     }
 
@@ -427,6 +447,7 @@ export async function executePipelineRun(args: PipelineRunParams): Promise<Pipel
       globalKnowledge,
       scopePreflight,
       resumeReusePlan: runState.resumeReusePlan,
+      completionContract: runState.completionContract ?? completionContract,
       runtimeConfig,
       controlPlaneMode: controlPlane.mode,
       eventLog: controlPlane.eventLog,
@@ -468,6 +489,7 @@ export async function executePipelineRun(args: PipelineRunParams): Promise<Pipel
               error: finalResult.error,
               scopePreflight,
               resumeReusePlan: finalResult.resumeReusePlan,
+              completionContract,
             });
           }
         }

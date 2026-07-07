@@ -94,9 +94,14 @@ export interface PipelineObservation {
   scopePreflight?: ScopePreflightReport;
   resumeReusePlan?: ResumeReusePlanReport;
   contextContract?: StepContextContract;
+  completionContract?: import("./state.js").CompletionContract;
   stageEvaluations?: import("../observability/stage-evaluation.js").StageEvaluationHint[];
   traceRef: { traceId: string };
   checkpointRef?: { sessionId: string; status: PipelineStatus };
+  /** Aggregated URI refs from step context (host may `mfs cat` / file-read). */
+  contextRefs?: import("./state.js").ContextEvidenceRef[];
+  /** Machine-readable host loop control (continue / stop / escalate). */
+  loopAction?: "continue" | "stop_loop" | "escalate_human";
   nextHint?: string;
 }
 

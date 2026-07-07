@@ -4,7 +4,7 @@
 
 import type { PipelineConfig } from "../core/config.js";
 import type { PipelineResult } from "../core/pipeline-run-types.js";
-import type { PipelineStatus, ResumeReusePlanReport, ScopePreflightReport } from "../core/state.js";
+import type { PipelineStatus, ResumeReusePlanReport, ScopePreflightReport, CompletionContract } from "../core/state.js";
 import type { StepResult } from "../core/state.js";
 import type { PipelineCostAccumulator } from "../routing/pricing.js";
 import { enrichTraceWithEventLog } from "./replay.js";
@@ -27,6 +27,7 @@ export async function finalizePipelineRunResult(args: {
   globalKnowledge: Record<string, string>;
   scopePreflight?: ScopePreflightReport;
   resumeReusePlan?: ResumeReusePlanReport;
+  completionContract?: CompletionContract;
   runtimeConfig: PipelineConfig;
   controlPlaneMode: "memory" | "file";
   eventLog?: EventLog;
@@ -46,6 +47,7 @@ export async function finalizePipelineRunResult(args: {
     globalKnowledge,
     scopePreflight,
     resumeReusePlan,
+    completionContract,
     runtimeConfig,
     controlPlaneMode,
     eventLog,
@@ -78,6 +80,7 @@ export async function finalizePipelineRunResult(args: {
     error: finalResult.error,
     scopePreflight,
     resumeReusePlan,
+    completionContract,
   });
 
   let finalTrace: PipelineTrace = {

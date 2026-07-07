@@ -1,0 +1,62 @@
+{
+  "providers": {
+    "triage": {
+      "type": "mock"
+    },
+    "diagnose": {
+      "type": "mock"
+    },
+    "fixer": {
+      "type": "mock"
+    },
+    "verifier": {
+      "type": "mock"
+    },
+    "reviewer": {
+      "type": "mock"
+    }
+  },
+  "pipeline": {
+    "triage": ["triage"],
+    "diagnose": ["diagnose", "triage"],
+    "fix": ["fixer", "diagnose"],
+    "verify": ["verifier", "fix"],
+    "review": ["reviewer", "fix", "verify"]
+  },
+  "retry": {
+    "maxRounds": 2,
+    "reviewStep": "review"
+  },
+  "runtime": {
+    "controlPlane": "file",
+    "costBudgetUSD": 3,
+    "raceFinalize": "defer",
+    "governance": {
+      "enabled": true,
+      "defaultPolicy": "allow",
+      "approvalMode": "defer",
+      "approvalRiskThreshold": "medium",
+      "maxStepExecutionsPerStep": 3,
+      "detectSecrets": true,
+      "detectForbiddenPaths": true,
+      "rules": [
+        {
+          "name": "deny-env",
+          "pathPrefix": ".env",
+          "decision": "deny"
+        },
+        {
+          "name": "gate-auth",
+          "pathPrefix": "src/auth",
+          "decision": "require-approval"
+        },
+        {
+          "name": "gate-ci-config",
+          "pathPrefix": ".github/workflows",
+          "decision": "require-approval"
+        }
+      ]
+    }
+  },
+  "routing": []
+}

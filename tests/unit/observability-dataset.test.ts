@@ -143,6 +143,7 @@ describe("observability dataset + eval report", () => {
         {
           stepName: "analyze_input",
           kind: "analyze",
+          overallStatus: "pass",
           metrics: [
             {
               name: "context_relevance",
@@ -154,6 +155,7 @@ describe("observability dataset + eval report", () => {
         {
           stepName: "verify_tests",
           kind: "test",
+          overallStatus: "partial",
           metrics: [
             {
               name: "verification_signal",
@@ -175,6 +177,10 @@ describe("observability dataset + eval report", () => {
     assert.equal(report.stageEvaluationSummary.stageEvaluationCount, 2);
     assert.equal(report.stageEvaluationSummary.missingTraceCount, 1);
     assert.equal(report.stageEvaluationSummary.missingStageEvaluationCount, 1);
+    assert.equal(report.stageEvaluationSummary.passCount, 1);
+    assert.equal(report.stageEvaluationSummary.partialCount, 1);
+    assert.equal(report.stageEvaluationSummary.failCount, 0);
+    assert.equal(report.stageEvaluationSummary.unknownCount, 0);
     assert.deepEqual(
       report.stageEvaluationSummary.byKind.map((row) => row.kind),
       ["analyze", "test"],

@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import type { StepResult, StepResumeMetadata, StepWorkspaceAttachment } from "../core/state.js";
 import type { Artifact } from "./artifacts.js";
+import { hasRequiredEvidence } from "./context-contract.js";
 
 function stableStringify(value: unknown): string {
   if (value === undefined) return "null";
@@ -14,39 +15,6 @@ function stableStringify(value: unknown): string {
 
 export function hashStepInput(value: unknown): string {
   return createHash("sha256").update(stableStringify(value)).digest("hex");
-}
-
-function hasRequiredEvidence(requirement: string, result: StepResult, artifacts: Artifact[]): boolean {
-  switch (requirement) {
-    case "artifacts":
-    case "artifactRefs":
-      return artifacts.length > 0;
-    case "filesModified":
-      return Boolean(
-        result.filesModified?.length ||
-          artifacts.some((artifact) => (artifact.kind === "diff" || artifact.kind === "patch") && artifact.filesModified.length),
-      );
-    case "diffStat":
-      return Boolean(
-        result.diffStat ||
-          artifacts.some((artifact) => (artifact.kind === "diff" || artifact.kind === "patch") && artifact.diffStat),
-      );
-    case "verdict":
-      return artifacts.some((artifact) => artifact.kind === "verdict");
-    case "review_feedback":
-      return Boolean(
-        result.reason ||
-          result.summary ||
-          result.explanation ||
-          artifacts.some((artifact) => {
-            if (artifact.kind === "review") return Boolean(artifact.reviewText || artifact.issues?.length || artifact.suggestions?.length);
-            if (artifact.kind === "verdict") return Boolean(artifact.feedback || artifact.sourceReview);
-            return false;
-          }),
-      );
-    default:
-      return Boolean((result as unknown as Record<string, unknown>)[requirement]);
-  }
 }
 
 function artifactCompleteness(result: StepResult, artifacts: Artifact[]): StepResumeMetadata["artifactCompleteness"] {

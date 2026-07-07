@@ -40,7 +40,7 @@
 
 ## Stage-level evaluation hints
 
-End-to-end `approved` / `failed` 不足以解释一个 agentic pipeline 的质量。runoff 现在用 `src/observability/stage-evaluation.ts` 提供轻量 metric taxonomy，先作为 `PipelineObservation.stageEvaluations` 的提示字段，不阻塞主链路。
+End-to-end `approved` / `failed` 不足以解释一个 agentic pipeline 的质量。runoff 用 `src/observability/stage-evaluation.ts` 提供 stage metric taxonomy，并在每个 step 的 `StepObservation.stageEvaluation` 上给出 `pass | fail | partial | unknown` 判定；pipeline 级汇总在 `PipelineObservation.stageEvaluations`。
 
 | Stage kind | 典型 step 名 | 指标例子 |
 | ---------- | ------------ | -------- |
@@ -50,15 +50,16 @@ End-to-end `approved` / `failed` 不足以解释一个 agentic pipeline 的质�
 | `test` | `test`、`verify` | `command_capture`、`exit_status`、`output_summary` |
 | `final_summary` | `final`、`summary`、`report` | `claim_evidence_coverage`、`unverified_items_visible`、`trace_ref_present` |
 
-`eval-report` 现在返回 `stageEvaluationSummary`：
+`eval-report` 返回 `stageEvaluationSummary`：
 
 - `evaluatedTraceCount`：有 `PipelineObservation.stageEvaluations` 的 trace 数。
-- `stageEvaluationCount`：聚合到的 stage hint 数。
+- `stageEvaluationCount`：聚合到的 stage evaluation 数。
 - `missingTraceCount`：experiment entry 指向的 trace 文件缺失数。
-- `missingStageEvaluationCount`：trace 存在但没有 stage hints 的 run 数。
-- `byKind`：按 `analyze` / `implement` / `review` / `test` / `final_summary` / `other` 汇总 step 名、metric 名和 evidence refs。
+- `missingStageEvaluationCount`：trace 存在但没有 stage evaluations 的 run 数。
+- `passCount` / `failCount` / `partialCount` / `unknownCount`：按 `overallStatus` 汇总的 step 级判定计数。
+- `byKind`：按 `analyze` / `implement` / `review` / `test` / `final_summary` / `other` 汇总 step 名、metric 名、evidence refs，以及各 kind 的 pass/fail/partial/unknown 计数。
 
-这些字段只做报告和缺口统计，不自动判定 pass/fail。harness evolution gate 后续可以消费同一份 taxonomy。
+这些判定写入 Observation 和 eval-report，但不阻塞 pipeline 主链路；harness evolution gate 后续可以消费同一份 taxonomy 做强制 gate。
 
 ## 实现
 

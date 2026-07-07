@@ -9,6 +9,15 @@
 import { existsSync, mkdirSync, readdirSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { dirname, join } from "node:path";
+import type { ContextEvidenceRef } from "../core/state.js";
+import { dedupeContextRefs, parseContextRef } from "./context-contract.js";
+import {
+  detectMfsCli,
+  isMfsOrFileUri,
+  queryMfsContext,
+  readLocalContextExcerpt,
+  type QueryContextResult,
+} from "./mfs-context-bridge.js";
 import type { PipelineTrace } from "../observability/trace.js";
 import { loadTraceById, queryTraces } from "../observability/trace.js";
 import {
@@ -162,7 +171,7 @@ export interface HarnessAutonomyDecision {
 
 export interface HarnessContextNode {
   nodeId: string;
-  kind: "file" | "directory" | "rule" | "skill" | "verifier" | "taskset";
+  kind: "file" | "directory" | "rule" | "skill" | "verifier" | "taskset" | "mfs";
   ref: string;
   summary: string;
   tags: string[];
@@ -200,6 +209,27 @@ export interface HarnessContextRoute {
     ref: string;
     reason: string;
   }>;
+}
+
+export interface HarnessContextRouteResolutionItem {
+  ref: string;
+  kind: HarnessContextNode["kind"] | "unknown";
+  connector: "mfs" | "filesystem" | "skipped";
+  excerpt?: string;
+  excerptChars?: number;
+  truncated?: boolean;
+  error?: string;
+}
+
+export interface HarnessContextRouteResolution {
+  schema: typeof HARNESS_OPERATING_LAYER_SCHEMA;
+  routeId: string;
+  resolvedAt: string;
+  mfsAvailable: boolean;
+  items: HarnessContextRouteResolutionItem[];
+  contextRefs: ContextEvidenceRef[];
+  promptBlock: string;
+  omittedRawPayload: true;
 }
 
 type HarnessCandidateProjection = {
@@ -891,14 +921,24 @@ export function routeHarnessContext(input: {
         loadHarnessRule(node.ref)?.appliesTo.some((surface) =>
           changedFiles.some((file) => isAllowedBySurface(file, [surface])),
         );
+      const mfsMatch =
+        node.kind === "mfs" ||
+        isMfsOrFileUri(node.ref) ||
+        node.tags.some((tag) => tag === "mfs" || tag.startsWith("mfs:"));
       return {
         node,
-        score: node.priority + (fileMatch ? 50 : 0) + (ruleMatch ? 40 : 0),
+        score:
+          node.priority +
+          (fileMatch ? 50 : 0) +
+          (ruleMatch ? 40 : 0) +
+          (mfsMatch && changedFiles.length === 0 ? 10 : 0),
         reason: fileMatch
           ? "changed file matched context node"
           : ruleMatch
             ? "changed file matched rule surface"
-            : "topology priority",
+            : mfsMatch
+              ? "mfs context node"
+              : "topology priority",
       };
     })
     .sort((a, b) => b.score - a.score);
@@ -928,6 +968,135 @@ export function routeHarnessContext(input: {
   mkdirSync(dirname(contextRoutePath(routeId)), { recursive: true });
   atomicWriteJson(contextRoutePath(routeId), route);
   return route;
+}
+
+export function loadHarnessContextRoute(routeId: string): HarnessContextRoute | undefined {
+  return readJsonFile<HarnessContextRoute>(contextRoutePath(routeId));
+}
+
+function resolveRouteRef(
+  ref: string,
+  kind: HarnessContextNode["kind"] | "unknown",
+  input: { workDir?: string; mfsCommand?: string; maxExcerptChars?: number },
+): HarnessContextRouteResolutionItem {
+  const useMfs = kind === "mfs" || isMfsOrFileUri(ref);
+  if (useMfs) {
+    const cat: QueryContextResult = queryMfsContext({
+      mode: "cat",
+      uri: ref,
+      skim: true,
+      mfsCommand: input.mfsCommand,
+      cwd: input.workDir,
+      maxExcerptChars: input.maxExcerptChars,
+    });
+    if (cat.excerpt) {
+      return {
+        ref,
+        kind,
+        connector: "mfs",
+        excerpt: cat.excerpt,
+        excerptChars: cat.excerptChars,
+        truncated: cat.truncated,
+        error: cat.error,
+      };
+    }
+    if (ref.startsWith("file://")) {
+      const local = readLocalContextExcerpt(ref, {
+        workDir: input.workDir,
+        maxChars: input.maxExcerptChars,
+      });
+      if (local.excerpt) {
+        return {
+          ref,
+          kind,
+          connector: "filesystem",
+          excerpt: local.excerpt,
+          excerptChars: local.excerptChars,
+          truncated: local.truncated,
+        };
+      }
+      return { ref, kind, connector: "filesystem", error: local.error ?? cat.error };
+    }
+    return { ref, kind, connector: "mfs", error: cat.error ?? "mfs cat returned no excerpt" };
+  }
+
+  const local = readLocalContextExcerpt(ref, {
+    workDir: input.workDir,
+    maxChars: input.maxExcerptChars,
+  });
+  if (local.excerpt) {
+    return {
+      ref,
+      kind,
+      connector: "filesystem",
+      excerpt: local.excerpt,
+      excerptChars: local.excerptChars,
+      truncated: local.truncated,
+    };
+  }
+  return { ref, kind, connector: "filesystem", error: local.error ?? "unable to read local ref" };
+}
+
+export function resolveHarnessContextRoute(input: {
+  routeId?: string;
+  route?: HarnessContextRoute;
+  workDir?: string;
+  mfsCommand?: string;
+  limit?: number;
+  maxExcerptChars?: number;
+}): HarnessContextRouteResolution {
+  const route =
+    input.route ??
+    (input.routeId?.trim() ? loadHarnessContextRoute(input.routeId.trim()) : undefined);
+  if (!route) {
+    throw new Error(
+      input.routeId
+        ? `Harness context route not found: ${input.routeId}`
+        : "routeId or route is required to resolve a context route",
+    );
+  }
+
+  const limit = Math.max(1, input.limit ?? 5);
+  const selected = route.selectedRefs.slice(0, limit);
+  const items = selected.map((entry) =>
+    resolveRouteRef(entry.ref, entry.kind, {
+      workDir: input.workDir,
+      mfsCommand: input.mfsCommand,
+      maxExcerptChars: input.maxExcerptChars,
+    }),
+  );
+
+  const contextRefs = dedupeContextRefs(items.map((item) => parseContextRef(item.ref)));
+  const mfsAvailable = detectMfsCli(input.mfsCommand).available;
+
+  const promptLines = [
+    "## Harness context route (bounded excerpts + refs)",
+    "",
+    `Route: ${route.routeId}`,
+    route.topologyId ? `Topology: ${route.topologyId}` : undefined,
+    "",
+  ].filter(Boolean) as string[];
+
+  for (const item of items) {
+    promptLines.push(`### ${item.ref}`);
+    if (item.error) promptLines.push(`error: ${item.error}`);
+    else if (item.excerpt) promptLines.push(item.excerpt);
+    promptLines.push("");
+  }
+  if (contextRefs.length) {
+    promptLines.push("Refs:", ...contextRefs.map((ref) => `- ${ref.ref}`), "");
+  }
+
+  return {
+    schema: HARNESS_OPERATING_LAYER_SCHEMA,
+    routeId: route.routeId,
+    resolvedAt: new Date().toISOString(),
+    mfsAvailable,
+    items,
+    contextRefs,
+    promptBlock: promptLines.join("\n").trim(),
+    omittedRawPayload: true,
+  };
 }
 
 export function listHarnessContextRoutes(limit = 20): HarnessContextRoute[] {

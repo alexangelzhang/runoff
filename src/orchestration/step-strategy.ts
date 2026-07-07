@@ -1,32 +1,37 @@
 /**
  * Maps pipeline step identity → prompt builder (issue 6.8).
- * Review steps use structured verdict instructions; other steps use generate/refine flow.
  */
 
 import type { Candidate } from "../core/candidate.js";
-import type { StepContextContract } from "../core/state.js";
 import { getCandidateContent, getCandidateContentLabel } from "../core/candidate.js";
 import {
   buildGeneratePrompt,
   buildReviewPrompt,
   type StructuredPrompt,
 } from "../pipeline/prompt.js";
+import {
+  type StepPromptBuildInput,
+  buildStepContextContract,
+  composeBoundedStepContext,
+  buildContextCompositionReport,
+  resolveStepContextKind,
+} from "./context-contract.js";
+import {
+  applyHarnessRoleIsolation,
+  harnessRoleScopeNote,
+  resolveLoopHarnessRole,
+} from "./harness-role.js";
+import { contractAssertionLines } from "./completion-contract.js";
 
-export type StepPromptBuildInput = {
-  stepName: string;
-  /** Configured review step id (e.g. from retry.reviewStep). */
-  reviewStepName: string;
-  spec: string;
-  round: number;
-  globalKnowledge: Record<string, string>;
-  candidate: Candidate;
-  acceptanceCriteria?: string[];
-  verifyResults?: string;
-  /** Populated after a review pass; feeds generate rounds. */
-  lastReviewFeedback?: string;
-  context?: string;
-  outputKind?: "text" | "agent" | "mixed";
+export type { StepPromptBuildInput };
+export {
+  buildStepContextContract,
+  composeBoundedStepContext,
+  buildContextCompositionReport,
+  resolveStepContextKind,
 };
+export { resolveLoopHarnessRole, applyHarnessRoleIsolation } from "./harness-role.js";
+export { ensureCompletionContract, contractAssertionLines } from "./completion-contract.js";
 
 export type StepKind = "review" | "generate";
 
@@ -34,85 +39,47 @@ export function isReviewStep(stepName: string, reviewStepName: string): boolean 
   return stepName === reviewStepName;
 }
 
-/** Classify step for prompt builder selection (issue 6.8 / 7.16). */
 export function resolveStepKind(stepName: string, reviewStepName: string): StepKind {
   return isReviewStep(stepName, reviewStepName) ? "review" : "generate";
 }
 
-export function buildStepContextContract(input: StepPromptBuildInput): StepContextContract {
-  if (resolveStepKind(input.stepName, input.reviewStepName) === "review") {
-    return {
-      kind: "review",
-      inputs: [
-        "spec",
-        "acceptanceCriteria",
-        "verifyResults",
-        "candidateContent",
-        "knowledge",
-      ],
-      forbidden: [
-        "full_trace_history",
-        "unrelated_artifacts",
-        "unbounded_repo_context",
-      ],
-      requiredEvidence: [
-        "verdict",
-        "artifactRefs",
-        "review_feedback",
-      ],
-      scopeNotes: [
-        "Focus on the supplied candidate and explicit verification results.",
-      ],
-    };
-  }
+export function buildStructuredPromptForStep(
+  input: StepPromptBuildInput & {
+    completionContract?: import("../core/state.js").CompletionContract;
+    contractDebateSummary?: string;
+  },
+): StructuredPrompt {
+  const kind = resolveStepContextKind(input.stepName, input.reviewStepName);
+  const harnessRole = resolveLoopHarnessRole(kind);
+  const isolated = applyHarnessRoleIsolation(input, harnessRole);
+  const effective = isolated.input;
+  const contractLines = contractAssertionLines(input.completionContract);
 
-  const requiredEvidence =
-    input.outputKind === "text"
-      ? ["code", "artifacts"]
-      : input.outputKind === "mixed"
-        ? ["artifacts"]
-        : ["filesModified", "diffStat", "artifacts"];
-
-  return {
-    kind: "generate",
-    inputs: [
-      "spec",
-      "lastReviewFeedback",
-      "previousContent",
-      "context",
-      "knowledge",
-    ],
-    forbidden: [
-      "full_trace_history",
-      "unrelated_artifacts",
-      "unbounded_repo_context",
-    ],
-    requiredEvidence,
-    scopeNotes: [
-      "Prefer the smallest edit surface that satisfies the spec and review feedback.",
-    ],
-  };
-}
-
-export function buildStructuredPromptForStep(input: StepPromptBuildInput): StructuredPrompt {
-  if (resolveStepKind(input.stepName, input.reviewStepName) === "review") {
+  if (resolveStepKind(effective.stepName, effective.reviewStepName) === "review") {
     return buildReviewPrompt({
-      spec: input.spec,
-      acceptanceCriteria: input.acceptanceCriteria,
-      verifyResults: input.verifyResults,
-      candidateContent: getCandidateContent(input.candidate),
-      candidateLabel: getCandidateContentLabel(input.candidate),
-      knowledge: input.globalKnowledge,
+      spec: effective.spec,
+      acceptanceCriteria: effective.acceptanceCriteria,
+      verifyResults: effective.verifyResults,
+      candidateContent: getCandidateContent(effective.candidate),
+      candidateLabel: getCandidateContentLabel(effective.candidate),
+      knowledge: effective.globalKnowledge,
+      contractAssertions: contractLines,
+      contractDebateSummary: input.contractDebateSummary,
+      harnessRole: harnessRole === "evaluator" ? "evaluator" : undefined,
     });
   }
 
   return buildGeneratePrompt({
-    spec: input.spec,
-    round: input.round,
-    lastReviewFeedback: input.lastReviewFeedback,
-    previousContent: getCandidateContent(input.candidate),
-    previousContentLabel: getCandidateContentLabel(input.candidate),
-    context: input.context,
-    knowledge: input.globalKnowledge,
+    spec: effective.spec,
+    round: effective.round,
+    lastReviewFeedback: effective.lastReviewFeedback,
+    previousContent: getCandidateContent(effective.candidate),
+    previousContentLabel: getCandidateContentLabel(effective.candidate),
+    context: effective.context,
+    knowledge: effective.globalKnowledge,
+    contractAssertions: contractLines,
+    contractDebateSummary: input.contractDebateSummary,
+    harnessRole,
+    harnessRoleNote: harnessRoleScopeNote(harnessRole),
   });
 }

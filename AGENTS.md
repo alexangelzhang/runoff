@@ -62,6 +62,7 @@ Host MCP client
 | `runoff_query_experiments`                | `src/tools/query-experiments.ts` |
 | `runoff_memory_status`                    | `src/tools/memory-status.ts`     |
 | `runoff_query_memory`                     | `src/tools/query-memory.ts`      |
+| `runoff_query_context`                    | `src/tools/query-context.ts`     |
 | `runoff_dream_run`                        | `src/tools/dream-run.ts`         |
 | `runoff_dreamify_tune`                    | `src/tools/dreamify-tune.ts`     |
 | `runoff_dream_export`                     | `src/tools/dream-export.ts`      |

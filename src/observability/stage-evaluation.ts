@@ -1,3 +1,11 @@
+import type {
+  StageEvaluationMetricResult,
+  StageEvaluationResult,
+  StageMetricStatus,
+  StepObservation,
+  StepResult,
+} from "../core/state.js";
+
 export type StageEvaluationKind = "analyze" | "implement" | "review" | "test" | "final_summary" | "other";
 
 export interface StageEvaluationMetricHint {
@@ -10,15 +18,20 @@ export interface StageEvaluationHint {
   stepName: string;
   kind: StageEvaluationKind;
   metrics: StageEvaluationMetricHint[];
+  overallStatus?: StageMetricStatus;
 }
 
-function normalizeStageKind(stepName: string): StageEvaluationKind {
+export function normalizeStageKind(stepName: string): StageEvaluationKind {
   const normalized = stepName.trim().toLowerCase();
   if (normalized.includes("analy")) return "analyze";
   if (normalized.includes("test") || normalized.includes("verify")) return "test";
   if (normalized.includes("review")) return "review";
-  if (normalized.includes("implement") || normalized.includes("refactor") || normalized.includes("write")) return "implement";
-  if (normalized.includes("final") || normalized.includes("summary") || normalized.includes("report")) return "final_summary";
+  if (normalized.includes("implement") || normalized.includes("refactor") || normalized.includes("write")) {
+    return "implement";
+  }
+  if (normalized.includes("final") || normalized.includes("summary") || normalized.includes("report")) {
+    return "final_summary";
+  }
   return "other";
 }
 
@@ -135,10 +148,199 @@ function metricsForKind(kind: StageEvaluationKind): StageEvaluationMetricHint[] 
   }
 }
 
+function combineStatus(statuses: StageMetricStatus[]): StageMetricStatus {
+  if (!statuses.length) return "unknown";
+  if (statuses.every((status) => status === "pass")) return "pass";
+  if (statuses.some((status) => status === "fail")) return "fail";
+  if (statuses.some((status) => status === "partial")) return "partial";
+  return "unknown";
+}
+
+function hasArtifactKinds(
+  observation: StepObservation | undefined,
+  kinds: string[],
+): boolean {
+  return Boolean(observation?.artifactRefs.some((ref) => kinds.includes(ref.kind)));
+}
+
+function evidenceMatches(observation: StepObservation | undefined, pattern: RegExp): boolean {
+  return Boolean(observation?.evidence.some((entry) => pattern.test(entry)));
+}
+
+function claimsHaveEvidenceRefs(observation: StepObservation | undefined): boolean {
+  return Boolean(
+    observation?.claims?.some(
+      (claim) => claim.evidenceRefs.length > 0 && !claim.evidenceRefs.every((ref) => ref.includes("error=")),
+    ),
+  );
+}
+
+function evaluateMetric(
+  metric: StageEvaluationMetricHint,
+  stepResult: StepResult,
+  observation: StepObservation | undefined,
+): StageEvaluationMetricResult {
+  if (stepResult.status !== "success") {
+    return {
+      ...metric,
+      status: "unknown",
+      detail: `Step status is ${stepResult.status}; metric not evaluated.`,
+    };
+  }
+
+  const typedGaps = observation?.typedCoverageGaps ?? [];
+  const evidenceGaps = typedGaps.filter((gap) => gap.kind === "evidence");
+
+  switch (metric.name) {
+    case "scope_accuracy":
+      return {
+        ...metric,
+        status:
+          (observation?.artifactRefs.length ?? 0) > 0 || evidenceMatches(observation, /filesModified=|model=/)
+            ? "pass"
+            : "partial",
+        detail:
+          (observation?.artifactRefs.length ?? 0) > 0
+            ? "Artifacts or file evidence present."
+            : "No scoped artifact refs recorded.",
+      };
+    case "risk_identification":
+      return {
+        ...metric,
+        status: claimsHaveEvidenceRefs(observation) || Boolean(observation?.summary?.length)
+          ? "pass"
+          : "partial",
+      };
+    case "test_target_precision":
+      return {
+        ...metric,
+        status: Boolean(stepResult.contextContract?.requiredEvidence.length) ? "pass" : "partial",
+      };
+    case "diff_validity":
+      return {
+        ...metric,
+        status:
+          Boolean(stepResult.filesModified?.length || stepResult.diffStat) ||
+          hasArtifactKinds(observation, ["diff", "patch"])
+            ? "pass"
+            : "fail",
+        detail:
+          stepResult.kind === "agent"
+            ? "Agent step should report modified files or diff artifacts."
+            : "Text step should include code or diff artifacts.",
+      };
+    case "surface_compliance":
+      return {
+        ...metric,
+        status: evidenceGaps.some((gap) => gap.detail.includes("filesModified")) ? "partial" : "pass",
+      };
+    case "boundary_handling":
+      return {
+        ...metric,
+        status: claimsHaveEvidenceRefs(observation) ? "pass" : "partial",
+      };
+    case "evidence_citation":
+      return {
+        ...metric,
+        status:
+          hasArtifactKinds(observation, ["review", "verdict"]) && claimsHaveEvidenceRefs(observation)
+            ? "pass"
+            : "partial",
+      };
+    case "blocker_separation":
+      return {
+        ...metric,
+        status: hasArtifactKinds(observation, ["verdict", "review"]) ? "pass" : "partial",
+      };
+    case "false_positive_control":
+      return {
+        ...metric,
+        status: evidenceGaps.length ? "partial" : "pass",
+      };
+    case "command_capture":
+      return {
+        ...metric,
+        status: evidenceMatches(observation, /verify|command=|exit=/) ? "pass" : "fail",
+        detail: "Expected verification command evidence on test/verify steps.",
+      };
+    case "exit_status":
+      return {
+        ...metric,
+        status: evidenceMatches(observation, /exit=|status=|failed|passed/) ? "pass" : "partial",
+      };
+    case "output_summary":
+      return {
+        ...metric,
+        status: Boolean(observation?.summary || observation?.claims?.length) ? "pass" : "fail",
+      };
+    case "step_completion":
+      return {
+        ...metric,
+        status: stepResult.status === "success" ? "pass" : "fail",
+      };
+    case "evidence_coverage":
+      return {
+        ...metric,
+        status: evidenceGaps.length ? "fail" : claimsHaveEvidenceRefs(observation) ? "pass" : "partial",
+        detail: evidenceGaps.length
+          ? `${evidenceGaps.length} evidence gap(s) recorded.`
+          : "Claims are linked to evidence refs.",
+      };
+    case "followup_hint_clarity":
+      return {
+        ...metric,
+        status: observation?.nextHint ? "pass" : "partial",
+      };
+    default:
+      return {
+        ...metric,
+        status: evidenceGaps.length ? "partial" : "unknown",
+      };
+  }
+}
+
+export function evaluateStageForStep(
+  stepName: string,
+  stepResult: StepResult,
+  observation?: StepObservation,
+): StageEvaluationResult {
+  const kind = normalizeStageKind(stepName);
+  const metrics = metricsForKind(kind).map((metric) =>
+    evaluateMetric(metric, stepResult, observation),
+  );
+  return {
+    stepName,
+    kind,
+    metrics,
+    overallStatus: combineStatus(metrics.map((metric) => metric.status)),
+  };
+}
+
 export function buildStageEvaluationHints(stepNames: string[]): StageEvaluationHint[] {
   return stepNames.map((stepName) => ({
     stepName,
     kind: normalizeStageKind(stepName),
     metrics: metricsForKind(normalizeStageKind(stepName)),
+  }));
+}
+
+export function buildStageEvaluationsFromStepResults(
+  stepResults: Record<string, StepResult>,
+): StageEvaluationResult[] {
+  return Object.entries(stepResults).map(([stepName, stepResult]) =>
+    evaluateStageForStep(stepName, stepResult, stepResult.observation),
+  );
+}
+
+export function toStageEvaluationHints(results: StageEvaluationResult[]): StageEvaluationHint[] {
+  return results.map((result) => ({
+    stepName: result.stepName,
+    kind: result.kind as StageEvaluationKind,
+    metrics: result.metrics.map(({ name, description, evidenceRefs }) => ({
+      name,
+      description,
+      evidenceRefs,
+    })),
+    overallStatus: result.overallStatus,
   }));
 }

@@ -1,0 +1,67 @@
+{
+  "providers": {
+    "triage": {
+      "type": "mock"
+    },
+    "fixer-a": {
+      "type": "mock",
+      "tier": "full"
+    },
+    "fixer-b": {
+      "type": "mock",
+      "tier": "lite"
+    },
+    "verifier": {
+      "type": "mock"
+    },
+    "reviewer": {
+      "type": "mock"
+    }
+  },
+  "pipeline": {
+    "triage": ["triage"],
+    "fix": [["fixer-a", "fixer-b"], "triage"],
+    "verify": ["verifier", "fix"],
+    "review": ["reviewer", "fix", "verify"]
+  },
+  "retry": {
+    "maxRounds": 2,
+    "reviewStep": "review"
+  },
+  "runtime": {
+    "controlPlane": "file",
+    "costBudgetUSD": 8,
+    "raceFinalize": "defer",
+    "governance": {
+      "enabled": true,
+      "defaultPolicy": "allow",
+      "approvalMode": "defer",
+      "approvalRiskThreshold": "medium",
+      "maxStepExecutionsPerStep": 3,
+      "detectSecrets": true,
+      "detectForbiddenPaths": true,
+      "rules": [
+        {
+          "name": "deny-env",
+          "pathPrefix": ".env",
+          "decision": "deny"
+        },
+        {
+          "name": "gate-auth",
+          "pathPrefix": "src/auth",
+          "decision": "require-approval"
+        },
+        {
+          "name": "gate-payments",
+          "pathPrefix": "src/payment",
+          "decision": "require-approval"
+        }
+      ]
+    }
+  },
+  "orchestration": {
+    "mode": "dag",
+    "raceEarlyTermination": true
+  },
+  "routing": []
+}

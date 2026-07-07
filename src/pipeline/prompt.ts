@@ -130,15 +130,27 @@ export interface ReviewPromptInput {
   candidateLabel: string;
   targets?: string[];
   knowledge?: Record<string, string>;
+  contractAssertions?: string[];
+  contractDebateSummary?: string;
+  harnessRole?: "evaluator";
 }
 
 export function buildReviewPrompt(input: ReviewPromptInput): StructuredPrompt {
-  const system = REVIEW_SYSTEM_PROMPT();
+  const system =
+    input.harnessRole === "evaluator"
+      ? `${REVIEW_SYSTEM_PROMPT()}\n\nAssume the candidate output contains defects until evidence proves otherwise. Evaluate only against the completion contract and spec; cite concrete evidence for every issue.`
+      : REVIEW_SYSTEM_PROMPT();
 
   const staticParts: string[] = [];
   staticParts.push(`## Spec\n${input.spec}`);
   if (input.acceptanceCriteria?.length) {
     staticParts.push(`## Acceptance Criteria\n` + input.acceptanceCriteria.map((c, i) => `${i + 1}. ${c}`).join("\n"));
+  }
+  if (input.contractAssertions?.length) {
+    staticParts.push(`## Completion Contract\n` + input.contractAssertions.join("\n"));
+  }
+  if (input.contractDebateSummary) {
+    staticParts.push(`## Contract Debate (latest)\n${input.contractDebateSummary}`);
   }
 
   if (input.knowledge && Object.keys(input.knowledge).length > 0) {
@@ -187,12 +199,24 @@ export interface GeneratePromptInput {
   context?: string;
   targets?: string[];
   knowledge?: Record<string, string>;
+  contractAssertions?: string[];
+  contractDebateSummary?: string;
+  harnessRole?: "planner" | "generator" | "evaluator";
+  harnessRoleNote?: string;
 }
 
 export function buildGeneratePrompt(input: GeneratePromptInput): StructuredPrompt {
-  const system = GENERATE_SYSTEM_PROMPT();
+  const system = input.harnessRoleNote
+    ? `${GENERATE_SYSTEM_PROMPT()}\n\n${input.harnessRoleNote}`
+    : GENERATE_SYSTEM_PROMPT();
 
   const staticParts: string[] = [`## Spec\n${input.spec}`];
+  if (input.contractAssertions?.length) {
+    staticParts.push(`## Completion Contract\n` + input.contractAssertions.join("\n"));
+  }
+  if (input.contractDebateSummary) {
+    staticParts.push(`## Contract Debate (latest)\n${input.contractDebateSummary}`);
+  }
   if (input.knowledge && Object.keys(input.knowledge).length > 0) {
     staticParts.push(`## Shared Knowledge\n` + Object.entries(input.knowledge).map(([k, v]) => `- **${k}**: ${v}`).join("\n"));
   }

@@ -25,8 +25,16 @@ import {
 } from "../../../src/pipeline/config-editor-server.js";
 import {
   formatDoctorReport,
+  formatLoopReadinessBadge,
   runDoctor,
 } from "../../../src/pipeline/pipeline-doctor.js";
+import {
+  estimateLoopCost,
+  formatLoopCostReport,
+  type LoopCadence,
+  type LoopCostLevel,
+  type LoopPattern,
+} from "../../../src/pipeline/pipeline-cost.js";
 import { formatPipelineRunOutcomeHints } from "../../../src/pipeline/run-outcome-hints.js";
 import {
   pipelineInit,
@@ -97,6 +105,10 @@ const INIT_PROFILES = [
   "bugfix",
   "refactor",
   "cli-detected",
+  "pr-babysitter",
+  "race-pr-babysitter",
+  "ci-sweeper",
+  "daily-triage",
 ] as const;
 
 function printHelp(): void {
@@ -104,8 +116,9 @@ function printHelp(): void {
 
 Usage:
   pipeline run --prompt <text> --work-dir <git-repo> [--config <path>]
-  pipeline init --work-dir <dir> [--profile mock|feature|bugfix|refactor|cli-detected]
-  pipeline doctor [--config <path>] [--cleanup-orphans]
+  pipeline init --work-dir <dir> [--profile mock|feature|bugfix|refactor|cli-detected|pr-babysitter|race-pr-babysitter|ci-sweeper|daily-triage]
+  pipeline doctor [--config <path>] [--cleanup-orphans] [--badge]
+  pipeline cost [--config <path>] [--pattern pr-babysitter|ci-sweeper|daily-triage] [--cadence 5m|10m|15m|30m|1h|2h|1d] [--level L1|L2|L3] [--conservative] [--json]
   pipeline config edit [--config <path>] [--port <n>] [--no-open]
   pipeline config validate [--config <path>]
   pipeline race apply --trace-id <id> --winner <n>
@@ -158,12 +171,12 @@ Usage:
   pipeline observability ui [--port <n>] [--no-open]
 
 Examples:
-  npx runoff init --work-dir ../my-repo --profile feature
+  npx runoff init --work-dir ../my-repo --profile pr-babysitter
   npx runoff doctor --config ../my-repo/pipeline.config.json
   npx runoff run --prompt "Add tests" --work-dir ../my-repo
   npx runoff mcp                # start MCP server (stdio)
 
-Docs: docs/guides/getting-started-30min.md, docs/guides/mcp-host-setup.md
+Docs: docs/guides/host-loop-cookbook.md, docs/guides/getting-started-30min.md
 `);
 }
 
@@ -313,6 +326,11 @@ type CliArgs = {
   sessionFilter?: string;
   limit?: number;
   heldInRatio?: number;
+  cadence?: LoopCadence;
+  pattern?: LoopPattern;
+  level?: LoopCostLevel;
+  conservative?: boolean;
+  badge?: boolean;
 };
 
 function parseArgs(argv: string[]): CliArgs {
@@ -588,6 +606,26 @@ function parseArgs(argv: string[]): CliArgs {
     else if (a === "--winner") out.winner = Number(next());
     else if (a === "--reason") out.reason = next();
     else if (a === "--cleanup-orphans") out.cleanupOrphans = true;
+    else if (a === "--cadence") {
+      const c = next() as LoopCadence;
+      if (!["5m", "10m", "15m", "30m", "1h", "2h", "1d"].includes(c)) {
+        throw new Error("--cadence must be 5m|10m|15m|30m|1h|2h|1d");
+      }
+      out.cadence = c;
+    } else if (a === "--pattern") {
+      const p = next() as LoopPattern;
+      if (!["pr-babysitter", "ci-sweeper", "daily-triage", "custom"].includes(p)) {
+        throw new Error("--pattern must be pr-babysitter|ci-sweeper|daily-triage|custom");
+      }
+      out.pattern = p;
+    } else if (a === "--level") {
+      const l = next().toUpperCase() as LoopCostLevel;
+      if (!["L1", "L2", "L3"].includes(l)) {
+        throw new Error("--level must be L1|L2|L3");
+      }
+      out.level = l;
+    } else if (a === "--conservative") out.conservative = true;
+    else if (a === "--badge") out.badge = true;
     else if (a === "--export-on-accept") out.exportOnAccept = true;
     else if (a === "--release") out.release = true;
     else if (a === "--complete") out.complete = true;
@@ -659,18 +697,55 @@ function cmdInit(args: CliArgs): void {
   console.log("Created pipeline.config.json");
   console.log(`  path:    ${result.configPath}`);
   console.log(`  profile: ${result.profile}`);
+  if (result.scaffoldedFiles.length) {
+    console.log("\nScaffolded:");
+    for (const file of result.scaffoldedFiles) {
+      console.log(`  ${file}`);
+    }
+  }
   console.log("\nNext:");
   console.log(
     `  npm run pipeline:config:edit -- --config ${result.configPath}`,
   );
   console.log(`  npm run pipeline:doctor -- --config ${result.configPath}`);
+  if (["pr-babysitter", "race-pr-babysitter", "ci-sweeper", "daily-triage"].includes(result.profile)) {
+    console.log("  docs/guides/host-loop-cookbook.md — schedule the host loop");
+  }
 }
 
 function cmdDoctor(args: CliArgs): void {
   const configPath = args.config ? resolve(args.config) : undefined;
+  if (args.badge && !configPath) {
+    throw new Error("--badge requires --config <path>");
+  }
   const report = runDoctor({ configPath, cleanupOrphans: args.cleanupOrphans });
+  if (args.badge) {
+    if (!report.loopReadiness) {
+      throw new Error("Loop readiness requires a valid --config path");
+    }
+    console.log(formatLoopReadinessBadge(report.loopReadiness));
+    process.exit(report.loopReadiness.level === "L0" ? 2 : 0);
+    return;
+  }
   console.log(formatDoctorReport(report));
   process.exit(report.ok ? 0 : 1);
+}
+
+function cmdCost(args: CliArgs): void {
+  const cadence = args.cadence ?? "15m";
+  const configPath = args.config ? resolve(args.config) : undefined;
+  const estimate = estimateLoopCost({
+    pattern: args.pattern,
+    cadence,
+    level: args.level,
+    configPath,
+    conservative: args.conservative,
+  });
+  if (args.json) {
+    console.log(JSON.stringify(estimate, null, 2));
+    return;
+  }
+  console.log(formatLoopCostReport(estimate));
 }
 
 function cmdConfigValidate(args: CliArgs): void {
@@ -1510,6 +1585,10 @@ async function main(): Promise<void> {
   }
   if (args.command === "doctor") {
     cmdDoctor(args);
+    return;
+  }
+  if (args.command === "cost") {
+    cmdCost(args);
     return;
   }
   if (args.command === "config" && args.sub === "edit") {

@@ -59,6 +59,7 @@ import {
   registerHarnessVerifier,
   releaseHarnessSandboxLease,
   routeHarnessContext,
+  resolveHarnessContextRoute,
   runHarnessGcLoop,
   runHarnessEvolution,
   scanHarnessTriggers,
@@ -117,6 +118,7 @@ const ACTIONS = [
   "context_topology",
   "context_topologies",
   "context_route",
+  "context_route_resolve",
   "context_routes",
   "index",
   "doctor",
@@ -156,7 +158,7 @@ export function register(server: McpServer) {
       action: z
         .enum(ACTIONS)
         .describe(
-          "coreset | mine | dataset | verifier | verifiers | taskset | tasksets | trajectory | replay | training_export | paddock | paddocks | sandbox | sandboxes | rollout_batch | rollout_batches | reward | rewards | reward_reports | rule | rules | feedback | feedbacks | gc | gc_reports | autonomy_policy | autonomy_policies | autonomy_decide | autonomy_decisions | context_topology | context_topologies | context_route | context_routes | index | doctor | skill_patch | rejected | create | propose | run | report | runs | trigger_scan | writeback | evaluate | evaluate_dataset | evaluate_taskset | audit | rank | frontier | decide | export | list",
+          "coreset | mine | dataset | verifier | verifiers | taskset | tasksets | trajectory | replay | training_export | paddock | paddocks | sandbox | sandboxes | rollout_batch | rollout_batches | reward | rewards | reward_reports | rule | rules | feedback | feedbacks | gc | gc_reports | autonomy_policy | autonomy_policies | autonomy_decide | autonomy_decisions | context_topology | context_topologies | context_route | context_route_resolve | context_routes | index | doctor | skill_patch | rejected | create | propose | run | report | runs | trigger_scan | writeback | evaluate | evaluate_dataset | evaluate_taskset | audit | rank | frontier | decide | export | list",
         ),
       runId: z.string().optional().describe("Harness evolution run id"),
       scanId: z.string().optional().describe("Harness trigger scan id"),
@@ -189,6 +191,11 @@ export function register(server: McpServer) {
         .describe("Harness autonomy decision id"),
       topologyId: z.string().optional().describe("Harness context topology id"),
       routeId: z.string().optional().describe("Harness context route id"),
+      workDir: z
+        .string()
+        .optional()
+        .describe("Working directory for context_route_resolve / local file reads"),
+      mfsCommand: z.string().optional().describe("MFS CLI binary for context_route_resolve"),
       frontierId: z.string().optional().describe("Harness frontier id"),
       summary: z
         .string()
@@ -1089,6 +1096,23 @@ export function register(server: McpServer) {
                 limit: args.limit,
               }),
             });
+          case "context_route_resolve": {
+            if (!args.routeId?.trim()) {
+              return mcpError(
+                "Harness evolve error",
+                "routeId is required for action=context_route_resolve",
+              );
+            }
+            return mcpJson({
+              action: args.action,
+              resolution: resolveHarnessContextRoute({
+                routeId: args.routeId.trim(),
+                workDir: args.workDir,
+                mfsCommand: args.mfsCommand,
+                limit: args.limit,
+              }),
+            });
+          }
           case "context_routes":
             return mcpJson({
               action: args.action,

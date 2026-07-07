@@ -1,0 +1,58 @@
+{
+  "providers": {
+    "triage": {
+      "type": "mock"
+    },
+    "fixer": {
+      "type": "mock"
+    },
+    "verifier": {
+      "type": "mock"
+    },
+    "reviewer": {
+      "type": "mock"
+    }
+  },
+  "pipeline": {
+    "triage": ["triage"],
+    "fix": ["fixer", "triage"],
+    "verify": ["verifier", "fix"],
+    "review": ["reviewer", "fix", "verify"]
+  },
+  "retry": {
+    "maxRounds": 2,
+    "reviewStep": "review"
+  },
+  "runtime": {
+    "controlPlane": "file",
+    "costBudgetUSD": 5,
+    "raceFinalize": "defer",
+    "governance": {
+      "enabled": true,
+      "defaultPolicy": "allow",
+      "approvalMode": "defer",
+      "approvalRiskThreshold": "medium",
+      "maxStepExecutionsPerStep": 3,
+      "detectSecrets": true,
+      "detectForbiddenPaths": true,
+      "rules": [
+        {
+          "name": "deny-env",
+          "pathPrefix": ".env",
+          "decision": "deny"
+        },
+        {
+          "name": "gate-auth",
+          "pathPrefix": "src/auth",
+          "decision": "require-approval"
+        },
+        {
+          "name": "gate-payments",
+          "pathPrefix": "src/payment",
+          "decision": "require-approval"
+        }
+      ]
+    }
+  },
+  "routing": []
+}

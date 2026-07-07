@@ -61,9 +61,19 @@ test("buildStepObservation summarizes successful step with artifact references",
       claim: "Updated the retry policy.",
       evidenceRefs: ["stepResults.implement.artifacts[0]"],
     },
+    {
+      claim: "Modified 1 file(s): src/retry.ts.",
+      evidenceRefs: ["stepResults.implement.filesModified", "stepResults.implement.artifacts[0]"],
+    },
+    {
+      claim: "Diff stat: 1 file changed, 3 insertions(+).",
+      evidenceRefs: ["stepResults.implement.diffStat", "stepResults.implement.artifacts[0]"],
+    },
   ]);
-  assert.equal(observation.contextContract?.kind, "generate");
+  assert.equal(observation.contextContract?.kind, "implement");
   assert.ok(observation.contextContract?.requiredEvidence.includes("artifacts"));
+  assert.equal(observation.stageEvaluation?.kind, "implement");
+  assert.equal(observation.stageEvaluation?.overallStatus, "pass");
   assert.equal(observation.resumeMetadata?.inputHash, "input-hash-1");
   assert.ok(observation.evidence.includes("inputHash=input-hash-1"));
 });
@@ -174,6 +184,19 @@ test("buildPipelineObservation summarizes pause states with next action", () => 
   assert.equal(observation.stageEvaluations?.[0]?.kind, "implement");
   assert.equal(observation.claims?.[0]?.claim, "Pipeline awaiting_judge; latest step \"implement\" completed.");
   assert.match(observation.nextHint ?? "", /runoff_race_apply/);
+  assert.equal(observation.loopAction, "escalate_human");
+});
+
+test("buildPipelineObservation sets loopAction stop_loop on terminal failure", () => {
+  const observation = buildPipelineObservation({
+    status: "failed",
+    traceId: "trace-fail",
+    stepResults: {},
+    error: "step timeout",
+  });
+
+  assert.equal(observation.loopAction, "stop_loop");
+  assert.ok(observation.nextHint?.includes("Inspect failed"));
 });
 
 test("buildPipelineObservation preserves failure error evidence", () => {
@@ -254,6 +277,35 @@ test("buildPipelineObservation aggregates step-level claims when present", () =>
 
   assert.ok(observation.claims?.some((claim) => claim.claim === "Updated retry behavior."));
   assert.ok(observation.claims?.some((claim) => claim.evidenceRefs.includes("stepResults.implement.artifacts[0]")));
+});
+
+test("buildPipelineObservation aggregates contextRefs from step contextComposition", () => {
+  const triage: StepResult = {
+    status: "success",
+    kind: "text",
+    summary: "CI lint failure on retry helper.",
+    contextComposition: {
+      schemaVersion: 1,
+      suppliedInputs: ["context"],
+      omittedForbidden: ["inline_tool_json"],
+      warnings: [],
+      contextRefs: [
+        { ref: "mfs://repo/src/retry.ts", scheme: "mfs" },
+        { ref: "file:///tmp/ci.log", scheme: "file" },
+      ],
+    },
+  };
+  triage.observation = buildStepObservation("triage", triage);
+
+  const observation = buildPipelineObservation({
+    status: "approved",
+    traceId: "trace-context-refs",
+    stepResults: { triage },
+  });
+
+  assert.equal(observation.contextRefs?.length, 2);
+  assert.ok(observation.evidence.includes("contextRef=mfs://repo/src/retry.ts"));
+  assert.ok(triage.observation?.evidence.includes("contextRef=file:///tmp/ci.log"));
 });
 
 test("buildPipelineObservation exposes resume reuse planner decisions", () => {
