@@ -6,6 +6,11 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed
+
+- **Project positioning** — README, differentiation, and OPEN_SOURCE docs describe runoff as a delivery harness + host-loop control plane (not race-only demo).
+- **Repo hygiene** — remove committed `.venv/`, `__pycache__/`, `data/sessions/` notes, and `.playwright-mcp/` logs from git; expand `.gitignore` and [docs/repo-root.md](docs/repo-root.md).
+
 ### Fixed
 
 - **Race apply failure** — failed winner apply now cleans all workspaces, clears checkpoint race fields, updates trace, and removes in-memory session (no orphaned `pendingRaceTraceId`)

@@ -4,8 +4,16 @@
 
 ## 定位（对外一句话）
 
-**Local harness for observable, recoverable coding-agent pipelines** — repo worktrees, durable run control, races, schema-versioned observations, local traces.
-详见 [`differentiation.md`](reference/differentiation.md)（含 **AutoGen** 对比）。
+**Local harness control plane for observable, recoverable coding-agent pipelines** — config DAG, git worktree isolation, durable run control, schema-versioned Observation (`loopAction`, context/completion contracts), host-loop readiness (doctor/cost/init), optional provider race, local traces. **Not** a chat framework, scheduler, or context search engine.
+
+| Layer | runoff | Typical alternative |
+|-------|--------|---------------------|
+| Delivery harness | `runoff_run_pipeline`, worktree, governance | LangGraph/CrewAI code graphs |
+| Host loop | `STATE.md` + cron/Actions + read Observation | loop-engineering methodology |
+| Session memory | `~/.runoff/memory/` + optional Mem0/Zep | Mem0/Zep products |
+| Context plane (optional) | Host + `runoff_query_context` / MFS | MFS, manual paste |
+
+详见 [`differentiation.md`](reference/differentiation.md)（含 **AutoGen** 对比）、[`harness-vs-loop.md`](../guides/harness-vs-loop.md)。
 
 ## 5 分钟体验（零 API Key）
 

@@ -3,11 +3,23 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![CI](https://github.com/alexangelzhang/runoff/actions/workflows/ci-gates.yml/badge.svg)](https://github.com/alexangelzhang/runoff/actions/workflows/ci-gates.yml)
 
-> **Local harness control plane for observable, recoverable coding-agent pipelines.**
+> **Local harness control plane for observable, recoverable coding-agent pipelines — and the host loops that schedule them.**
 
-Give runoff one prompt. It turns **Claude Code, Codex, Gemini, OpenCode**, or any CLI/MCP-backed coding agent into a repo-change pipeline: config DAG, isolated git worktrees, governance gates, checkpoints, durable run state, traces, and resumable handoffs.
+runoff turns **Claude Code, Codex, Gemini, OpenCode**, or any CLI/MCP-backed coding agent into a **repo-native delivery harness**: config DAG, git worktree isolation, governance gates, durable run state, schema-versioned **Observation**, checkpoints, and resumable handoffs. The **host** (Cursor, Claude Code, cron, Actions) owns scheduling; runoff owns **execution, audit, and recovery**.
 
-Its sharpest first-run demo is still race mode: run two coding agents on the identical task, compare real diffs, pick the winner, and merge only that candidate.
+```
+Host loop (optional)          runoff harness (this repo)
+─────────────────────         ───────────────────────────
+STATE.md / priorities    →    runoff_run_pipeline (DAG)
+read Observation         ←    loopAction + contextRefs + traces
+MFS / manual gather      →    bounded context into triage steps
+```
+
+**What runoff is:** a **delivery harness** — not a chat framework, not a context search engine, not a SaaS control plane.
+
+**Sharp differentiators:** same-step **provider race** (compare real diffs, pick a winner), **maker/checker** loops with L1→L3 readiness (`doctor`, `cost`, loop-sync), and optional **harness evolution** audit artifacts under `~/.runoff/harness-evolution/`.
+
+Race mode remains the fastest demo — two agents, one task, you judge:
 
 ```
 $ npx runoff run --prompt "Add formatRelativeTime() with edge cases"
@@ -24,11 +36,11 @@ No more hoping a single model got it right. The harness keeps the run observable
 
 **Why race instead of hoping?** A model that wrote subtly broken code is the worst model to catch its own bug — they share the same blind spots. runoff treats AI output like code review: the author and the reviewer should not be the same.
 
-Works as an **MCP server** (Cursor, Claude Desktop, Claude Code) or a standalone **CLI**. Runs entirely local — no SaaS, no telemetry, traces stay on your machine.
+Works as an **MCP server** (Cursor, Claude Desktop, Claude Code) or a standalone **CLI**. Runs entirely local — no SaaS, no telemetry, traces stay on your machine (`~/.runoff/`).
 
-Every pipeline result includes a schema-versioned **Observation**: a concise work-memory summary with status, evidence, next-action hints, and links back to full artifacts and traces. The control plane can also be queried for active runs, pending approvals, resume tokens, and event cursors, so a host agent can continue or recover work without scraping logs.
+Every pipeline result includes a schema-versioned **Observation**: status, evidence, `loopAction`, coverage gaps, and links back to artifacts and traces. Step-level **context contracts** and **completion contracts** bound what each DAG step may see and what counts as done. The control plane exposes active runs, pending approvals, and resume hints via `runoff_query_runs`.
 
-For teams building agent workflows, runoff has a second surface beyond the race demo: a **local harness evolution control plane**. It records datasets, tasksets, verifiers, trajectories, replay manifests, reward reports, rule/feedback/GC decisions, context routes, candidate lineage, acceptance checks, rollback records, and promotion bundles under `~/.runoff/harness-evolution/`. A shared artifact store owns durable paths plus `harness index` / `harness doctor` health checks, so host agents can inspect the control plane without scraping directories. These are audit artifacts and adapter contracts by default; applying edits to a user repo still goes through explicit pipeline/workspace paths.
+For teams improving the harness itself, runoff also ships a **local harness evolution control plane** (datasets, verifiers, context routes, promotion bundles — audit artifacts only; repo edits still go through pipeline/worktree paths). See [Capability maturity](#capability-maturity) below.
 
 ## Install
 
@@ -96,7 +108,9 @@ Edit config in a browser (providers, DAG, retry — saves via local HTTP):
 npx runoff config edit --config /path/to/pipeline.config.json
 ```
 
-Example configs: [`examples/configs/`](examples/configs/) — `feature`, `bugfix`, `refactor`, `cli`
+Example configs: [`examples/configs/`](examples/configs/) — `feature`, `bugfix`, `refactor`, `cli`, **`pr-babysitter`**, **`daily-triage`**, **`ci-sweeper`**
+
+Loop profiles (`npx runoff init --profile pr-babysitter`) scaffold `AGENTS.md`, `STATE.md`, and readiness checks — see [**host-loop-cookbook.md**](docs/guides/host-loop-cookbook.md).
 
 Observation response shape: [`examples/observation-result.json`](examples/observation-result.json)
 
@@ -127,6 +141,7 @@ npm run setup:mcp
 | `runoff_run_pipeline`                              | Full DAG + retries + checkpoints + race pause                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | `runoff_run_step`                                  | Single step                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | `runoff_query_runs`                                | Harness control plane: run status, approvals, resume hints                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| `runoff_query_context`                             | Optional MFS bridge: bounded search/cat + `contextRefs` (host-side context plane)                                                                                                                                                                                                                                                                                                                                                                                                |
 | `runoff_harness_evolve`                            | Harness evolution: trigger scan, coreset, failure mining, tasksets/verifiers, trajectory/replay, training export, paddock adapters, sandbox leases, rollout batches, reward registry, rule registry, feedback compiler, GC loop, autonomy gate, context topology, dataset splits, orchestrated runs, role policy, isolated proposer + observed variant diff, leakage audit, frontier, skill patch gate, rejected buffer, connector writeback, acceptance guard, promotion bundle |
 | `runoff_query_traces` / `runoff_query_experiments` | Local observability                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | `runoff_race_apply` / `runoff_race_abort`          | Race finalization                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
@@ -135,7 +150,7 @@ npm run setup:mcp
 
 | Layer                   | Status                      | What it means                                                                                                                                                                                |
 | ----------------------- | --------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Core runtime            | Production-ready local path | Config DAG, orchestration, governance, worktree isolation, durable run state, traces, Observation, and race apply/abort are exercised by `npm run ci:gates`.                                 |
+| Core runtime            | Production-ready local path | Config DAG, orchestration, governance, worktree isolation, durable run state, traces, Observation, context/completion contracts, loop readiness, and race apply/abort are exercised by `npm run ci:gates`. |
 | Local control plane     | Implemented audit artifacts | Harness datasets, tasksets, verifiers, trajectories, rewards, rules, feedback, GC, autonomy decisions, context routes, frontier state, reports, and promotion bundles are persisted locally. |
 | Adapter contracts       | Contract-ready              | Paddock, sandbox lease, rollout, connector writeback, and training exports define stable local contracts; remote lifecycle or arbitrary blackbox execution requires explicit adapters.       |
 | Experimental / optional | Opt-in                      | A2A federation, external memory backends, Dream/Dreamify, OTel collector, and real-provider smoke depend on local environment and remain opt-in.                                             |
@@ -217,6 +232,8 @@ Full index: [**docs/README.md**](docs/README.md)
 | Doc                                                              | Topic                                      |
 | ---------------------------------------------------------------- | ------------------------------------------ |
 | [getting-started-30min.md](docs/guides/getting-started-30min.md) | First run → real repo                      |
+| [host-loop-cookbook.md](docs/guides/host-loop-cookbook.md)       | Schedule host loops (L1→L3)                 |
+| [harness-vs-loop.md](docs/guides/harness-vs-loop.md)             | Harness vs loop vocabulary + doctor scoring  |
 | [coding-agent-backends.md](docs/guides/coding-agent-backends.md) | Codex, Gemini, Claude Code, OpenCode       |
 | [race-mode.md](docs/features/race-mode.md)                       | Running multiple LLMs on the same step     |
 | [observability.md](docs/features/observability.md)               | Trace + experiment (no LangSmith required) |
@@ -227,14 +244,15 @@ Full index: [**docs/README.md**](docs/README.md)
 
 ## Features
 
-- Declarative DAG pipeline: implement → review → retry
+- Declarative DAG pipeline: triage → implement → verify → review (configurable)
+- Host loop templates: `daily-triage`, `pr-babysitter`, `ci-sweeper` + doctor L1→L3 scoring
+- Step **context contracts** + **completion contracts** + harness role isolation (planner/generator/evaluator)
+- Observation layer: `loopAction`, `contextRefs`, evidence-linked claims
 - Provider race mode with judge pause and worktree isolation
-- Observation layer: clean next-turn summaries linked to full artifacts/traces
 - Governance: policy, guardrails, plan approval gate
 - Checkpoint / resume; durable run store
 - Local trace + experiment logs at `~/.runoff/` (no SaaS required)
-- Local harness evolution control plane for datasets, verifiers, rewards, rules, context routing, acceptance, rollback, and promotion audit bundles
-- Optional: external memory, Dream offline worker, A2A federation (**experimental**)
+- Optional: `runoff_query_context` (MFS), external memory (Mem0/Zep), harness evolution, Dream, A2A federation (**experimental**)
 
 ## License
 

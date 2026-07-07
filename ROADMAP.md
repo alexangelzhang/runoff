@@ -18,7 +18,9 @@
 
 ## Vision (short)
 
-**North Star:** Config compiles to an observable agent graph; Orchestrator controls execution; agents share context, governance, and trace — while the harness control plane records the datasets, verifiers, rewards, rules, feedback, context routes, acceptance decisions, rollback records, and promotion bundles needed to improve the harness itself. This still does not replace `pipeline.config.json` as declaration SoT or the Python worktree/IPC layer.
+**North Star:** Config compiles to an observable agent graph; Orchestrator controls execution; agents share bounded context (contracts), governance, and trace — while the **host** schedules long-running loops from Observation. The harness control plane records datasets, verifiers, context routes, acceptance decisions, and promotion bundles needed to improve the harness itself. This still does not replace `pipeline.config.json` as declaration SoT or the Python worktree/IPC layer.
+
+**Positioning (2026):** runoff = **delivery harness**; host = **loop scheduler**; optional MFS/Mem0/Zep = **context or memory planes** — see [harness-vs-loop.md](docs/guides/harness-vs-loop.md), [memory-layers.md](docs/architecture/memory-layers.md).
 
 **Current runtime (verified):**
 

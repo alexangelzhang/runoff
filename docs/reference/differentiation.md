@@ -1,17 +1,19 @@
 # Why runoff?
 
-> **One line:** A local **coding-agent harness/runtime** — config DAG, git worktree isolation, durable run control, provider races, schema-versioned observations, local traces — not another chat-loop framework.
+> **One line:** A local **coding-agent harness/runtime** — config DAG, git worktree isolation, durable run control, schema-versioned Observation, host-loop readiness, optional provider races, local traces — **not** a chat-loop framework or context search product.
 
 ## Who this is for
 
 Teams that already use **Claude Code, Codex CLI, Gemini CLI, OpenCode**, or any MCP-capable host, and need:
 
-- A **declarative DAG** (implement → review → retry) instead of a single agent turn
+- A **declarative DAG** (triage → implement → verify → review) instead of a single agent turn
 - **Real-repo** edits with worktree isolation and locks
-- **Observation-shaped results** so MCP hosts continue from a clean work-memory summary instead of raw logs
+- **Observation-shaped results** with `loopAction`, evidence, and context/completion contracts so hosts continue without raw logs
+- **Loop readiness** scoring (`doctor`, `cost`, loop-sync) for L1→L3 unattended operation
 - A **queryable control plane** for active runs, pending approvals, resume tokens, and event cursors
 - **Local** trace + A/B experiment logs without LangSmith SaaS
 - Optional **multi-provider race** on the same step
+- Optional **host-side context gather** (`runoff_query_context`, MFS) — separate from pipeline memory (Mem0/Zep)
 
 ## Six differentiators
 
