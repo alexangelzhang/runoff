@@ -35,35 +35,8 @@ What does the user want?
 │   ├─ Score a trace (human eval)                → runoff_score_trace
 │   └─ A/B experiments / eval report             → runoff_query_experiments
 │
-├─ Evolve the harness (local control-plane artifacts)
-│   ├─ Scan trigger rules                       → runoff_harness_evolve(action="trigger_scan")
-│   ├─ Select hard/diverse traces                → runoff_harness_evolve(action="coreset")
-│   ├─ Mine failure signatures                   → runoff_harness_evolve(action="mine")
-│   ├─ Create held-in / held-out dataset split   → runoff_harness_evolve(action="dataset")
-│   ├─ Register task verifiers                   → runoff_harness_evolve(action="verifier"|"verifiers")
-│   ├─ Create tasksets / regression suites       → runoff_harness_evolve(action="taskset"|"tasksets")
-│   ├─ Persist trajectory + replay manifests     → runoff_harness_evolve(action="trajectory"|"replay")
-│   ├─ Export training-ready trajectories        → runoff_harness_evolve(action="training_export")
-│   ├─ Register paddock / sandbox / rollout      → runoff_harness_evolve(action="paddock"|"sandbox"|"rollout_batch")
-│   ├─ Register rewards / evaluate rewards       → runoff_harness_evolve(action="reward"|"rewards"|"reward_reports")
-│   ├─ Register rules / compile feedback         → runoff_harness_evolve(action="rule"|"feedback")
-│   ├─ Run harness GC loop                       → runoff_harness_evolve(action="gc"|"gc_reports")
-│   ├─ Decide autonomy policy                    → runoff_harness_evolve(action="autonomy_policy"|"autonomy_decide")
-│   ├─ Route context topology                    → runoff_harness_evolve(action="context_topology"|"context_route")
-│   ├─ Create change manifest + variant          → runoff_harness_evolve(action="create")
-│   ├─ Propose isolated candidate edits          → runoff_harness_evolve(action="propose")
-│   ├─ Run full harness evolution loop           → runoff_harness_evolve(action="run")
-│   ├─ Inspect harness evolution run report      → runoff_harness_evolve(action="report"|"runs")
-│   ├─ Write report to local connectors          → runoff_harness_evolve(action="writeback")
-│   ├─ Run held-in / held-out gate               → runoff_harness_evolve(action="evaluate")
-│   ├─ Evaluate candidate against dataset        → runoff_harness_evolve(action="evaluate_dataset")
-│   ├─ Evaluate candidate against taskset        → runoff_harness_evolve(action="evaluate_taskset")
-│   ├─ Audit leakage / overfit / surface safety  → runoff_harness_evolve(action="audit")
-│   ├─ Gate skill patch decisions                → runoff_harness_evolve(action="skill_patch")
-│   ├─ Record optimizer-only rejected buffer     → runoff_harness_evolve(action="rejected")
-│   ├─ Rank / update frontier                    → runoff_harness_evolve(action="rank"|"frontier")
-│   ├─ Accept / rollback                         → runoff_harness_evolve(action="decide")
-│   └─ Export accepted promotion bundle          → runoff_harness_evolve(action="export")
+├─ Evolve the harness — extracted to the standalone `agent-evolution` project
+│   (host-agnostic `propose → evaluate → accept` loop; no longer part of runoff)
 │
 ├─ Memory & learning
 │   ├─ Backend status (+ optional remote probe)    → runoff_memory_status (probe=true)
@@ -95,7 +68,7 @@ Example configs: [examples/configs/](../examples/configs/) · scaffold: `npm run
 | `runoff_query_traces`      | Find runs by status/time; `traceId` for one run; `format=postmortem` on failures                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | `runoff_score_trace`       | Record numeric quality score → `~/.runoff/traces/scores.jsonl`; read back via `runoff_query_traces traceId=<id> format=postmortem` → `humanScores`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | `runoff_query_experiments` | A/B variants; `format=eval-report` for winner recommendation                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
-| `runoff_harness_evolve`    | Harness evolution substrate: trigger scans, coreset selection, failure signature mining, taskset/verifier registry, trajectory/replay manifests, training-ready trajectory export, paddock adapter registry, sandbox leases, rollout batches, reward registry/reports, rule registry, feedback compiler, GC loop, autonomy gate, context topology/router, artifact store index/doctor, dataset/split objects, full run orchestration, role policy evidence, run reports, connector writebacks, change manifest, isolated proposer with rejected-buffer history context and observed variant diff, dataset/taskset evaluation, leakage/overfit audit, skill patch gate, pairwise rank, persisted frontier, acceptance guard/rollback, promotion bundle export |
+| *(agent-evolution)*        | Harness evolution substrate moved to the standalone, host-agnostic `agent-evolution` project (no longer a runoff tool). |
 | `runoff_memory_status`     | Before enabling Mem0/Zep; `probe=true` checks remote reachability                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 | `runoff_query_memory`      | Hybrid search (local + remote); ops/debug — **not** the hot pipeline read path                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | `runoff_dream_run`         | After several runs — offline ADD/UPDATE/FORGET on `~/.runoff/memory/`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
@@ -108,7 +81,7 @@ Hot-path remote pattern search requires `orchestration.memoryHybridRetrieve: tru
 
 Memory architecture: [docs/architecture/memory-layers.md](../docs/architecture/memory-layers.md)
 
-Harness maturity boundary: core pipeline execution, local artifact persistence, artifact indexing, and artifact-store doctor checks are implemented; paddock, sandbox, rollout, connector, and training-export objects are adapter contracts unless an explicit adapter is configured. Use `runoff_harness_evolve(action="index"|"doctor")` before assuming local harness state is healthy. Do not treat `runoff_harness_evolve` output as permission to mutate user repositories; user-repo edits still go through pipeline/workspace paths and explicit accept/apply decisions.
+Harness maturity boundary: harness-evolution control-plane artifacts (datasets, verifiers, promotion bundles) live in the standalone `agent-evolution` project; its audit material never mutates user repositories — user-repo edits still go through pipeline/workspace paths and explicit accept/apply decisions.
 
 ---
 
@@ -168,7 +141,7 @@ Governance order: Policy → Guardrails → Approval. See [docs/architecture/gov
 | `runoff_query_traces`      | Trace query, postmortem, aggregates                              |
 | `runoff_score_trace`       | Persist trace score                                              |
 | `runoff_query_experiments` | Local A/B log                                                    |
-| `runoff_harness_evolve`    | Harness evolution control plane                                  |
+| *(agent-evolution)*        | Harness evolution control plane (split out; not a runoff tool)   |
 | `runoff_memory_status`     | Memory backend describe + optional probe                         |
 | `runoff_query_memory`      | `retrieveMerged` hybrid search                                   |
 | `runoff_dream_run`         | Offline Dream worker (A/B/C tracks)                              |

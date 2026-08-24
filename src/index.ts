@@ -19,7 +19,6 @@ import { register as registerQueryExperiments } from "./tools/query-experiments.
 import { register as registerMemoryStatus } from "./tools/memory-status.js";
 import { register as registerQueryMemory } from "./tools/query-memory.js";
 import { register as registerQueryContext } from "./tools/query-context.js";
-import { register as registerHarnessEvolve } from "./tools/harness-evolve.js";
 import { register as registerDreamRun } from "./tools/dream-run.js";
 import { register as registerDreamifyTune } from "./tools/dreamify-tune.js";
 import { register as registerDreamExport } from "./tools/dream-export.js";
@@ -47,7 +46,6 @@ registerQueryExperiments(server);
 registerMemoryStatus(server);
 registerQueryMemory(server);
 registerQueryContext(server);
-registerHarnessEvolve(server);
 registerDreamRun(server);
 registerDreamifyTune(server);
 registerDreamExport(server);

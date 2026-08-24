@@ -257,15 +257,20 @@ async function runSingleProviderSmoke(
   }
 }
 
-test("real codex provider smoke: standalone agent-write pipeline can modify a repo", async (t) => {
-  await runSingleProviderSmoke(t, "codex-standalone", "codex", "RUNOFF_REAL_CODEX_ARGV_JSON", "codex real smoke ok");
-});
+// Real-provider smoke tests are opt-in: they are only registered when the
+// opt-in env flag is set, so the default `npm test` run stays skip-free.
+if (RUN_REAL_PROVIDER_SMOKE) {
+  test("real codex provider smoke: standalone agent-write pipeline can modify a repo", async (t) => {
+    await runSingleProviderSmoke(t, "codex-standalone", "codex", "RUNOFF_REAL_CODEX_ARGV_JSON", "codex real smoke ok");
+  });
 
-test("real gemini provider smoke: standalone agent-write pipeline can modify a repo", async (t) => {
-  await runSingleProviderSmoke(t, "gemini-standalone", "gemini", "RUNOFF_REAL_GEMINI_ARGV_JSON", "gemini real smoke ok");
-});
+  test("real gemini provider smoke: standalone agent-write pipeline can modify a repo", async (t) => {
+    await runSingleProviderSmoke(t, "gemini-standalone", "gemini", "RUNOFF_REAL_GEMINI_ARGV_JSON", "gemini real smoke ok");
+  });
+}
 
-test("real provider race smoke: codex + gemini can reach awaiting_judge with deferred workspaces", async (t) => {
+if (RUN_REAL_PROVIDER_SMOKE && RUN_REAL_RACE_SMOKE) {
+  test("real provider race smoke: codex + gemini can reach awaiting_judge with deferred workspaces", async (t) => {
   const caseId = "provider-race";
   const label = "codex+gemini race";
   const providerEnvNames = ["RUNOFF_REAL_CODEX_ARGV_JSON", "RUNOFF_REAL_GEMINI_ARGV_JSON"];
@@ -419,10 +424,10 @@ test("real provider race smoke: codex + gemini can reach awaiting_judge with def
   }
 });
 
-test("real provider race auto-pick smoke: codex + gemini finishes approved", async (t) => {
-  const caseId = "provider-race-autopick";
-  const label = "codex+gemini race auto-pick";
-  const providerEnvNames = ["RUNOFF_REAL_CODEX_ARGV_JSON", "RUNOFF_REAL_GEMINI_ARGV_JSON"];
+  test("real provider race auto-pick smoke: codex + gemini finishes approved", async (t) => {
+    const caseId = "provider-race-autopick";
+    const label = "codex+gemini race auto-pick";
+    const providerEnvNames = ["RUNOFF_REAL_CODEX_ARGV_JSON", "RUNOFF_REAL_GEMINI_ARGV_JSON"];
 
   if (!RUN_REAL_PROVIDER_SMOKE) {
     markSkippedCase(caseId, label, providerEnvNames, "set RUNOFF_RUN_REAL_PROVIDER_SMOKE=1");
@@ -534,3 +539,4 @@ test("real provider race auto-pick smoke: codex + gemini finishes approved", asy
     if (!KEEP_SANDBOX) rmSync(sandboxDir, { recursive: true, force: true });
   }
 });
+}

@@ -413,6 +413,7 @@ export function mergeRemoteCardsIntoFederationStore(
     skillDepsPruneStrategy?: SkillDepPruneStrategy;
   } = {},
 ): number {
+  if (options.enabled === false) return 0;
   if (newCards.length === 0) return 0;
   const local = loadFederatedAgentCards(options.storePath);
   const { merged, added, conflicts } = mergeCardsWithConflictStrategy(

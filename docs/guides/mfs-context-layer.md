@@ -209,9 +209,8 @@ runoff doctor does not require MFS; missing `contextRefs` on analyze steps with 
 |---------|---------------|----------|
 | Host triage | `runoff_query_context` `mode=search` | Wraps `mfs search --json`; returns bounded hits + `contextRefs` + `promptBlock` |
 | Evidence read | `runoff_query_context` `mode=cat` | Wraps `mfs cat --skim` or `-n range`; truncates excerpt |
-| Harness route | `runoff_query_context` `mode=resolve_route` | Resolves `HarnessContextRoute` refs → bounded excerpts |
-| Harness evolve | `runoff_harness_evolve` `action=context_route_resolve` | Same resolution, audit artifact oriented |
-| Node kind | `HarnessContextNode.kind=mfs` | Topology nodes with `mfs://` refs participate in routing |
+| Harness route | `agent-evolution` `ContextSource` host adapter | Harness route resolution moved to the standalone `agent-evolution` project |
+| Node kind | `HarnessContextNode.kind=mfs` | Topology nodes with `mfs://` refs participate in routing (in `agent-evolution`) |
 
 **Still optional:** runoff does not bundle `mfs-server`. When `mfs` is absent, tools return structured errors + `probe.available=false`; host manual gather remains valid.
 

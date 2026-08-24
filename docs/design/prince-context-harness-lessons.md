@@ -21,7 +21,7 @@ runoff 已经是 local harness control plane：`pipeline.config.json` 编译为 
 | Runtime graph | `pipeline.config.json` → `compileAgentGraphFromPipeline` → Orchestrator / runner | 已有可执行拓扑，不需要引入 LangGraph 作为核心 runtime |
 | Recovery | checkpoint / resume、durable run store、file event log、approval / race pause | 已具备 harness 骨架，下一步应细化 step-level 恢复信息 |
 | Observability | `PipelineTrace`、`StepTrace`、Observation、postmortem、experiment / eval report | 已有 run-level evidence，缺少 claim-level evidence |
-| Evaluation | experiment judge、manual score、held-in / held-out gate、harness evolution reports | 已有评估底座，缺少按 step 类型定义的指标 |
+| Evaluation | experiment judge、manual score、held-in / held-out gate（in `agent-evolution`） | 已有评估底座，缺少按 step 类型定义的指标 |
 | Context | shared context、pattern cache、Observation artifact refs、context topology artifacts | 已有 context 通道，缺少 step 级输入/输出契约 |
 
 ## 设计决策
@@ -66,7 +66,7 @@ runoff 已经是 local harness control plane：`pipeline.config.json` 编译为 
 
 - `AgentGraphNode` 保持轻量，但文档中定义 context contract 语义。
 - Observation 在缺少 `requiredEvidence` 时产生 `coverageGaps`。
-- harness evolution 后续可统计哪些 step 经常缺证据。
+- harness evolution（`agent-evolution`）后续可统计哪些 step 经常缺证据。
 
 ### P1. Reflection Taxonomy
 

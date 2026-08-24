@@ -36,7 +36,7 @@ Do **not** delete `.devcontainer/` or `.github/` to “clean” the tree; they a
 
 | Path | Why |
 |------|-----|
-| `~/.runoff/` | Runtime home: traces, sessions, checkpoints, harness-evolution, control-plane |
+| `~/.runoff/` | Runtime home: traces, sessions, checkpoints, control-plane |
 | `data/sessions/` | Developer session notes / scratch (repo keeps `data/sessions/.gitkeep` only) |
 | `node_modules/` | Install via `npm install` |
 | `.venv/` | Python deps for `task_runner.py` / workspace scripts |

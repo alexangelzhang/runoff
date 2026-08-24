@@ -57,21 +57,41 @@ function nodeMajor(): number {
 
 const IMPLEMENT_LIKE = /implement|fix|refactor|write|diagnose/i;
 
+/** A pipeline step value: a provider name or a provider-race array. */
+type PipelineStepValue = string | string[] | readonly (string | string[])[];
+
+/** Flattens a step's provider/race value into a list of provider names. */
+function stepProviders(value: PipelineStepValue | undefined): string[] {
+  if (value === undefined) return [];
+  const items = typeof value === "string" ? [value] : Array.from(value);
+  const out: string[] = [];
+  for (const item of items) {
+    if (typeof item === "string") {
+      if (item) out.push(item);
+    } else {
+      for (const provider of item) {
+        if (provider) out.push(provider);
+      }
+    }
+  }
+  return out;
+}
+
 function reviewDependsOnImplementLike(
-  pipeline: Record<string, string[]>,
+  pipeline: PipelineConfig["pipeline"],
   reviewStep: string,
 ): boolean {
-  const deps = pipeline[reviewStep] ?? [];
+  const deps = stepProviders(pipeline[reviewStep]);
   return deps.some((dep) => IMPLEMENT_LIKE.test(dep));
 }
 
 function collectPipelineProviders(
-  pipeline: Record<string, string[]>,
+  pipeline: PipelineConfig["pipeline"],
   stepNames: string[],
 ): Set<string> {
   const names = new Set<string>();
   for (const step of stepNames) {
-    for (const provider of pipeline[step] ?? []) {
+    for (const provider of stepProviders(pipeline[step])) {
       names.add(provider);
     }
   }

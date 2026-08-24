@@ -57,7 +57,6 @@
     "runoff:cost": "tsx scripts/ts/dev/pipeline-cli.ts cost",
     "runoff:validate": "tsx scripts/ts/dev/pipeline-cli.ts config validate",
     "runoff:runs": "tsx scripts/ts/dev/pipeline-cli.ts runs",
-    "runoff:harness": "tsx scripts/ts/dev/pipeline-cli.ts harness",
     "runoff:race:apply": "tsx scripts/ts/dev/pipeline-cli.ts race apply",
     "runoff:race:abort": "tsx scripts/ts/dev/pipeline-cli.ts race abort",
     "typecheck": "tsc --noEmit",

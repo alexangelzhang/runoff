@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import test, { after, before } from "node:test";
+import { mkdtempSync, rmSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 import { InMemoryAgentMemory } from "../../src/orchestration/memory.ts";
 import {
   dominantVerdictForFile,
@@ -17,6 +20,16 @@ import {
 import { CostTracker } from "../../src/routing/pricing.ts";
 import type { PipelineTrace } from "../../src/observability/trace.ts";
 import type { PipelineConfig } from "../../src/core/config.ts";
+
+let testHome: string;
+before(() => {
+  testHome = mkdtempSync(join(tmpdir(), "runoff-home-"));
+  process.env.RUNOFF_HOME = testHome;
+});
+after(() => {
+  delete process.env.RUNOFF_HOME;
+  rmSync(testHome, { recursive: true, force: true });
+});
 
 function makeTrace(overrides: Partial<PipelineTrace> = {}): PipelineTrace {
   return {

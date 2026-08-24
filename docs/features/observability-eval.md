@@ -59,7 +59,7 @@ End-to-end `approved` / `failed` 不足以解释一个 agentic pipeline 的质�
 - `passCount` / `failCount` / `partialCount` / `unknownCount`：按 `overallStatus` 汇总的 step 级判定计数。
 - `byKind`：按 `analyze` / `implement` / `review` / `test` / `final_summary` / `other` 汇总 step 名、metric 名、evidence refs，以及各 kind 的 pass/fail/partial/unknown 计数。
 
-这些判定写入 Observation 和 eval-report，但不阻塞 pipeline 主链路；harness evolution gate 后续可以消费同一份 taxonomy 做强制 gate。
+这些判定写入 Observation 和 eval-report，但不阻塞 pipeline 主链路；`agent-evolution` 的 harness gate 后续可以消费同一份 taxonomy 做强制 gate。
 
 ## 实现
 

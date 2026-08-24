@@ -18,6 +18,8 @@ tests/traces/
 !tests/traces/.gitkeep
 docs/.vitepress/dist
 docs/.vitepress/cache
+.reasonix/
+reasonix.toml
 
 # Local dev notes and session scratch (never commit)
 data/sessions/*

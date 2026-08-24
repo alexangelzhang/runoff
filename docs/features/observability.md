@@ -99,6 +99,15 @@ PRINCE's useful lesson for runoff is contract discipline, not a new hosted stack
 | Claim-level Evidence | `claims[].evidenceRefs` | Uses artifact refs when available, otherwise structured evidence strings; MCP JSON and CLI run hints expose these refs for final summaries / PR comments. |
 | Stage-level Evaluation | `PipelineObservation.stageEvaluations` from `stage-evaluation.ts` | Metric hints only; `eval-report.stageEvaluationSummary` aggregates them and reports missing trace / missing hint counts. |
 
+When hosts or reviewers classify a claim gap, prefer this split (aligned with generic Agent Runtime checklists — see [harness-vs-loop.md §Agent Runtime checklist](../guides/harness-vs-loop.md#agent-runtime-checklist-borrow--skip)):
+
+| Gap kind | Meaning | Suggested next action |
+| -------- | ------- | --------------------- |
+| **insufficient** | Claim lacks supporting evidence refs | Re-gather context / mark uncertain — do not invent |
+| **contradiction** | Evidence explicitly conflicts with the claim | Rewrite, block, or escalate — do not soft-overwrite |
+
+Today this is **vocabulary for hosts and future gates**, not a required enum on `claims[]`. `typedCoverageGaps.kind = evidence` remains the shipped taxonomy bucket.
+
 The first implementation intentionally reports gaps instead of enforcing them. Future gates can consume these fields when a profile wants stricter behavior.
 
 ### PRINCE P2/P3/P4 runtime contracts
@@ -188,7 +197,7 @@ Trace postmortems and experiment eval reports surface `observationSummary` so of
 
 ## Harness evolution control plane
 
-`runoff_harness_evolve` and `npm run runoff:harness` provide the local control plane for improving the harness itself. Trigger scans, dataset splits, orchestrated runs, role policy evidence, connector writebacks, run reports, candidate lineage, leakage audit, frontier state, and promotion bundles are persisted as first-class artifacts under `~/.runoff/harness-evolution/`. The shared artifact store owns durable path contracts plus `index` / `doctor` health checks so host agents can inspect local harness state without scraping directories.
+The harness-evolution control plane (`runoff_harness_evolve`, `npm run runoff:harness`) was extracted into the standalone, host-agnostic `agent-evolution` project and is no longer part of runoff. Trigger scans, dataset splits, orchestrated runs, role policy evidence, run reports, candidate lineage, leakage audit, frontier state, and promotion bundles now persist under that project's artifact root.
 
 Capability maturity is explicit: core pipeline execution, local harness artifacts, artifact indexing, and artifact-store doctor checks are implemented; paddock, sandbox, rollout, connector, and training-export objects are stable adapter contracts unless a concrete adapter is configured. Harness reports and promotion bundles are audit material by default and do not apply edits to user repositories.
 

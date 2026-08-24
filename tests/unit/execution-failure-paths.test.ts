@@ -1,12 +1,22 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import test from "node:test";
+import test, { after, before } from "node:test";
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { parseTaskResult } from "../../src/core/ipc.js";
 import { TASK_PAYLOAD_SCHEMA_VERSION } from "../../src/core/ipc.js";
 import { executeCliRunnerTask } from "../../src/providers/cli.ts";
+
+let testHome: string;
+before(() => {
+  testHome = mkdtempSync(join(tmpdir(), "runoff-home-"));
+  process.env.RUNOFF_HOME = testHome;
+});
+after(() => {
+  delete process.env.RUNOFF_HOME;
+  rmSync(testHome, { recursive: true, force: true });
+});
 
 test("parseTaskResult rejects garbage JSON shape", () => {
   assert.throws(() => parseTaskResult({ foo: 1 }), /Invalid TaskResult schema/i);

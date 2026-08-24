@@ -37,7 +37,7 @@ import type { AgentRegistry } from "./registry.js";
 import type { AgentToolRegistry } from "./agent-tools.js";
 import { executeWorkflowParallelStage, useWorkflowAgents } from "./workflow-bridge.js";
 import { classifyStepFailure, type FailureReason } from "../routing/retry-strategy.js";
-import type { ExecutionPlan, OrchestrationContext, Orchestrator } from "./orchestrator.js";
+import type { ExecutionPlan, OrchestrationContext, Orchestrator, RecoveryAction } from "./orchestrator.js";
 import {
   appendNodeToAgentGraph,
   agentGraphToStages,
@@ -135,18 +135,20 @@ async function tryReflectReplan(opts: {
   state: MutablePipelineRunState;
   round: number;
   stepFailed: boolean;
+  failedStepName?: string;
   eventLog?: EventLog;
   traceId: string;
 }): Promise<boolean> {
-  const { runtimeConfig, orchestrator, orchestrationContext, executionPlan, agentGraph, state, round, stepFailed, eventLog, traceId } = opts;
+  const { runtimeConfig, orchestrator, orchestrationContext, executionPlan, agentGraph, state, round, stepFailed, failedStepName, eventLog, traceId } = opts;
   const trigger = stepFailed ? "step_failure" : "review_revision";
   if (!shouldReflectOnTrigger(runtimeConfig, trigger)) return false;
 
   orchestrationContext.round = round + 1;
   orchestrationContext.sharedKnowledge = { ...state.globalKnowledge };
-  const failedStep = stepFailed
-    ? Object.entries(state.stepResults).find(([, sr]) => sr.status === "failed")?.[0]
-    : undefined;
+  const failedStep = failedStepName
+    ?? (stepFailed
+      ? Object.entries(state.stepResults).find(([, sr]) => sr.status === "failed")?.[0]
+      : undefined);
   try {
     const replanned = await applyReflectReplan({
       config: runtimeConfig,
@@ -226,6 +228,7 @@ export async function runPipelineDAGLoop(
   let finalStatus: PipelineStatus = "running";
   let pausedForApproval = false;
   let completedRounds = 0;
+  let failedStepNameForReplan: string | undefined;
   const workspaceLeases = new WorkspaceOwnershipRegistry();
   const stageMergeMode = resolveStageMergeMode(runtimeConfig);
   if (startRound > 0) {
@@ -248,6 +251,7 @@ export async function runPipelineDAGLoop(
 
   for (; round <= maxRounds; round++) {
     let stepFailed = false;
+    failedStepNameForReplan = undefined;
     const completedThisRound = new Set<string>();
     state.pendingRaceTraceId = undefined;
     state.raceCandidates = undefined;
@@ -630,32 +634,13 @@ export async function runPipelineDAGLoop(
           }
         }
 
-        if (orchestrator && orchestrationContext) {
-          const agentResult = outcomeToAgentResult(outcome);
-          orchestrationContext.results.set(stepName, agentResult);
-          orchestrationContext.round = round;
-          orchestrationContext.sharedKnowledge = { ...state.globalKnowledge };
-          try {
-            const next = await orchestrator.onStepComplete(orchestrationContext, agentResult);
-            if (next.type === "done") {
-              if (next.success) {
-                state.approved = true;
-                finalStatus = "approved";
-              } else {
-                stepFailed = true;
-                finalStatus = "failed";
-              }
-              break;
-            }
-          } catch {
-            // non-critical
-          }
-        }
-
         if (response.failed) {
+          let recovery: RecoveryAction | undefined;
           if (orchestrator && orchestrationContext) {
+            orchestrationContext.round = round;
+            orchestrationContext.sharedKnowledge = { ...state.globalKnowledge };
             try {
-              await orchestrator.onStepFailed(orchestrationContext, {
+              recovery = await orchestrator.onStepFailed(orchestrationContext, {
                 stepName,
                 agentId: agentId(stepName),
                 error: new Error(response.error ?? "step failed"),
@@ -676,8 +661,81 @@ export async function runPipelineDAGLoop(
             error: response.error,
             provider: outcome.usedProvider,
           };
-          stepFailed = true;
+          failedStepNameForReplan = stepName;
+          if (recovery?.type === "skip") {
+            assertStepTransition(stepResult.status, "skipped", stepName);
+            stepResult.status = "skipped";
+            stepResult.reason = recovery.reason;
+            stepResult.error = undefined;
+            stepResult.resumeMetadata = buildStepResumeMetadata({
+              stepName,
+              round,
+              inputHash:
+                inputHash ??
+                hashStepInput({
+                  stepName,
+                  round,
+                  prompt,
+                  context,
+                  workDir: effectiveWorkDir,
+                  fallback: "missing-step-input-hash",
+                }),
+              stepResult,
+              artifacts: artifactsForStep,
+              promptVersionId: trace.promptVersionId,
+              workspaceAttachment: resolveWorkspaceAttachment({
+                effectiveWorkDir,
+                sourceWorkDir: workDir,
+                raceCandidateWorkspace: Boolean(awaitingJudge && raceSession),
+              }),
+              rerunReason: outcome.rerunReason,
+            });
+            stepResult.observation = buildStepObservation(stepName, stepResult);
+            stepResult.contextComposition = stepResult.observation.contextComposition;
+            trace.observation = stepResult.observation;
+            trace.resumeMetadata = stepResult.resumeMetadata;
+            state.stepResults[stepName] = stepResult;
+            stepFailed = false;
+          } else if (recovery?.type === "abort") {
+            stepFailed = true;
+            finalStatus = "failed";
+          } else if (recovery?.type === "retry" || recovery?.type === "fallback") {
+            stepFailed = false;
+            finalStatus = "running";
+          } else {
+            stepFailed = true;
+          }
           break;
+        }
+
+        state.lastRetryFailure = undefined;
+
+        if (orchestrator && orchestrationContext) {
+          const agentResult = outcomeToAgentResult(outcome);
+          orchestrationContext.results.set(stepName, agentResult);
+          orchestrationContext.round = round;
+          orchestrationContext.sharedKnowledge = { ...state.globalKnowledge };
+          try {
+            const next = await orchestrator.onStepComplete(orchestrationContext, agentResult);
+            if (next.type === "done") {
+              if (!next.success) {
+                stepFailed = true;
+                finalStatus = "failed";
+                break;
+              }
+              // Plan steps finished ≠ pipeline approved. When the completing step is
+              // the review step with a verdict, fall through so NEEDS_REVISION can
+              // drive another round (DAG review short-circuit fix).
+              const reviewNeedsVerdict = stepName === reviewStepName && Boolean(verdict);
+              if (!reviewNeedsVerdict) {
+                state.approved = true;
+                finalStatus = "approved";
+                break;
+              }
+            }
+          } catch {
+            // non-critical
+          }
         }
 
         if (stepName === reviewStepName && verdict) {
@@ -749,6 +807,7 @@ export async function runPipelineDAGLoop(
         state,
         round,
         stepFailed,
+        failedStepName: failedStepNameForReplan,
         eventLog,
         traceId,
       });

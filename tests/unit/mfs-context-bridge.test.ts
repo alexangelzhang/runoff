@@ -7,11 +7,6 @@ import {
   parseMfsSearchOutput,
   readLocalContextExcerpt,
 } from "../../src/orchestration/mfs-context-bridge.ts";
-import {
-  createHarnessContextTopology,
-  resolveHarnessContextRoute,
-  routeHarnessContext,
-} from "../../src/orchestration/harness-operating-layer.ts";
 
 test("parseMfsSearchOutput extracts refs from JSON hits", () => {
   const stdout = JSON.stringify([
@@ -39,53 +34,4 @@ test("readLocalContextExcerpt reads file with line range", () => {
   assert.match(excerpt ?? "", /line2/);
   assert.match(excerpt ?? "", /line3/);
   assert.doesNotMatch(excerpt ?? "", /line4/);
-});
-
-test("resolveHarnessContextRoute resolves local file refs from route", () => {
-  const dir = mkdtempSync(join(tmpdir(), "runoff-route-resolve-"));
-  const oldHome = process.env.RUNOFF_HOME;
-  process.env.RUNOFF_HOME = join(dir, "home");
-  const workDir = join(dir, "repo");
-  const coreDir = join(workDir, "src/core");
-  mkdirSync(coreDir, { recursive: true });
-  const file = join(coreDir, "unsafe.ts");
-  writeFileSync(file, "export const unsafe = true;\n", "utf-8");
-
-  try {
-    const topology = createHarnessContextTopology({
-      topologyId: "topo-resolve",
-      summary: "test",
-      nodes: [
-        {
-          nodeId: "file:unsafe",
-          kind: "file",
-          ref: "src/core/unsafe.ts",
-          summary: "unsafe module",
-          tags: ["core"],
-          priority: 90,
-        },
-      ],
-    });
-    const route = routeHarnessContext({
-      routeId: "route-resolve-local",
-      topologyId: topology.topologyId,
-      changedFiles: ["src/core/unsafe.ts"],
-      limit: 3,
-    });
-
-    const resolution = resolveHarnessContextRoute({
-      routeId: route.routeId,
-      workDir,
-      limit: 3,
-    });
-
-    assert.equal(resolution.routeId, "route-resolve-local");
-    assert.ok(resolution.contextRefs.some((ref) => ref.ref.includes("unsafe.ts")));
-    assert.ok(resolution.items.some((item) => item.excerpt?.includes("unsafe")));
-    assert.match(resolution.promptBlock, /Harness context route/);
-    assert.equal(resolution.omittedRawPayload, true);
-  } finally {
-    if (oldHome === undefined) delete process.env.RUNOFF_HOME;
-    else process.env.RUNOFF_HOME = oldHome;
-  }
 });

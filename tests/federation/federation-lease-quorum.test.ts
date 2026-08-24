@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import test from "node:test";
+import test, { after, before } from "node:test";
 import type { FederationLease } from "../../src/experimental/a2a/federation-lease.ts";
 import {
   confirmLeaseWriteQuorum,
@@ -17,6 +17,16 @@ const lease: FederationLease = {
   expiresAt: "2099-01-01T00:00:00.000Z",
   term: 3,
 };
+
+let testHome: string;
+before(() => {
+  testHome = mkdtempSync(join(tmpdir(), "runoff-home-"));
+  process.env.RUNOFF_HOME = testHome;
+});
+after(() => {
+  delete process.env.RUNOFF_HOME;
+  rmSync(testHome, { recursive: true, force: true });
+});
 
 test("recordLeaseWriteWitness appends to log file", () => {
   const dir = mkdtempSync(join(tmpdir(), "fed-lq-"));

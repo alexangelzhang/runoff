@@ -3,12 +3,14 @@ import test from "node:test";
 import { emptyCandidate } from "../../src/core/candidate.ts";
 import type { PipelineConfig } from "../../src/core/config.ts";
 import { runPipelineDAGLoop } from "../../src/orchestration/pipeline-runner.ts";
+import { DAGOrchestrator } from "../../src/orchestration/orchestrator.ts";
 import { CostTracker } from "../../src/routing/pricing.ts";
 import type { StepResult } from "../../src/core/state.ts";
 import type { SchedulerContext, StepOutcome } from "../../src/orchestration/step-execution.ts";
 import { artifactsFromStepResponse } from "../../src/orchestration/artifact-bridge.ts";
 import { isCodeArtifact } from "../../src/orchestration/artifacts.ts";
 import { applyResumeStepReusePlan } from "../../src/orchestration/pipeline-runner-helpers.ts";
+import { agentId } from "../../src/orchestration/multi-agent-types.ts";
 
 function makeConfig(): PipelineConfig {
   return {
@@ -117,6 +119,192 @@ test("runPipelineDAGLoop reruns steps in a new round after review rejection", as
   assert.ok(state.stepResults.generate.artifacts?.length);
   assert.equal(state.stepResults.generate.artifacts?.[0]?.artifactId, "generate:code:0");
   assert.ok(isCodeArtifact(state.stepResults.generate.artifacts![0]!));
+});
+
+test("runPipelineDAGLoop with DAGOrchestrator retries after review NEEDS_REVISION", async () => {
+  const calls: string[] = [];
+  const stepRunner = {
+    async executeStep(stepName: string, ctx: SchedulerContext): Promise<StepOutcome> {
+      calls.push(`${stepName}@${ctx.round}`);
+      if (stepName === "generate") {
+        const response = {
+          kind: "text" as const,
+          content: `generated-${ctx.round}`,
+          code: `generated-${ctx.round}`,
+          explanation: "",
+          model: "mock",
+        };
+        return {
+          stepName,
+          usedProvider: "mock",
+          upgraded: false,
+          routedFrom: undefined,
+          durationMs: 1,
+          trace: makeTrace(stepName, ctx.round),
+          response,
+          candidateSnapshot: { code: `generated-${ctx.round}`, isAgent: false },
+          verdict: { approved: false, feedback: "" },
+          artifacts: artifactsFromStepResponse(response, { stepName }),
+        };
+      }
+
+      const approved = ctx.round >= 2;
+      return {
+        stepName,
+        usedProvider: "mock",
+        upgraded: false,
+        routedFrom: undefined,
+        durationMs: 1,
+        trace: makeTrace(stepName, ctx.round),
+        response: {
+          kind: "text",
+          content: approved ? "VERDICT: APPROVED" : "VERDICT: NEEDS_REVISION: fix it",
+          code: "",
+          explanation: "",
+          model: "mock",
+        },
+        verdict: {
+          approved,
+          feedback: approved ? "" : "fix it",
+        },
+      };
+    },
+  } as const;
+
+  const state = {
+    stepResults: {} as Record<string, StepResult>,
+    stepTraces: [],
+    globalKnowledge: {},
+    candidate: emptyCandidate(),
+    approved: false,
+    lastReviewFeedback: "",
+  };
+
+  const steps = ["generate", "review"];
+  const result = await runPipelineDAGLoop({
+    runtimeConfig: makeConfig(),
+    stepRunner: stepRunner as never,
+    costTracker: new CostTracker(),
+    state,
+    pipelineSessionId: "session-dag-orch",
+    startRound: 1,
+    maxRounds: 2,
+    reviewStepName: "review",
+    traceId: "trace-dag-orch",
+    prompt: "implement feature",
+    onRoundComplete: async () => {},
+    orchestrator: new DAGOrchestrator(makeConfig().pipeline, 2),
+    orchestrationContext: {
+      runId: "run-dag-orch",
+      sessionId: "session-dag-orch",
+      steps,
+      assignments: new Map(steps.map((s) => [s, agentId(s)])),
+      results: new Map(),
+      round: 1,
+      sharedKnowledge: {},
+    },
+  });
+
+  assert.equal(result.finalStatus, "approved");
+  assert.deepEqual(calls, ["generate@1", "review@1", "generate@2", "review@2"]);
+  assert.equal(state.approved, true);
+  assert.equal(state.lastReviewFeedback, "");
+});
+
+test("runPipelineDAGLoop honors orchestrator retry for failed step on next round", async () => {
+  const calls: string[] = [];
+  const completions: string[] = [];
+  const orchestrator = {
+    async onStepComplete(_context: unknown, result: { stepName: string }) {
+      completions.push(result.stepName);
+      return { type: "done" as const, success: true };
+    },
+    async onStepFailed() {
+      return { type: "retry" as const, stepName: "generate" };
+    },
+  };
+  const stepRunner = {
+    async executeStep(stepName: string, ctx: SchedulerContext): Promise<StepOutcome> {
+      calls.push(`${stepName}@${ctx.round}`);
+      if (ctx.round === 1) {
+        return {
+          stepName,
+          usedProvider: "mock",
+          upgraded: false,
+          routedFrom: undefined,
+          durationMs: 1,
+          trace: makeTrace(stepName, ctx.round),
+          response: {
+            kind: "text",
+            content: "",
+            code: "",
+            explanation: "",
+            model: "mock",
+            failed: true,
+            error: "transient",
+          },
+        };
+      }
+      return {
+        stepName,
+        usedProvider: "mock",
+        upgraded: false,
+        routedFrom: undefined,
+        durationMs: 1,
+        trace: makeTrace(stepName, ctx.round),
+        response: {
+          kind: "text",
+          content: "ok",
+          code: "ok",
+          explanation: "",
+          model: "mock",
+        },
+      };
+    },
+  } as const;
+
+  const state = {
+    stepResults: {} as Record<string, StepResult>,
+    stepTraces: [],
+    globalKnowledge: {},
+    candidate: emptyCandidate(),
+    approved: false,
+    lastReviewFeedback: "",
+  };
+
+  const result = await runPipelineDAGLoop({
+    runtimeConfig: {
+      providers: { mock: { type: "mock" } },
+      pipeline: { generate: ["mock"] },
+      retry: { maxRounds: 2, reviewStep: "review" },
+    },
+    stepRunner: stepRunner as never,
+    costTracker: new CostTracker(),
+    state,
+    pipelineSessionId: "session-retry-failed",
+    startRound: 1,
+    maxRounds: 2,
+    reviewStepName: "review",
+    traceId: "trace-retry-failed",
+    prompt: "implement feature",
+    onRoundComplete: async () => {},
+    orchestrator: orchestrator as never,
+    orchestrationContext: {
+      runId: "run-retry-failed",
+      sessionId: "session-retry-failed",
+      steps: ["generate"],
+      assignments: new Map([["generate", agentId("generate")]]),
+      results: new Map(),
+      round: 1,
+      sharedKnowledge: {},
+    },
+  });
+
+  assert.equal(result.finalStatus, "approved");
+  assert.deepEqual(calls, ["generate@1", "generate@2"]);
+  assert.deepEqual(completions, ["generate"]);
+  assert.equal(state.stepResults.generate.status, "success");
+  assert.equal(state.lastRetryFailure, undefined);
 });
 
 test("runPipelineDAGLoop resume reruns failed step without rerunning successful upstream step", async () => {

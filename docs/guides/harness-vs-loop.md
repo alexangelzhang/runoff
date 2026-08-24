@@ -60,7 +60,7 @@ Cross-reference: [loop-engineering primitives matrix](https://github.com/cobusgr
 |----------------------------|----------------------|-------|
 | Automations / scheduling | **Host-side** | Use cron, GitHub Actions, or host `/loop` — not built into runoff |
 | Worktrees | `workspace_manager.py` | Cross-process lock; TS delegates via `src/runtime/workspace.ts` |
-| Skills | `AGENTS.md` / `CLAUDE.md` + harness evolution skill registry | Not agentskills.io yet; host skills trigger MCP calls |
+| Skills | `AGENTS.md` / `CLAUDE.md` + `agent-evolution` skill registry | Not agentskills.io yet; host skills trigger MCP calls |
 | Plugins & connectors (MCP) | runoff **is** an MCP server | Host connects outbound; pipeline steps call CLI providers |
 | Sub-agents (maker / checker) | DAG steps + `harness-role.ts` | `implement` → `review`; planner / generator / evaluator input isolation |
 | Memory / state | Observation, RunStore, `completion-contract`, checkpoint | Machine-readable; optional human `STATE.md` overlay |
@@ -144,6 +144,33 @@ Use PTC-style thinking inside runoff loops for **data-heavy triage** (large CI l
 
 Host-side integration (no runoff dependency): [mfs-context-layer.md](mfs-context-layer.md).
 
+## Agent Runtime checklist (Borrow / Skip)
+
+External reference: [Agent Runtime 架构拆解：Prompt 如何变成可校验的执行链路](https://mp.weixin.qq.com/s/Yp4sM9wA8SadRjgCF7ibOw) (AI 小老六).  
+It describes a **generic conversational Agent Runtime** (Compiler → Router → Context → Observation → Evidence → Draft → Verifier → Repair → Closure). Use it as a **alignment checklist**, not a blueprint to rebuild inside runoff.
+
+**Rule:** runoff stays a **delivery harness**. The checklist validates that our Observation / contracts / governance already cover the hard parts; borrow vocabulary only where it tightens existing behavior.
+
+| Runtime stage (article) | Verdict | runoff mapping | Notes |
+|-------------------------|---------|----------------|-------|
+| **Prompt Compiler** (NL → task slots / risk fields) | **Skip** | `pipeline.config.json` + `context-contract` + host prompt | Config DAG already declares structure; do not add a chat-style slot compiler |
+| **Execution Router** (ReAct / Plan-Execute / ask) | **Skip** | `AgentGraph` + orchestration mode (`dag` / `workflow` / `llm-driven`) | Routing is config/orchestrator-owned, not model-picks-among-1000-tools |
+| **Context Runtime** (static prefix vs dynamic state) | **Borrow (aligned)** | AGENTS.md / contracts vs Observation + bounded step context | Keep stable rules out of volatile tool dumps; see `context-contract.ts` |
+| **Observation Loop** (tool results ≠ next prompt) | **Borrow (shipped)** | `StepResult.observation` / `PipelineResult.observation` + `contextRefs` | Host reads refs + evidence; raw payloads stay in artifacts/trace |
+| **Evidence Pipeline** (RAG rewrite → rerank → bundle) | **Skip / outsource** | Optional MFS + pipeline memory / Mem0·Zep | Context & memory planes — not the delivery core |
+| **Draft ≠ Final** | **Borrow (discipline)** | worktree unmerged · `awaiting_judge` · approval resume | Name pre-merge / pre-apply outputs as drafts until human or race apply |
+| **Verifier** (claim ↔ evidence) | **Borrow (tighten)** | Observation `claims` + `evidenceRefs` + stage evaluation | Prefer splitting gaps: **insufficient** (补查/标不确定) vs **contradiction** (改写或阻断) — see [observability.md](../features/observability.md) §Observation |
+| **Repair Loop** (map failure → action + budget) | **Borrow (tighten)** | review-driven retry · `maxStepExecutionsPerStep` · `costBudgetUSD` | Failures must map to concrete actions (补证据 / 改约束 / 降级 / 人工闸); never blind full regenerate |
+| **Closure** (long-term vs task-local memory) | **Skip as product** | PatternCache / Dream on approved runs; traces for audit | Execution memory only — not a personal second-brain (cf. DigitalSelf / memdsl) |
+
+### What to harden next (if anything)
+
+1. Claim gap vocabulary: surface `insufficient` vs `contradiction` in typed coverage / claims where evidence conflicts.
+2. Repair action mapping: when review fails, prefer structured next action over “rerun the same step colder.”
+3. Draft naming in host docs / Observation hints until apply/merge.
+
+Do **not** schedule a conversational Prompt Compiler, in-process ReAct loop, or built-in RAG evidence subsystem from this article.
+
 ## Loop readiness checks (doctor)
 
 `npm run pipeline:doctor` runs environment checks **plus** loop-readiness when `--config` is set.
@@ -191,6 +218,8 @@ Examples (non-exhaustive):
 - A `STATE.md`-first SoT (config + RunStore remain authoritative).
 - A PTC sandbox runtime (worktree isolation stays the delivery path).
 - A full MFS-style knowledge platform (optional host-side MFS only — see [mfs-context-layer.md](mfs-context-layer.md)).
+- A conversational Agent Runtime (Prompt Compiler + ReAct + in-harness RAG) — use as checklist only; see [Agent Runtime checklist](#agent-runtime-checklist-borrow--skip).
+- A personal memory / second-brain product (DigitalSelf, memdsl, etc.) — optional read of external memory refs only.
 
 ## Related docs
 
@@ -198,6 +227,7 @@ Examples (non-exhaustive):
 - [governance-config.md](../architecture/governance-config.md) — L2/L3 guardrails
 - [observability.md](../features/observability.md) — Observation as loop work memory
 - [prince-context-harness-lessons.md](../design/prince-context-harness-lessons.md) — context / harness contracts
+- [memory-layers.md](../architecture/memory-layers.md) — execution memory vs external memory planes
 - [examples/README.md](../../examples/README.md) — config templates including PR Babysitter
 - [host-loop-cookbook.md](host-loop-cookbook.md) — MCP / Actions / cron loop hosting
 - [mfs-context-layer.md](mfs-context-layer.md) — optional MFS + runoff integration
@@ -207,4 +237,5 @@ Examples (non-exhaustive):
 - [loop-engineering](https://github.com/cobusgreyling/loop-engineering) — patterns, `loop-init`, `loop-audit`, `loop-cost`
 - [MFS](https://github.com/zilliztech/mfs) — multi-source context plane (`mfs-ingest` / `mfs-find`)
 - [open-ptc-agent](https://github.com/Chen-zexi/open-ptc-agent) — programmatic MCP via sandbox code
+- [Agent Runtime checklist article](https://mp.weixin.qq.com/s/Yp4sM9wA8SadRjgCF7ibOw) — Borrow / Skip table above
 - [Anthropic — Code execution with MCP](https://www.anthropic.com/engineering/code-execution-with-mcp)

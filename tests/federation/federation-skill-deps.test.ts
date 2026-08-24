@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import test, { after, before } from "node:test";
 import type { A2AAgentCard } from "../../src/experimental/a2a/agent-card.ts";
 import { mergeAgentCardCrdt } from "../../src/experimental/a2a/federation-crdt.ts";
 import {
@@ -35,6 +35,16 @@ import { mergeRemoteCardsIntoFederationStore } from "../../src/experimental/a2a/
 import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+
+let testHome: string;
+before(() => {
+  testHome = mkdtempSync(join(tmpdir(), "runoff-home-"));
+  process.env.RUNOFF_HOME = testHome;
+});
+after(() => {
+  delete process.env.RUNOFF_HOME;
+  rmSync(testHome, { recursive: true, force: true });
+});
 
 function card(agentId: string, skills: string[], deps?: Record<string, string[]>): A2AAgentCard {
   return {

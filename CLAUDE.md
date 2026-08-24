@@ -106,11 +106,9 @@ scripts/ts/ci/check-ipc-sync.ts — CI helper: TS/Python IPC constants must matc
 
 ## 架构陷阱
 
-**DAGOrchestrator 短路 review verdict**：`DAGOrchestrator.onStepComplete` 在所有步骤完成时返回 `{type:"done", success:true}`，这会在 `if (orchestrator && orchestrationContext)` 分支里直接 `state.approved = true; break`，导致 review step 的 `NEEDS_REVISION` verdict 永远不被处理。
+**DAG review short-circuit（已修复）**：`DAGOrchestrator.onStepComplete` 在所有步骤完成时仍返回 `{type:"done", success:true}`，但 `pipeline-runner` 不再把「计划步骤跑完」等同于 `approved`。当完成步是 review 且带有 verdict 时，会落到 verdict 处理：`NEEDS_REVISION` 可进入下一 round；无 review verdict 的流水线仍可在 `done` 时直接通过。
 
-DAG 模式下 retry 不是 review-driven 的——它只通过 `stepFailed=true`（implement 步骤 response.failed）触发，而 stepFailed 会立即让 finalStatus=failed（不是 retry）。真正的 review-driven retry 只在 `llm-driven` orchestration 模式下有效。
-
-**影响**：mock provider 的 review 差异化测试在 DAG 模式下无效，测不出 retry 轮次差异。benchmark 数据只能反映 token 成本，不反映质量差异。
+**注意**：`stepFailed=true`（implement `response.failed`）仍会立刻把 `finalStatus` 标为 failed，与 review-driven retry 是两条路径。`llm-driven` 的 `onStepComplete` 还可在同轮返回 `continue → implement`；DAG 的跨轮 retry 依赖上述 runner 语义。
 
 **opencode 在 linked worktree 里追溯源仓库（已修复）**：opencode 通过 `.git` 文件追溯到源仓库，忽略 worktree 内的目标代码。已通过在 `task_runner._execute_delegate_or_stub` 里注入 `--dir <exec_dir>` 修复——`exec_dir` 是 worktree 创建后才确定的实际工作目录。
 
