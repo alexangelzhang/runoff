@@ -39,8 +39,8 @@ runoff 原本的 `proposeHarnessCandidate` 只做**单次** let-provider-edit-th
 - 每轮独立 candidateId（`{base}-iter-{N}`）+ `parentCandidateIds` 链接，保留完整审计链与 lineage。
 - 要接真正的 GEPA 优化器：把它暴露成 cli/MCP provider，作为 `provider` 传入即可（走现有 paddock adapter 思路）。
 
-实现：`src/orchestration/harness-evolution.ts` 的 `evolveHarnessCandidate`。
-接入：MCP `runoff_harness_evolve` action=`evolve`；CLI `pipeline harness evolve`。
+实现：已随 harness-evolution 拆到独立工程 `agent-evolution`（`evolveHarnessCandidate`，原 `src/orchestration/harness-evolution.ts`）。
+接入：`agent-evolution` 的 MCP `agent_evolution` action=`evolve`；独立 CLI（原 runoff 的 `runoff_harness_evolve` / `pipeline harness`）。
 
 ### 2. 双层 fitness：快代理 → 选择性 LLM-judge
 
@@ -50,7 +50,7 @@ runoff 原本的 `proposeHarnessCandidate` 只做**单次** let-provider-edit-th
 - `llmJudgeFitness()`：LLM-as-judge 多维打分（correctness / procedure / conciseness，按 rubric 加权，含长度惩罚）。贵，仅用于 final/top-N。
 - reward kind 扩展：新增 `heuristic_overlap`（廉价代理）和 `llm_judge` 两类。
 
-实现：`src/orchestration/harness-evolution.ts` 的 `heuristicFitness` / `llmJudgeFitness` / `rewardForResult`。
+实现：`harness-evolution` 控制平面中的 `heuristicFitness` / `llmJudgeFitness` / `rewardForResult`（已随拆分迁至独立工程 `agent-evolution`，原 `src/orchestration/harness-evolution.ts`）。
 
 ### 3. Gate ≠ Fitness：分级门控流水线
 
@@ -65,7 +65,7 @@ runoff 原本的 `proposeHarnessCandidate` 只做**单次** let-provider-edit-th
 | 3 | dataset_gate | fitness | ✅ | `evaluateHarnessDataset` |
 | 4 | audit | coherence | ✅ | `auditHarnessCandidate` |
 
-实现：`src/orchestration/harness-evolution.ts` 的 `DEFAULT_GATE_STAGES` + `runHarnessEvolution`。
+实现：`harness-evolution` 控制平面的 `DEFAULT_GATE_STAGES` + `runHarnessEvolution`（已随拆分迁至独立工程 `agent-evolution`，原 `src/orchestration/harness-evolution.ts`）。
 
 ## 诚实的边界（不该照搬）
 
